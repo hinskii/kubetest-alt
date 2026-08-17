@@ -1,0 +1,142 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-jmeter-run
+  name: sample-jmeter-run
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-jmeter-run
+    uid: 00000000-0000-0000-0000-0000cafe0001
+spec:
+  activeDeadlineSeconds: 360
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        foo/bar: baz
+        sidecar.istio.io/inject: "false"
+      labels:
+        app.kubernetes.io/managed-by: kubetest-alt
+        kubetest.io/run-id: sample-jmeter-run
+        team: sre
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - -n
+        - -t
+        - plan.jmx
+        - -l
+        - out.jtl
+        - -e
+        - -o
+        - report
+        command:
+        - /entry
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        - name: KUBETEST_RESULTDIR
+          value: /etc/kubetest/result
+        - name: KUBETEST_RUN_ID
+          value: sample-jmeter-run
+        - name: KUBETEST_TEST_REF
+          value: sample-jmeter
+        - name: FEATURE_X
+          value: "on"
+        image: alpine/jmeter:5.6.3
+        name: wrapper
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+        - mountPath: /etc/kubetest/result
+          name: result
+      initContainers:
+      - command:
+        - /entry
+        - fetch
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        image: ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0
+        name: content-fetcher
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - emptyDir: {}
+        name: data
+      - emptyDir: {}
+        name: result
+      - configMap:
+          items:
+          - key: request.json
+            path: request.json
+          - key: content.json
+            path: content.json
+          name: sample-jmeter-run-request
+        name: request
+  ttlSecondsAfterFinished: 3600
+status: {}
+---
+apiVersion: v1
+data:
+  content.json: '{"git":{"uri":"https://example.com/tests.git","revision":"main"}}'
+  request.json: |-
+    {
+      "type": "jmeter",
+      "runId": "sample-jmeter-run",
+      "testRef": "sample-jmeter",
+      "dataDir": "/data",
+      "args": [
+        "-n",
+        "-t",
+        "plan.jmx",
+        "-l",
+        "out.jtl",
+        "-e",
+        "-o",
+        "report"
+      ],
+      "env": {
+        "FEATURE_X": "on"
+      },
+      "config": {
+        "vus": "10"
+      },
+      "artifacts": {
+        "paths": [
+          "results/**/*.xml"
+        ]
+      },
+      "timeoutSeconds": 300
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-jmeter-run
+  name: sample-jmeter-run-request
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-jmeter-run
+    uid: 00000000-0000-0000-0000-0000cafe0001

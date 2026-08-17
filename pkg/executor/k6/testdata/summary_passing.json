@@ -1,0 +1,28 @@
+{
+  "metrics": {
+    "http_req_duration": {
+      "avg": 87.4,
+      "min": 12.1,
+      "max": 340.9,
+      "p(95)": 245.3,
+      "thresholds": {
+        "p(95)<500": {"ok": true}
+      }
+    },
+    "http_reqs": {
+      "count": 500,
+      "rate": 16.7
+    },
+    "iterations": {
+      "count": 250,
+      "rate": 8.3
+    },
+    "vus": {
+      "max": 10
+    },
+    "checks": {
+      "passes": 500,
+      "fails": 0
+    }
+  }
+}

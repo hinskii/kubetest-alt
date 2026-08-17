@@ -1,0 +1,27 @@
+# This rule is not used by the project kubetest-alt itself.
+# It is provided to allow the cluster admin to help manage permissions for users.
+#
+# Grants full permissions ('*') over tests.kubetest.io.
+# This role is intended for users authorized to modify roles and bindings within the cluster,
+# enabling them to delegate specific permissions to other users or groups as needed.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetest-alt
+    app.kubernetes.io/managed-by: kustomize
+  name: test-admin-role
+rules:
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - tests
+  verbs:
+  - '*'
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - tests/status
+  verbs:
+  - get

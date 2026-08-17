@@ -1,0 +1,7 @@
+## Append samples of your project ##
+resources:
+- tests_v1alpha1_test.yaml
+- tests_v1alpha1_testrun.yaml
+- tests_v1alpha1_testtemplate.yaml
+- tests_v1alpha1_testtrigger.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples

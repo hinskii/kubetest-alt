@@ -1,0 +1,134 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-newman-run
+  name: sample-newman-run
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-newman-run
+    uid: 00000000-0000-0000-0000-0000cafe0001
+spec:
+  activeDeadlineSeconds: 360
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        foo/bar: baz
+        sidecar.istio.io/inject: "false"
+      labels:
+        app.kubernetes.io/managed-by: kubetest-alt
+        kubetest.io/run-id: sample-newman-run
+        team: sre
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - run
+        - coll.json
+        - -r
+        - cli,json,junit
+        command:
+        - /entry
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        - name: KUBETEST_RESULTDIR
+          value: /etc/kubetest/result
+        - name: KUBETEST_RUN_ID
+          value: sample-newman-run
+        - name: KUBETEST_TEST_REF
+          value: sample-newman
+        - name: FEATURE_X
+          value: "on"
+        image: postman/newman:6.2.2
+        name: wrapper
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+        - mountPath: /etc/kubetest/result
+          name: result
+      initContainers:
+      - command:
+        - /entry
+        - fetch
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        image: ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0
+        name: content-fetcher
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - emptyDir: {}
+        name: data
+      - emptyDir: {}
+        name: result
+      - configMap:
+          items:
+          - key: request.json
+            path: request.json
+          - key: content.json
+            path: content.json
+          name: sample-newman-run-request
+        name: request
+  ttlSecondsAfterFinished: 3600
+status: {}
+---
+apiVersion: v1
+data:
+  content.json: '{"git":{"uri":"https://example.com/tests.git","revision":"main"}}'
+  request.json: |-
+    {
+      "type": "newman",
+      "runId": "sample-newman-run",
+      "testRef": "sample-newman",
+      "dataDir": "/data",
+      "args": [
+        "run",
+        "coll.json",
+        "-r",
+        "cli,json,junit"
+      ],
+      "env": {
+        "FEATURE_X": "on"
+      },
+      "config": {
+        "vus": "10"
+      },
+      "artifacts": {
+        "paths": [
+          "results/**/*.xml"
+        ]
+      },
+      "timeoutSeconds": 300
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-newman-run
+  name: sample-newman-run-request
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-newman-run
+    uid: 00000000-0000-0000-0000-0000cafe0001

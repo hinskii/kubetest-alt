@@ -1,0 +1,40 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetest-alt
+    app.kubernetes.io/managed-by: kustomize
+  name: test-sample
+spec:
+  type: k6
+  schedule: "0 6 * * *"
+  concurrencyPolicy: Forbid
+  content:
+    git:
+      uri: https://example.com/perf-tests.git
+      revision: main
+      paths:
+        - scenarios/checkout
+  container:
+    image: grafana/k6:latest
+    args:
+      - run
+      - scenarios/checkout/script.js
+  pod:
+    # PodConfig passthrough per CLAUDE.md §8 — the platform hardcodes NO
+    # annotations. Anything set here lands verbatim on the pod.
+    annotations:
+      sidecar.istio.io/inject: "false"
+    labels:
+      team: sre
+  config:
+    vus:
+      type: integer
+      default: "50"
+    duration:
+      type: string
+      default: 60s
+  artifacts:
+    paths:
+      - "results/**/*.json"
+      - "results/**/*.xml"

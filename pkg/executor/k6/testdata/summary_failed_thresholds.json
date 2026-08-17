@@ -1,0 +1,25 @@
+{
+  "metrics": {
+    "http_req_duration": {
+      "avg": 612.4,
+      "p(95)": 890.1,
+      "thresholds": {
+        "p(95)<500": {"ok": false}
+      }
+    },
+    "http_reqs": {
+      "count": 500,
+      "rate": 12.4
+    },
+    "http_req_failed": {
+      "rate": 0.08,
+      "thresholds": {
+        "rate<0.01": {"ok": false}
+      }
+    },
+    "checks": {
+      "passes": 460,
+      "fails": 40
+    }
+  }
+}

@@ -1,0 +1,31 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTrigger
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetest-alt
+    app.kubernetes.io/managed-by: kustomize
+  name: testtrigger-sample
+# Mirrors the CLAUDE.md §5 example: fire the sample Test whenever a
+# backend-tier Deployment becomes Available (Argo sync completion).
+spec:
+  resource: deployment
+  event: modified
+  resourceSelector:
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/tier: backend
+  conditionSpec:
+    timeout: 100
+    delay: 2
+    conditions:
+      - type: Progressing
+        status: "True"
+        reason: NewReplicaSetAvailable
+        ttl: 60
+      - type: Available
+        status: "True"
+  action: run
+  execution: test
+  concurrencyPolicy: allow
+  testSelector:
+    name: test-sample

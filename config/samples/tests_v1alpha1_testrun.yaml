@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestRun
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetest-alt
+    app.kubernetes.io/managed-by: kustomize
+  name: testrun-sample
+spec:
+  testRef: test-sample
+  # source defaults to "api" via the defaulting webhook when omitted.
+  config:
+    vus: "10"
+    duration: 30s
+  tags:
+    triggered-by: onboarding-doc

@@ -1,0 +1,19 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  labels:
+    app.kubernetes.io/name: kubetest-alt
+    app.kubernetes.io/managed-by: kustomize
+  name: testtemplate-sample
+spec:
+  # Reusable partial spec. Composition semantics land with step 13.
+  pod:
+    annotations:
+      sidecar.istio.io/inject: "false"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+  config:
+    baseUrl:
+      type: string
+      default: https://api.staging.example.com
