@@ -363,6 +363,78 @@ func TestReconcile_OOMPath(t *testing.T) {
 	assert.Contains(t, final.Status.Message, "OOMKilled")
 }
 
+// TestReconcile_Step07_StatusReflectsScraperOutput is the step-07 e2e:
+// scraper output (metrics, JUnit counts, artifact refs) that landed in the
+// wrapper's result.json flows through the ResultReader into TestRun.Status.
+//
+// We plant a fake RunResult, simulate Job success, then assert TestRun.Status
+// has Metrics + TestCounts + ArtifactRefs populated. Uses the envtest control
+// plane so the assertion covers the real Status().Update() marshaling path.
+func TestReconcile_Step07_StatusReflectsScraperOutput(t *testing.T) {
+	fakeResults.Reset()
+	resetReconcileCounts()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+
+	test := newTestFixture(ns, "step7-test")
+	require.NoError(t, k8sClient.Create(ctx, test))
+	run := newRunFixture(ns, "step7-run", "step7-test")
+	require.NoError(t, k8sClient.Create(ctx, run))
+
+	runKey := client.ObjectKey{Namespace: ns, Name: run.Name}
+	jobKey := client.ObjectKey{Namespace: ns, Name: run.Name}
+	waitForJob(t, ctx, jobKey, 5*time.Second)
+	// Wait for the reconciler to finish setup (queued + JobName set) so
+	// patching the Job below doesn't race with the setup writes.
+	waitForPhase(t, ctx, runKey, testsv1alpha1.PhaseQueued, 3*time.Second)
+
+	// Preload the RunResult the way step-07's real StorageResultReader would
+	// project from a scraper-augmented result.json.
+	fakeResults.Set(run.Name, &RunResult{
+		Phase: testsv1alpha1.PhasePassed,
+		Metrics: map[string]float64{
+			"p95_ms":        250.5,
+			"rps":           42.0,
+			"checks_passed": 100,
+			"checks_total":  100,
+		},
+		TestCounts: &testsv1alpha1.TestCounts{Total: 12, Passed: 10, Failed: 1, Skipped: 1},
+		Artifacts: []testsv1alpha1.ArtifactRef{
+			{Path: "results/junit.xml", Key: "step7-run/results/junit.xml", SizeBytes: 2048, ContentType: "application/xml"},
+			{Path: "results/summary.json", Key: "step7-run/results/summary.json", SizeBytes: 1024, ContentType: "application/json"},
+		},
+	})
+
+	patchJobConditions(t, ctx, jobKey, []batchv1.JobCondition{
+		{Type: batchv1.JobComplete, Status: corev1.ConditionTrue, Reason: "Complete"},
+	})
+
+	final := waitForPhase(t, ctx, runKey, testsv1alpha1.PhasePassed, 5*time.Second)
+
+	// TestCounts round-tripped through the CRD.
+	require.NotNil(t, final.Status.TestCounts, "TestCounts must land on status")
+	assert.Equal(t, 12, final.Status.TestCounts.Total)
+	assert.Equal(t, 10, final.Status.TestCounts.Passed)
+	assert.Equal(t, 1, final.Status.TestCounts.Failed)
+	assert.Equal(t, 1, final.Status.TestCounts.Skipped)
+
+	// Metrics stringified from float — CRD uses map[string]string (see
+	// applyRunResultToStatus for the rationale).
+	require.Len(t, final.Status.Metrics, 4)
+	assert.Equal(t, "250.5", final.Status.Metrics["p95_ms"])
+	assert.Equal(t, "42", final.Status.Metrics["rps"])
+
+	// ArtifactRefs projected verbatim with keys the UI can use to fetch.
+	require.Len(t, final.Status.ArtifactRefs, 2)
+	byPath := map[string]testsv1alpha1.ArtifactRef{}
+	for _, a := range final.Status.ArtifactRefs {
+		byPath[a.Path] = a
+	}
+	junit := byPath["results/junit.xml"]
+	assert.Equal(t, "step7-run/results/junit.xml", junit.Key)
+	assert.Equal(t, int64(2048), junit.SizeBytes)
+}
+
 // TestReconcile_ContentFetchFailed exercises the step-06 init-container path:
 // the fetcher writes FETCH_ERROR to /dev/termination-log, k8s surfaces it on
 // Pod.Status.InitContainerStatuses[i].State.Terminated.Message, and

@@ -84,6 +84,17 @@ type TestRunStatus struct {
 	// +optional
 	ArtifactRefs []ArtifactRef `json:"artifactRefs,omitempty"`
 
+	// Metrics mirrors the wrapper's ExecutionResult.Metrics — a flat name→value
+	// map of tool-emitted numeric metrics (p95_ms, rps, checks_passed/total).
+	// Populated on passed AND failed runs; nil on error/aborted.
+	// +optional
+	Metrics map[string]string `json:"metrics,omitempty"`
+
+	// TestCounts aggregates JUnit-derived counts across all scraped XML files.
+	// Nil when the tool didn't emit JUnit output.
+	// +optional
+	TestCounts *TestCounts `json:"testCounts,omitempty"`
+
 	// +optional
 	Message string `json:"message,omitempty"`
 

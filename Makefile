@@ -69,7 +69,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests with -race.
 # override). Compiler is the pure-function core so gets 90; pkg/executor has
 # some inherent fs-error branches that are impractical to trigger without
 # fs mocks — 80 matches the plan/README.md convention for core-logic packages.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage

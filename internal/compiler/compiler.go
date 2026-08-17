@@ -116,7 +116,36 @@ type Options struct {
 	// Missing keys fall back to defaults. Applied BEFORE ImageRegistry prefixing.
 	// This is the hook for a future operator config (Helm value, CRD field).
 	ExecutorImages map[string]string
+
+	// MinIO configures the artifact scraper (step 07). When Endpoint is set,
+	// the compiler adds:
+	//   - envFrom on the wrapper container pointing at SecretName (holds
+	//     S3-standard AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY keys);
+	//   - literal MINIO_ENDPOINT + MINIO_BUCKET env vars on the wrapper.
+	// When Endpoint is empty, the wrapper skips scraping and the controller
+	// falls back to NoResultReader. Leaves compile output identical to pre-07.
+	MinIO MinIOOptions
 }
+
+// MinIOOptions groups the MinIO/S3 config the compiler injects into the
+// wrapper container's env. Populated by cmd/operator from --minio-* flags.
+type MinIOOptions struct {
+	Endpoint   string // host:port, no scheme
+	Bucket     string // default: MinIODefaultBucket
+	SecretName string // Secret in the run's namespace holding S3 creds
+	UseSSL     bool   // toggle https:// on the MinIO client
+}
+
+// MinIODefaultBucket is what cmd/operator uses when --minio-bucket is empty.
+const MinIODefaultBucket = "kubetest-artifacts"
+
+// MinIO-facing env var names on the wrapper container. Public consts so the
+// wrapper (pkg/executor, internal/scraper) reads by the same names.
+const (
+	EnvMinIOEndpoint = "MINIO_ENDPOINT"
+	EnvMinIOBucket   = "MINIO_BUCKET"
+	EnvMinIOUseSSL   = "MINIO_USE_SSL"
+)
 
 // Note: the ExecutionRequest wire format lives in pkg/executor as the public
 // contract between the operator (which serializes) and the /entry wrapper
@@ -235,7 +264,38 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		corev1.EnvVar{Name: executor.EnvRunID, Value: run.Name},
 		corev1.EnvVar{Name: executor.EnvTestRef, Value: run.Spec.TestRef},
 	)
+	// MinIO config (step 07): only injected when the operator is configured
+	// with --minio-endpoint. Wrapper's cmd/entry checks $MINIO_ENDPOINT and
+	// skips scraping when unset — so a step 06 cluster keeps working.
+	if opts.MinIO.Endpoint != "" {
+		bucket := opts.MinIO.Bucket
+		if bucket == "" {
+			bucket = MinIODefaultBucket
+		}
+		wrapperEnv = append(wrapperEnv,
+			corev1.EnvVar{Name: EnvMinIOEndpoint, Value: opts.MinIO.Endpoint},
+			corev1.EnvVar{Name: EnvMinIOBucket, Value: bucket},
+		)
+		if opts.MinIO.UseSSL {
+			wrapperEnv = append(wrapperEnv, corev1.EnvVar{Name: EnvMinIOUseSSL, Value: "true"})
+		}
+	}
 	wrapperEnv = append(wrapperEnv, test.Spec.Container.Env...)
+
+	// envFrom is separate from env: keeps the wrapper container's env-var
+	// name/value listing free of credentials in kubectl describe. Compiler
+	// only projects the ref; k8s resolves at pod-start.
+	var wrapperEnvFrom []corev1.EnvFromSource
+	if opts.MinIO.Endpoint != "" && opts.MinIO.SecretName != "" {
+		wrapperEnvFrom = append(wrapperEnvFrom, corev1.EnvFromSource{
+			SecretRef: &corev1.SecretEnvSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: opts.MinIO.SecretName},
+			},
+		})
+	}
+	// User-provided envFrom (test.spec.container.envFrom) is appended after
+	// the operator's so user keys win on conflict — same precedence as env.
+	wrapperEnvFrom = append(wrapperEnvFrom, test.Spec.Container.EnvFrom...)
 
 	wrapperMounts := []corev1.VolumeMount{
 		{Name: VolumeData, MountPath: DataDirPath},
@@ -271,7 +331,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		Command:         []string{executor.EntryCommand},
 		Args:            args,
 		Env:             wrapperEnv,
-		EnvFrom:         test.Spec.Container.EnvFrom,
+		EnvFrom:         wrapperEnvFrom,
 		WorkingDir:      test.Spec.Container.WorkingDir,
 		ImagePullPolicy: test.Spec.Container.ImagePullPolicy,
 		Resources:       test.Spec.Container.Resources,

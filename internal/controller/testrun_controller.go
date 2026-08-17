@@ -343,6 +343,9 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 	case JobSucceeded, JobFailedConclusion:
 		result, err := r.Results.Read(ctx, run.Name)
 		if err == nil && result != nil {
+			// Fold scraper output (metrics, JUnit counts, artifact refs)
+			// into TestRun.Status before the terminal transition writes it.
+			applyRunResultToStatus(run, result)
 			return r.terminalAndDeleteJob(ctx, run, result.Phase, "", result.ErrorMessage, job)
 		}
 		if !errors.Is(err, ErrResultNotFound) && err != nil {

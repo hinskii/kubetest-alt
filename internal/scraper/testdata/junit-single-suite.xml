@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="MyTests" tests="4" failures="1" errors="0" skipped="1" time="1.234">
+  <testcase name="passes" classname="MyTests" time="0.1"/>
+  <testcase name="also_passes" classname="MyTests" time="0.2"/>
+  <testcase name="skipped_case" classname="MyTests" time="0.0">
+    <skipped/>
+  </testcase>
+  <testcase name="fails" classname="MyTests" time="0.5">
+    <failure message="expected 2 got 3">stack trace here</failure>
+  </testcase>
+</testsuite>

@@ -161,14 +161,28 @@ type ArtifactSpec struct {
 }
 
 // ArtifactRef is a pointer to a scraped artifact in object storage.
+// Aligned with pkg/executor.ArtifactRef by JSON tag — the controller mirrors
+// the wrapper's ExecutionResult.Artifacts into TestRun.Status.ArtifactRefs
+// without a shape translation.
 type ArtifactRef struct {
-	Name string `json:"name"`
+	// Path is the file path relative to the wrapper's working directory.
+	Path string `json:"path"`
+	// Key is the object-store key ("<runID>/<Path>").
 	// +optional
 	Key string `json:"key,omitempty"`
 	// +optional
 	SizeBytes int64 `json:"sizeBytes,omitempty"`
 	// +optional
 	ContentType string `json:"contentType,omitempty"`
+}
+
+// TestCounts mirrors pkg/executor.TestCounts — JUnit-aggregated counts the
+// scraper (step 07) parses out of uploaded XML fixtures.
+type TestCounts struct {
+	Total   int `json:"total"`
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
 }
 
 // RetryPolicy configures automatic retry on step failure.

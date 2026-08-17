@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="AllSuites" tests="6" failures="1" errors="1" skipped="1">
+  <testsuite name="Suite1" tests="3" failures="1" errors="0" skipped="0">
+    <testcase name="a1"/>
+    <testcase name="a2"/>
+    <testcase name="a3">
+      <failure message="boom"/>
+    </testcase>
+  </testsuite>
+  <testsuite name="Suite2" tests="3" failures="0" errors="1" skipped="1">
+    <testcase name="b1"/>
+    <testcase name="b2">
+      <error message="crash"/>
+    </testcase>
+    <testcase name="b3">
+      <skipped/>
+    </testcase>
+  </testsuite>
+</testsuites>

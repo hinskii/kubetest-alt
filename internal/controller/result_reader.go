@@ -24,8 +24,8 @@ import (
 )
 
 // RunResult is the reconciler-facing subset of the wrapper's result.json.
-// Full shape (steps, artifacts) lands with step 07 when we build the real
-// object-storage reader; step 04 only needs the phase verdict.
+// Extended in step 07 to carry the scraper's output (artifacts, JUnit counts,
+// tool metrics) that lands on TestRun.Status.
 type RunResult struct {
 	// Phase is one of the terminal Phase enum values (passed/failed/error/aborted).
 	Phase testsv1alpha1.Phase
@@ -33,6 +33,23 @@ type RunResult struct {
 	// ErrorMessage carries the wrapper's error message when phase is failed
 	// or error. Empty for passed.
 	ErrorMessage string
+
+	// Metrics is the flat tool-metrics map (p95_ms, rps, checks_*). Nil when
+	// the tool didn't emit metrics.
+	Metrics map[string]float64
+
+	// TestCounts is the JUnit-aggregated summary the scraper computed. Nil
+	// when no JUnit files were uploaded.
+	TestCounts *testsv1alpha1.TestCounts
+
+	// Artifacts is the ref list — path + object-store key + size. Populated
+	// by the scraper. Empty slice means "scraper ran, nothing matched".
+	Artifacts []testsv1alpha1.ArtifactRef
+
+	// ScrapeError carries a scraper failure message (network down, bucket
+	// missing). The Phase verdict is still the tool's; UI can surface this
+	// as "run passed, artifacts not saved: ..." separately.
+	ScrapeError string
 }
 
 // ErrResultNotFound indicates the wrapper didn't produce a result.json (crash,

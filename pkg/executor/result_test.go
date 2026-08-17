@@ -34,7 +34,7 @@ func TestWriteResultAtomic_RoundTrip(t *testing.T) {
 		Steps: []StepResult{
 			{Name: "run", Phase: PhasePassed, StartedAt: "2026-01-01T00:00:00Z", FinishedAt: "2026-01-01T00:01:00Z"},
 		},
-		Artifacts: []string{"results/summary.json"},
+		Artifacts: []ArtifactRef{{Path: "results/summary.json", Key: "run-1/results/summary.json"}},
 	}
 	require.NoError(t, WriteResultAtomic(dir, in))
 

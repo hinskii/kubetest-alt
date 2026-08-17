@@ -40,6 +40,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	webhookv1alpha1 "github.com/hinskii/kubetest-alt/internal/webhook/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -135,11 +136,42 @@ func main() {
 		"Comma-separated executor image overrides: k6=repo/k6:v1,cypress=repo/cypress:v1. "+
 			"Missing keys fall back to compiler.DefaultExecutorImages.")
 
+	// MinIO wiring (step 07). When --minio-endpoint is empty, artifact
+	// scraping is disabled and the controller uses NoResultReader. Setting
+	// endpoint enables both the wrapper-side scraper (via env on wrapper
+	// container) and the controller-side ResultReader.
+	var minioEndpoint, minioBucket, minioSecret, minioAccessKey, minioSecretKey string
+	var minioUseSSL bool
+	flag.StringVar(&minioEndpoint, "minio-endpoint", "",
+		"MinIO/S3 endpoint (host:port). Empty disables artifact scraping.")
+	flag.StringVar(&minioBucket, "minio-bucket", compiler.MinIODefaultBucket,
+		"Object-store bucket for artifacts + result.json.")
+	flag.StringVar(&minioSecret, "minio-secret-name", "",
+		"Name of the Secret in the run's namespace holding AWS_ACCESS_KEY_ID + "+
+			"AWS_SECRET_ACCESS_KEY. Injected as envFrom on the wrapper container.")
+	flag.BoolVar(&minioUseSSL, "minio-use-ssl", false,
+		"Use https:// for the MinIO/S3 client.")
+	flag.StringVar(&minioAccessKey, "minio-access-key", "",
+		"Access key for the OPERATOR's own MinIO client (result.json download). "+
+			"Wrapper uses --minio-secret-name; the operator needs its own creds. "+
+			"Alternatively set via env $MINIO_ACCESS_KEY.")
+	flag.StringVar(&minioSecretKey, "minio-secret-key", "",
+		"Secret key for the operator's MinIO client. Or $MINIO_SECRET_KEY.")
+
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	// Env-var fallbacks for operator's own creds — Kubernetes deployments
+	// mount these from a Secret volume; flags are for local dev.
+	if minioAccessKey == "" {
+		minioAccessKey = os.Getenv("MINIO_ACCESS_KEY")
+	}
+	if minioSecretKey == "" {
+		minioSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -156,6 +188,34 @@ func main() {
 		ContentFetcherImage: contentFetcherImage,
 		ImageRegistry:       imageRegistry,
 		ExecutorImages:      parseExecutorImages(executorImagesRaw),
+		MinIO: compiler.MinIOOptions{
+			Endpoint:   minioEndpoint,
+			Bucket:     minioBucket,
+			SecretName: minioSecret,
+			UseSSL:     minioUseSSL,
+		},
+	}
+
+	// ResultReader wiring — when MinIO is configured, the controller reads
+	// result.json from the bucket. Without MinIO, NoResultReader falls the
+	// controller back to Pod terminated state analysis (§15.2).
+	var resultReader controller.ResultReader = controller.NoResultReader{}
+	if minioEndpoint != "" {
+		mc, err := storage.NewMinIO(storage.Config{
+			Endpoint:  minioEndpoint,
+			Bucket:    minioBucket,
+			UseSSL:    minioUseSSL,
+			AccessKey: minioAccessKey,
+			SecretKey: minioSecretKey,
+		})
+		if err != nil {
+			setupLog.Error(err, "Failed to init MinIO client — controller will use NoResultReader")
+		} else {
+			resultReader = controller.NewStorageResultReader(mc, minioBucket)
+			setupLog.Info("MinIO result reader wired", "endpoint", minioEndpoint, "bucket", minioBucket)
+		}
+	} else {
+		setupLog.Info("--minio-endpoint not set — artifact scraping disabled, using NoResultReader")
 	}
 
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
@@ -268,9 +328,7 @@ func main() {
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compilerOpts,
-		// Results left nil → defaults to NoResultReader (always ErrResultNotFound).
-		// Every Job completion falls back to Pod terminated-state analysis
-		// until step 07 wires the MinIO-backed reader.
+		Results:      resultReader, // step 07: real MinIO reader when configured
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
 		os.Exit(1)

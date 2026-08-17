@@ -73,12 +73,54 @@ type ExecutionResult struct {
 	// trends over time. Nil on error/aborted (nothing meaningful to report).
 	Metrics map[string]float64 `json:"metrics,omitempty"`
 
+	// TestCounts is filled by the scraper (step 07) when JUnit XML files
+	// are found and parsed. Nil when the tool doesn't emit JUnit output.
+	TestCounts *TestCounts `json:"testCounts,omitempty"`
+
 	// Steps is per-step results for tools with an internal step concept
 	// (Cypress specs, Newman requests). k6 leaves it empty.
 	Steps []StepResult `json:"steps,omitempty"`
 
-	// Artifacts is the list of paths the wrapper wrote out for the scraper.
-	Artifacts []string `json:"artifacts,omitempty"`
+	// Artifacts is the list of artifact references produced by the scraper
+	// (step 07). Each entry has the original relative path + the object-store
+	// key the operator UI uses to fetch the file.
+	//
+	// Populated even on failed runs — the scraper runs post-tool regardless
+	// of exit code so partial diagnostic output survives.
+	Artifacts []ArtifactRef `json:"artifacts,omitempty"`
+
+	// ScrapeError carries a human-readable message if the artifact scraper
+	// hit a permanent failure (network down, bucket missing). The run's
+	// verdict (Phase) still stands — a scrape failure never turns a passing
+	// tool run into a failing status. Callers can surface this separately
+	// in the UI ("run passed, artifacts not saved: <reason>").
+	ScrapeError string `json:"scrapeError,omitempty"`
+}
+
+// TestCounts aggregates JUnit-derived counts across all uploaded XML files.
+type TestCounts struct {
+	Total   int `json:"total"`
+	Passed  int `json:"passed"`
+	Failed  int `json:"failed"`
+	Skipped int `json:"skipped"`
+}
+
+// ArtifactRef is one uploaded artifact — original path + object-store key.
+type ArtifactRef struct {
+	// Path is the file path relative to the wrapper's working directory
+	// (e.g. "results/summary.json") — how the user's spec.artifacts.paths
+	// glob matched it.
+	Path string `json:"path"`
+
+	// Key is the object-store key the operator/UI uses to fetch the file.
+	// Layout: "<runID>/<Path>". Bucket is implicit (operator config).
+	Key string `json:"key"`
+
+	// SizeBytes is the uploaded size. Handy for UI listings; not enforced.
+	SizeBytes int64 `json:"sizeBytes,omitempty"`
+
+	// ContentType is what the scraper detected/set on upload.
+	ContentType string `json:"contentType,omitempty"`
 }
 
 // StepResult is the wire shape for one sub-execution. Timestamps are ISO 8601

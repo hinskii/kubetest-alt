@@ -3226,20 +3226,26 @@ spec:
             properties:
               artifactRefs:
                 items:
-                  description: ArtifactRef is a pointer to a scraped artifact in object
-                    storage.
+                  description: |-
+                    ArtifactRef is a pointer to a scraped artifact in object storage.
+                    Aligned with pkg/executor.ArtifactRef by JSON tag — the controller mirrors
+                    the wrapper's ExecutionResult.Artifacts into TestRun.Status.ArtifactRefs
+                    without a shape translation.
                   properties:
                     contentType:
                       type: string
                     key:
+                      description: Key is the object-store key ("<runID>/<Path>").
                       type: string
-                    name:
+                    path:
+                      description: Path is the file path relative to the wrapper's
+                        working directory.
                       type: string
                     sizeBytes:
                       format: int64
                       type: integer
                   required:
-                  - name
+                  - path
                   type: object
                 type: array
               conditions:
@@ -3315,6 +3321,14 @@ spec:
                 type: string
               message:
                 type: string
+              metrics:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Metrics mirrors the wrapper's ExecutionResult.Metrics — a flat name→value
+                  map of tool-emitted numeric metrics (p95_ms, rps, checks_passed/total).
+                  Populated on passed AND failed runs; nil on error/aborted.
+                type: object
               phase:
                 description: |-
                   Phase mirrors Testkube's TestWorkflowStatus enum (verified in source),
@@ -3366,6 +3380,25 @@ spec:
                       format: date-time
                       type: string
                   type: object
+                type: object
+              testCounts:
+                description: |-
+                  TestCounts aggregates JUnit-derived counts across all scraped XML files.
+                  Nil when the tool didn't emit JUnit output.
+                properties:
+                  failed:
+                    type: integer
+                  passed:
+                    type: integer
+                  skipped:
+                    type: integer
+                  total:
+                    type: integer
+                required:
+                - failed
+                - passed
+                - skipped
+                - total
                 type: object
             type: object
         required:

@@ -45,6 +45,14 @@ type Entry struct {
 	// ships only k6; dispatch (map[type]Runner) lands with step 11.
 	Runner Runner
 
+	// Scraper is the optional post-tool artifact scraper (step 07).
+	// nil means "no MinIO configured, skip upload" — the wrapper still writes
+	// result.json locally, controller falls back to NoResultReader.
+	//
+	// cmd/entry composes internal/scraper.Scraper + pkg/storage.MinIO when
+	// $MINIO_ENDPOINT is set; otherwise leaves this nil.
+	Scraper Scraper
+
 	// RequestPath is the path to request.json. Production sets it to the
 	// package constant RequestPath; tests inject a temp file.
 	RequestPath string
@@ -52,6 +60,10 @@ type Entry struct {
 	// ResultDir is where result.json is written. Production reads it from
 	// $KUBETEST_RESULTDIR; tests use t.TempDir().
 	ResultDir string
+
+	// WorkingDir is where the scraper looks for artifacts.paths matches. Defaults
+	// to the request's WorkingDir when empty. Tests can override.
+	WorkingDir string
 
 	// Stderr is where load/setup errors are logged. Production is os.Stderr;
 	// tests inject a bytes.Buffer to assert on messages.
@@ -110,11 +122,91 @@ func (e *Entry) Execute(ctx context.Context) error {
 		}
 	}
 
+	// Scrape happens post-tool AND on the SIGTERM/timeout paths — the plan
+	// §15.3 spec says "flush partial result + trigger artifact scrape hook
+	// before exit". Even a failed / aborted run may have produced diagnostic
+	// files worth uploading. Scrape errors NEVER change Phase; they're
+	// recorded in ScrapeError so the UI can surface the partial state.
+	//
+	// Scraping uses a background ctx so a fired parent (SIGTERM/timeout) doesn't
+	// immediately kill the scrape too. The scraper enforces its own internal
+	// budget via file counts and per-upload timeouts inside pkg/storage.MinIO.
+	e.runScrape(ctx, req, &result)
+
 	if err := WriteResultAtomic(e.ResultDir, result); err != nil {
 		_, _ = fmt.Fprintf(e.Stderr, "write result: %v\n", err)
 		return err
 	}
+
+	// Upload the finalized result.json so the controller's ResultReader can
+	// fetch it (step 04 currently uses NoResultReader; step 07 wires the
+	// real MinIO reader). Non-fatal — a wrapper without a Scraper still
+	// leaves result.json on disk for post-mortem.
+	if e.Scraper != nil && req.RunID != "" {
+		payload, err := marshalResult(result)
+		if err == nil {
+			if uerr := e.Scraper.UploadResult(ctx, req.RunID, payload); uerr != nil {
+				_, _ = fmt.Fprintf(e.Stderr, "upload result.json: %v\n", uerr)
+			}
+		}
+	}
 	return nil
+}
+
+// runScrape triggers the scraper if one is configured, and merges its output
+// into result. Extracted so tests can exercise the scrape hook independently.
+func (e *Entry) runScrape(ctx context.Context, req ExecutionRequest, result *ExecutionResult) {
+	if e.Scraper == nil {
+		return
+	}
+	workingDir := e.WorkingDir
+	if workingDir == "" {
+		workingDir = req.WorkingDir
+	}
+	if workingDir == "" {
+		workingDir = req.DataDir
+	}
+	if workingDir == "" {
+		return
+	}
+
+	// If the parent ctx already fired (SIGTERM/timeout mid-run), scrape gets
+	// a fresh short-lived ctx so it can flush a partial upload before the
+	// pod's second signal / SIGKILL. Bounded to 30s — anything longer risks
+	// overrunning the Job's ADS grace.
+	scrapeCtx := ctx
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		scrapeCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+	}
+
+	sr, err := e.Scraper.Scrape(scrapeCtx, workingDir, ScrapeSpec{
+		RunID: req.RunID,
+		Paths: req.Artifacts.Paths,
+	})
+	if err != nil {
+		// Programmer-error from scraper (nil uploader, empty bucket) — treat
+		// as scrape failure, don't propagate to Phase.
+		if result.ScrapeError == "" {
+			result.ScrapeError = err.Error()
+		}
+		return
+	}
+	result.Artifacts = sr.Artifacts
+	if sr.TestCounts != nil {
+		result.TestCounts = sr.TestCounts
+	}
+	if sr.ScrapeError != "" {
+		result.ScrapeError = sr.ScrapeError
+	}
+}
+
+// marshalResult serializes ExecutionResult the same way WriteResultAtomic
+// does — kept in one place so the on-disk file and the uploaded object have
+// identical bytes.
+func marshalResult(r ExecutionResult) ([]byte, error) {
+	return json.MarshalIndent(r, "", "  ")
 }
 
 // writeErrorResult writes an error-phase result.json and logs to stderr.

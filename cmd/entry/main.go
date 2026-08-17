@@ -35,9 +35,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/hinskii/kubetest-alt/internal/scraper"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/executor/fetcher"
 	"github.com/hinskii/kubetest-alt/pkg/executor/k6"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 func main() {
@@ -73,6 +75,7 @@ func runWrapper(ctx context.Context) int {
 
 	entry := &executor.Entry{
 		Runner:      k6.NewRunner(),
+		Scraper:     newScraperFromEnv(), // nil when MINIO_ENDPOINT unset
 		RequestPath: executor.RequestPath,
 		ResultDir:   resultDir,
 		Stderr:      os.Stderr,
@@ -82,4 +85,35 @@ func runWrapper(ctx context.Context) int {
 		return 1
 	}
 	return 0
+}
+
+// newScraperFromEnv builds the wrapper-side artifact scraper (step 07) when
+// the operator has configured MinIO. Returns nil when disabled so Entry
+// skips the scrape path cleanly. Credentials come from envFrom (the compiler
+// wires the Secret ref on the container) — this function only reads env vars.
+func newScraperFromEnv() executor.Scraper {
+	endpoint := os.Getenv("MINIO_ENDPOINT")
+	if endpoint == "" {
+		return nil
+	}
+	bucket := os.Getenv("MINIO_BUCKET")
+	if bucket == "" {
+		bucket = "kubetest-artifacts" // matches compiler.MinIODefaultBucket
+	}
+	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
+
+	client, err := storage.NewMinIO(storage.Config{
+		Endpoint:  endpoint,
+		Bucket:    bucket,
+		UseSSL:    useSSL,
+		AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
+		SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+	})
+	if err != nil {
+		// Log to stderr but keep going — Entry treats nil Scraper as "don't
+		// scrape", the run still produces result.json on the local emptyDir.
+		_, _ = fmt.Fprintf(os.Stderr, "wrapper: minio init failed, skipping scrape: %v\n", err)
+		return nil
+	}
+	return scraper.New(client, bucket)
 }
