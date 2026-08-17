@@ -172,12 +172,14 @@ func (e *Entry) runScrape(ctx context.Context, req ExecutionRequest, result *Exe
 
 	// If the parent ctx already fired (SIGTERM/timeout mid-run), scrape gets
 	// a fresh short-lived ctx so it can flush a partial upload before the
-	// pod's second signal / SIGKILL. Bounded to 30s — anything longer risks
-	// overrunning the Job's ADS grace.
+	// pod's grace period runs out. Budget = ScrapeGracePeriodSeconds; the
+	// compiler pins pod terminationGracePeriodSeconds ≥ this + margin so
+	// k8s doesn't SIGKILL us mid-scrape.
 	scrapeCtx := ctx
 	if ctx.Err() != nil {
 		var cancel context.CancelFunc
-		scrapeCtx, cancel = context.WithTimeout(context.Background(), 30*time.Second)
+		scrapeCtx, cancel = context.WithTimeout(context.Background(),
+			time.Duration(ScrapeGracePeriodSeconds)*time.Second)
 		defer cancel()
 	}
 

@@ -30,9 +30,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
+)
+
+// Retry defaults for uploadOne. Transient uploader errors (network flakes,
+// 5xx from MinIO) get retried; a run whose bucket is genuinely gone still
+// hits the wall after MaxUploadAttempts × BackoffBase in the worst case.
+//
+// Kept as package vars so tests can shorten BackoffBase to zero and avoid
+// wall-clock latency in the retry-on-transient-error scenario.
+var (
+	MaxUploadAttempts       = 3
+	UploadBackoffBase       = 100 * time.Millisecond
+	UploadBackoffMultiplier = 2.0
 )
 
 // Scraper is the concrete internal/scraper implementation of the
@@ -112,8 +125,17 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 	return result, nil
 }
 
-// uploadOne opens the file, sniffs content-type, and puts it. Returns the
-// ArtifactRef entry that gets appended to ExecutionResult.Artifacts.
+// uploadOne opens the file, sniffs content-type, and puts it — with retry
+// on transient failures. Returns the ArtifactRef entry that gets appended
+// to ExecutionResult.Artifacts.
+//
+// Retry policy: MaxUploadAttempts with exponential backoff starting at
+// UploadBackoffBase. This handles both network flakes and 5xx from MinIO
+// where the next request is likely to succeed. A truly gone bucket / hard
+// permission error just hits the wall N times — caller records failure
+// in ScrapeError without changing the run's Phase.
+//
+// ctx cancellation short-circuits the retry loop (SIGTERM should exit fast).
 func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (executor.ArtifactRef, error) {
 	// #nosec G304 -- m.AbsPath came from ExpandGlobs which pinned matches under workingDir.
 	f, err := os.Open(m.AbsPath)
@@ -128,24 +150,37 @@ func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (exe
 	}
 	size := stat.Size()
 
-	// Peek 512 bytes to sniff (or infer from extension for common cases so
-	// UI-facing content types are stable).
+	// Sniff content-type once before any upload attempt (idempotent).
 	ct := detectContentType(m.RelPath, f)
-	// Rewind after the peek.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return executor.ArtifactRef{}, err
-	}
 
 	key := runID + "/" + m.RelPath
-	if err := s.Uploader.Put(ctx, s.Bucket, key, f, size, ct); err != nil {
-		return executor.ArtifactRef{}, err
+	var lastErr error
+	backoff := UploadBackoffBase
+	for attempt := 1; attempt <= MaxUploadAttempts; attempt++ {
+		// Rewind for each attempt — the previous attempt may have consumed bytes.
+		if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+			return executor.ArtifactRef{}, seekErr
+		}
+		lastErr = s.Uploader.Put(ctx, s.Bucket, key, f, size, ct)
+		if lastErr == nil {
+			return executor.ArtifactRef{
+				Path:        m.RelPath,
+				Key:         key,
+				SizeBytes:   size,
+				ContentType: ct,
+			}, nil
+		}
+		if attempt == MaxUploadAttempts || ctx.Err() != nil {
+			break
+		}
+		// Sleep is interruptible by ctx so SIGTERM aborts the whole retry cycle.
+		select {
+		case <-time.After(backoff):
+			backoff = time.Duration(float64(backoff) * UploadBackoffMultiplier)
+		case <-ctx.Done():
+		}
 	}
-	return executor.ArtifactRef{
-		Path:        m.RelPath,
-		Key:         key,
-		SizeBytes:   size,
-		ContentType: ct,
-	}, nil
+	return executor.ArtifactRef{}, fmt.Errorf("after %d attempts: %w", MaxUploadAttempts, lastErr)
 }
 
 // UploadResult writes the wrapper's ExecutionResult as JSON to

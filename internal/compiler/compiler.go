@@ -97,7 +97,25 @@ const (
 	// 1 hour is long enough to debug a stuck run before the Job vanishes,
 	// short enough that a hung namespace doesn't drown in stale Jobs.
 	TTLSecondsAfterFinished int32 = 3600
+
+	// TerminationGracePeriodMarginSeconds is added to executor.ScrapeGracePeriodSeconds
+	// to compute the pod's terminationGracePeriodSeconds. k8s default is 30s,
+	// which is EXACTLY the scrape budget — the pod gets SIGKILL'd mid-scrape
+	// under load. Margin covers the WriteResultAtomic + UploadResult steps
+	// that run AFTER the scrape budget's timer starts.
+	TerminationGracePeriodMarginSeconds int32 = 15
 )
+
+// terminationGracePeriodSeconds derives the pod's TGPS from the shared
+// scrape budget in pkg/executor. Any future change to ScrapeGracePeriodSeconds
+// propagates here without a compiler-side edit.
+func terminationGracePeriodSeconds() int64 {
+	return int64(executor.ScrapeGracePeriodSeconds) + int64(TerminationGracePeriodMarginSeconds)
+}
+
+// ptrInt64 keeps the pod spec construction terse — k8s API types take
+// *int64 for TerminationGracePeriodSeconds and friends.
+func ptrInt64(v int64) *int64 { return &v }
 
 // Options configures Compile. All fields are optional except ContentFetcherImage.
 type Options struct {
@@ -364,17 +382,18 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 					Annotations: podAnnotations,
 				},
 				Spec: corev1.PodSpec{
-					RestartPolicy:                corev1.RestartPolicyNever,
-					AutomountServiceAccountToken: &automountSAToken,
-					ServiceAccountName:           mergedPod.ServiceAccountName,
-					NodeSelector:                 mergedPod.NodeSelector,
-					Tolerations:                  mergedPod.Tolerations,
-					Affinity:                     mergedPod.Affinity,
-					SecurityContext:              mergedPod.SecurityContext,
-					ImagePullSecrets:             mergedPod.ImagePullSecrets,
-					InitContainers:               initContainers,
-					Containers:                   []corev1.Container{wrapper},
-					Volumes:                      volumes,
+					RestartPolicy:                 corev1.RestartPolicyNever,
+					AutomountServiceAccountToken:  &automountSAToken,
+					TerminationGracePeriodSeconds: ptrInt64(terminationGracePeriodSeconds()),
+					ServiceAccountName:            mergedPod.ServiceAccountName,
+					NodeSelector:                  mergedPod.NodeSelector,
+					Tolerations:                   mergedPod.Tolerations,
+					Affinity:                      mergedPod.Affinity,
+					SecurityContext:               mergedPod.SecurityContext,
+					ImagePullSecrets:              mergedPod.ImagePullSecrets,
+					InitContainers:                initContainers,
+					Containers:                    []corev1.Container{wrapper},
+					Volumes:                       volumes,
 				},
 			},
 		},

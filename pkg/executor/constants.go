@@ -68,4 +68,14 @@ const (
 	// #nosec G101 -- this is an env-var NAME, not a hardcoded credential.
 	EnvGitToken      = "KUBETEST_GIT_TOKEN"
 	EnvGitSSHKeyPath = "KUBETEST_GIT_SSH_KEY_PATH"
+
+	// ScrapeGracePeriodSeconds is how long the wrapper's post-SIGTERM scrape
+	// hook (see Entry.runScrape) gets to flush artifacts + upload result.json.
+	// The compiler MUST set pod terminationGracePeriodSeconds to at least this
+	// value plus a margin — otherwise k8s SIGKILLs the pod mid-scrape and the
+	// whole "flush partial state" story (§15.3) is theater.
+	//
+	// Kept as int32 to match k8s API's typing on TerminationGracePeriodSeconds
+	// so the compiler can convert without silent int-truncation warnings.
+	ScrapeGracePeriodSeconds int32 = 30
 )

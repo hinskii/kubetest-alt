@@ -128,11 +128,18 @@ func TestScrape_NonJUnitXMLIgnored(t *testing.T) {
 // scraper never returns error for upload failures — records them in
 // ScrapeError so the run's Phase stays intact.
 func TestScrape_UploaderPermanentFailureRecordsButDoesNotError(t *testing.T) {
+	origBackoff := UploadBackoffBase
+	UploadBackoffBase = 0
+	t.Cleanup(func() { UploadBackoffBase = origBackoff })
+
 	dir := t.TempDir()
 	writeFile(t, dir, "results/a.txt", "x")
 
 	up := storage.NewFake()
-	up.PutErrors = []error{errors.New("permanent 500"), errors.New("permanent 500")}
+	// Enough errors to exhaust the retry budget → permanent failure.
+	for range MaxUploadAttempts {
+		up.PutErrors = append(up.PutErrors, errors.New("permanent 500"))
+	}
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
@@ -145,16 +152,112 @@ func TestScrape_UploaderPermanentFailureRecordsButDoesNotError(t *testing.T) {
 	assert.Contains(t, res.ScrapeError, "results/a.txt")
 }
 
-// TestScrape_PartialFailureUploadsWhatItCan: 1 file fails, 1 succeeds →
-// Artifacts has 1 entry AND ScrapeError describes the failure.
+// TestScrape_RetryOnTransientErrorThenSuccess — plan step-07 mandate:
+// "upload retry on transient error (fake returns 500 once)". Uploader errs
+// exactly once, scraper retries, second attempt succeeds. Asserts artifact
+// recorded + PutCalls == 2 (proves retry actually retried).
+func TestScrape_RetryOnTransientErrorThenSuccess(t *testing.T) {
+	origBackoff := UploadBackoffBase
+	UploadBackoffBase = 0
+	t.Cleanup(func() { UploadBackoffBase = origBackoff })
+
+	dir := t.TempDir()
+	writeFile(t, dir, "results/a.txt", "hello")
+
+	up := storage.NewFake()
+	up.PutErrors = []error{errors.New("500 transient")}
+
+	s := New(up, testBucket)
+	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
+		RunID: "retry-run",
+		Paths: []string{"**/*.txt"},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, res.ScrapeError, "transient failure recovered → no error")
+	require.Len(t, res.Artifacts, 1)
+	assert.Equal(t, 2, up.PutCalls, "one failure + one success = 2 attempts")
+
+	got, ok := up.Object(testBucket, "retry-run/results/a.txt")
+	require.True(t, ok)
+	assert.Equal(t, "hello", string(got))
+}
+
+// TestScrape_RetryGivesUpAfterMaxAttempts is the complement: permanent
+// failure → all MaxUploadAttempts consumed → no artifact + ScrapeError.
+func TestScrape_RetryGivesUpAfterMaxAttempts(t *testing.T) {
+	origBackoff := UploadBackoffBase
+	UploadBackoffBase = 0
+	t.Cleanup(func() { UploadBackoffBase = origBackoff })
+
+	dir := t.TempDir()
+	writeFile(t, dir, "a.txt", "x")
+
+	up := storage.NewFake()
+	for range MaxUploadAttempts + 1 {
+		up.PutErrors = append(up.PutErrors, errors.New("permanent 500"))
+	}
+	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
+		RunID: "gives-up", Paths: []string{"*.txt"},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, res.Artifacts)
+	assert.Contains(t, res.ScrapeError, "after")
+	assert.Equal(t, MaxUploadAttempts, up.PutCalls, "retried exactly MaxUploadAttempts times")
+}
+
+// TestScrape_PerRunPrefixIsolation — plan step-07 mandate: "per-run prefix
+// isolation". Two runs, same bucket, colliding relative paths — objects
+// land under distinct <runID>/ prefixes, no collision. This is what makes
+// multi-tenant scraping on a shared bucket safe.
+func TestScrape_PerRunPrefixIsolation(t *testing.T) {
+	up := storage.NewFake()
+	s := New(up, testBucket)
+
+	dir1 := t.TempDir()
+	writeFile(t, dir1, "results/summary.json", `{"run":"one"}`)
+	_, err := s.Scrape(context.Background(), dir1, executor.ScrapeSpec{
+		RunID: "run-alpha", Paths: []string{"**/*.json"},
+	})
+	require.NoError(t, err)
+
+	dir2 := t.TempDir()
+	writeFile(t, dir2, "results/summary.json", `{"run":"two"}`)
+	_, err = s.Scrape(context.Background(), dir2, executor.ScrapeSpec{
+		RunID: "run-beta", Paths: []string{"**/*.json"},
+	})
+	require.NoError(t, err)
+
+	alpha, ok := up.Object(testBucket, "run-alpha/results/summary.json")
+	require.True(t, ok)
+	assert.Equal(t, `{"run":"one"}`, string(alpha))
+	beta, ok := up.Object(testBucket, "run-beta/results/summary.json")
+	require.True(t, ok)
+	assert.Equal(t, `{"run":"two"}`, string(beta))
+
+	assert.ElementsMatch(t,
+		[]string{"run-alpha/results/summary.json", "run-beta/results/summary.json"},
+		up.Keys(testBucket),
+	)
+}
+
+// TestScrape_PartialFailure — plan step-07 mandate: "permanent failure →
+// artifacts partial + error recorded, run result still produced". Two files;
+// one fails all retries, one succeeds. Artifacts has 1 entry, ScrapeError set.
 func TestScrape_PartialFailure(t *testing.T) {
+	origBackoff := UploadBackoffBase
+	UploadBackoffBase = 0
+	t.Cleanup(func() { UploadBackoffBase = origBackoff })
+
 	dir := t.TempDir()
 	writeFile(t, dir, "a.txt", "x")
 	writeFile(t, dir, "b.txt", "y")
 
 	up := storage.NewFake()
-	// First upload fails permanently, second succeeds.
-	up.PutErrors = []error{errors.New("500")}
+	// First file exhausts all retries (MaxUploadAttempts failures) → permanent.
+	// Second file's attempts drain from an empty queue → succeed.
+	for range MaxUploadAttempts {
+		up.PutErrors = append(up.PutErrors, errors.New("500"))
+	}
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{

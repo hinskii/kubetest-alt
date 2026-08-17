@@ -73,6 +73,7 @@ spec:
           name: request
           readOnly: true
       restartPolicy: Never
+      terminationGracePeriodSeconds: 45
       volumes:
       - emptyDir: {}
         name: data

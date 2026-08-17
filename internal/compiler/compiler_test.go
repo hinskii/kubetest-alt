@@ -112,6 +112,18 @@ func TestCompile_StructuralInvariants(t *testing.T) {
 		require.NotNil(t, job.Spec.TTLSecondsAfterFinished)
 		assert.Equal(t, TTLSecondsAfterFinished, *job.Spec.TTLSecondsAfterFinished)
 	})
+	t.Run("TerminationGracePeriodSeconds accommodates the scrape budget (§15.3)", func(t *testing.T) {
+		// Without this, k8s SIGKILLs the pod at the default 30s TGPS — EXACTLY
+		// the scrape budget — killing the flush hook the wrapper relies on for
+		// partial-artifact upload. TGPS must be scrape budget + margin.
+		require.NotNil(t, job.Spec.Template.Spec.TerminationGracePeriodSeconds)
+		got := *job.Spec.Template.Spec.TerminationGracePeriodSeconds
+		want := int64(executor.ScrapeGracePeriodSeconds) + int64(TerminationGracePeriodMarginSeconds)
+		assert.Equal(t, want, got,
+			"TGPS must be at least ScrapeGracePeriodSeconds+margin, got %d", got)
+		assert.Greater(t, got, int64(executor.ScrapeGracePeriodSeconds),
+			"TGPS MUST be strictly greater than scrape budget — no margin = SIGKILL mid-scrape")
+	})
 	t.Run("restartPolicy is Never", func(t *testing.T) {
 		assert.Equal(t, corev1.RestartPolicyNever, job.Spec.Template.Spec.RestartPolicy)
 	})
