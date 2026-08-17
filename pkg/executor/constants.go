@@ -59,4 +59,13 @@ const (
 	// to stdout can tag their output. Optional for the wrapper itself.
 	EnvRunID   = "KUBETEST_RUN_ID"
 	EnvTestRef = "KUBETEST_TEST_REF"
+
+	// Git-auth env vars the compiler wires from Test.spec.content.git.*From
+	// secret refs onto the init container, and the fetcher reads at runtime.
+	// Shared here (not in pkg/executor/fetcher) so internal/compiler can
+	// reference them without creating an import cycle with fetcher's tests.
+	EnvGitUsername = "KUBETEST_GIT_USERNAME"
+	// #nosec G101 -- this is an env-var NAME, not a hardcoded credential.
+	EnvGitToken      = "KUBETEST_GIT_TOKEN"
+	EnvGitSSHKeyPath = "KUBETEST_GIT_SSH_KEY_PATH"
 )

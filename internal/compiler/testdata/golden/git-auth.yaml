@@ -1,0 +1,128 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-git-auth-run
+  name: sample-git-auth-run
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-git-auth-run
+    uid: 00000000-0000-0000-0000-0000cafe0001
+spec:
+  activeDeadlineSeconds: 1860
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/managed-by: kubetest-alt
+        kubetest.io/run-id: sample-git-auth-run
+    spec:
+      automountServiceAccountToken: false
+      containers:
+      - args:
+        - run
+        - --summary-export=summary.json
+        - script.js
+        command:
+        - /entry
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        - name: KUBETEST_RESULTDIR
+          value: /etc/kubetest/result
+        - name: KUBETEST_RUN_ID
+          value: sample-git-auth-run
+        - name: KUBETEST_TEST_REF
+          value: sample-git-auth
+        image: grafana/k6:2.2.0
+        name: wrapper
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+        - mountPath: /etc/kubetest/result
+          name: result
+      initContainers:
+      - command:
+        - /entry
+        - fetch
+        env:
+        - name: KUBETEST_DATADIR
+          value: /data
+        - name: KUBETEST_GIT_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: git-creds
+        - name: KUBETEST_GIT_TOKEN
+          valueFrom:
+            secretKeyRef:
+              key: token
+              name: git-creds
+        image: ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0
+        name: content-fetcher
+        resources: {}
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /etc/kubetest
+          name: request
+          readOnly: true
+      restartPolicy: Never
+      volumes:
+      - emptyDir: {}
+        name: data
+      - emptyDir: {}
+        name: result
+      - configMap:
+          items:
+          - key: request.json
+            path: request.json
+          - key: content.json
+            path: content.json
+          name: sample-git-auth-run-request
+        name: request
+  ttlSecondsAfterFinished: 3600
+status: {}
+---
+apiVersion: v1
+data:
+  content.json: '{"git":{"uri":"https://example.com/private.git","revision":"main","authType":"basic","usernameFrom":{"secretKeyRef":{"name":"git-creds","key":"username"}},"tokenFrom":{"secretKeyRef":{"name":"git-creds","key":"token"}}}}'
+  request.json: |-
+    {
+      "type": "k6",
+      "runId": "sample-git-auth-run",
+      "testRef": "sample-git-auth",
+      "dataDir": "/data",
+      "args": [
+        "run",
+        "--summary-export=summary.json",
+        "script.js"
+      ],
+      "config": {
+        "vus": "10"
+      },
+      "timeoutSeconds": 1800
+    }
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kubetest-alt
+    kubetest.io/run-id: sample-git-auth-run
+  name: sample-git-auth-run-request
+  namespace: kubetest-samples
+  ownerReferences:
+  - apiVersion: tests.kubetest.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: TestRun
+    name: sample-git-auth-run
+    uid: 00000000-0000-0000-0000-0000cafe0001

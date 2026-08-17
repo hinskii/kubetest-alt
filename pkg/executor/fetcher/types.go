@@ -24,6 +24,8 @@ limitations under the License.
 // for pkg/executor.ExecutionRequest.
 package fetcher
 
+import "github.com/hinskii/kubetest-alt/pkg/executor"
+
 // Content is the wire shape of Test.spec.content. Read from
 // $KUBETEST_REQUEST_DIR/content.json by the fetcher.
 type Content struct {
@@ -63,14 +65,18 @@ type Tarball struct {
 	Path string `json:"path,omitempty"`
 }
 
-// Env var names the fetcher reads at runtime. Compiler-side wiring (step 06+)
-// sets these from Test.spec.content.git secret refs.
+// EnvGit* env var names are shared wire contract with the compiler — see
+// pkg/executor/constants.go. Aliased here for readability at call sites in
+// this package; compiler references the pkg/executor originals to avoid an
+// import cycle with the fetcher's own tests.
 const (
-	EnvGitUsername = "KUBETEST_GIT_USERNAME"
-	// #nosec G101 -- this is an env-var NAME, not a hardcoded credential.
-	EnvGitToken      = "KUBETEST_GIT_TOKEN"
-	EnvGitSSHKeyPath = "KUBETEST_GIT_SSH_KEY_PATH"
+	EnvGitUsername   = executor.EnvGitUsername
+	EnvGitToken      = executor.EnvGitToken
+	EnvGitSSHKeyPath = executor.EnvGitSSHKeyPath
+)
 
+// Fetcher-only env vars.
+const (
 	// EnvFetchTimeoutSeconds overrides the default fetch timeout. Optional.
 	EnvFetchTimeoutSeconds = "KUBETEST_FETCH_TIMEOUT_SECONDS"
 

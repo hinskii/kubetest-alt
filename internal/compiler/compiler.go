@@ -221,9 +221,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		Name:    ContainerContentFetcher,
 		Image:   opts.ContentFetcherImage,
 		Command: []string{executor.EntryCommand, "fetch"},
-		Env: []corev1.EnvVar{
-			{Name: executor.EnvDataDir, Value: DataDirPath},
-		},
+		Env:     initContainerEnv(test.Spec.Content.Git),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: VolumeData, MountPath: DataDirPath},
 			{Name: VolumeRequest, MountPath: RequestMountDir, ReadOnly: true},
