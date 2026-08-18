@@ -67,6 +67,11 @@ var (
 	// can assert the reconciler's lifecycle hooks fire at the right time.
 	// See TestReconcile_LogRegistry_LifecycleHooks.
 	fakeLogRegistry *RecordingLogRegistry
+
+	// fakeRunStore captures SaveFinished calls. Tests reset it and assert
+	// the reconciler wrote at terminal transitions AND retried after
+	// transient errors. See TestReconcile_RunStore_*.
+	fakeRunStore *RecordingRunStore
 )
 
 // RecordingLogRegistry captures LogRegistry calls in order. It's the
@@ -124,6 +129,76 @@ func (r *RecordingLogRegistry) CallsForRun(runID string) []LogRegistryCall {
 		}
 	}
 	return out
+}
+
+// RecordingRunStore is the reconciler-facing test double for
+// store.Postgres. Captures every SaveFinished call (in order); a per-UID
+// error queue lets tests simulate transient DB failures and assert retry.
+type RecordingRunStore struct {
+	mu       sync.Mutex
+	saves    []RecordedSave
+	errQueue map[string][]error // UID → errors to return, one per call
+}
+
+// RecordedSave is a captured invocation.
+type RecordedSave struct {
+	UID   string
+	Name  string
+	Phase testsv1alpha1.Phase
+}
+
+func NewRecordingRunStore() *RecordingRunStore {
+	return &RecordingRunStore{errQueue: map[string][]error{}}
+}
+
+// SaveFinished implements the reconciler's RunStorePersister interface.
+func (r *RecordingRunStore) SaveFinished(_ context.Context, run *testsv1alpha1.TestRun) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.saves = append(r.saves, RecordedSave{
+		UID:   string(run.UID),
+		Name:  run.Name,
+		Phase: run.Status.Phase,
+	})
+	uid := string(run.UID)
+	if q := r.errQueue[uid]; len(q) > 0 {
+		err := q[0]
+		r.errQueue[uid] = q[1:]
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// QueueErr appends err to the per-UID queue. Every SaveFinished call for
+// that UID pops one entry; nil entries return success (useful to sequence
+// "fail then succeed" test cases).
+func (r *RecordingRunStore) QueueErr(uid string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.errQueue[uid] = append(r.errQueue[uid], err)
+}
+
+// SavesForUID returns the recorded calls filtered to a specific UID.
+func (r *RecordingRunStore) SavesForUID(uid string) []RecordedSave {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []RecordedSave
+	for _, s := range r.saves {
+		if s.UID == uid {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// Reset clears state between tests.
+func (r *RecordingRunStore) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.saves = nil
+	r.errQueue = map[string][]error{}
 }
 
 // FakeResultReader is the ResultReader used across envtest tests. Concurrent-
@@ -251,12 +326,14 @@ func runTests(m *testing.M) (int, error) {
 
 	fakeResults = newFakeResultReader()
 	fakeLogRegistry = &RecordingLogRegistry{}
+	fakeRunStore = NewRecordingRunStore()
 	real := &TestRunReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compiler.Options{ContentFetcherImage: "test/content-fetcher:v0"},
 		Results:      fakeResults,
 		LogRegistry:  fakeLogRegistry,
+		RunStore:     fakeRunStore,
 		// Short intervals for tests — production defaults are 30s / 10s.
 		FallbackRequeue:         500 * time.Millisecond,
 		ConcurrencyWaitInterval: 250 * time.Millisecond,

@@ -17,10 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -37,10 +39,13 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/logstream"
+	"github.com/hinskii/kubetest-alt/internal/store"
 	webhookv1alpha1 "github.com/hinskii/kubetest-alt/internal/webhook/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 	// +kubebuilder:scaffold:imports
@@ -169,6 +174,15 @@ func main() {
 		"Tail pod logs, fan out to subscribers, and flush chunk-objects to MinIO. "+
 			"Requires MinIO to be configured (--minio-endpoint) and RBAC for pods/log.")
 
+	// Postgres run-history store (step 09). Empty DSN → no store, controller
+	// runs without persisting finished TestRuns (a valid dev-mode config).
+	// DSN accepts either "postgres://..." or "key=value ..." forms.
+	// Fallback: $POSTGRES_DSN for k8s-Secret-mounted deployments.
+	var postgresDSN string
+	flag.StringVar(&postgresDSN, "postgres-dsn", "",
+		"Postgres DSN for run-history + retention. Empty disables persistence. "+
+			"Or set via $POSTGRES_DSN.")
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -182,6 +196,9 @@ func main() {
 	}
 	if minioSecretKey == "" {
 		minioSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	}
+	if postgresDSN == "" {
+		postgresDSN = os.Getenv("POSTGRES_DSN")
 	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
@@ -298,6 +315,51 @@ func main() {
 
 	restCfg := ctrl.GetConfigOrDie()
 
+	// Postgres run-history (step 09). Migrations under advisory lock so
+	// rolling-update replicas serialize their attempts. Pool lifetime spans
+	// the whole manager; closed on exit.
+	var runStore controller.RunStorePersister
+	var pgPool *pgxpool.Pool
+	if postgresDSN != "" {
+		migCtx, migCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if err := store.ApplyMigrations(migCtx, postgresDSN); err != nil {
+			migCancel()
+			setupLog.Error(err, "Postgres migrations failed — run-history disabled")
+		} else {
+			migCancel()
+			poolCtx, poolCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			pool, err := pgxpool.New(poolCtx, postgresDSN)
+			poolCancel()
+			if err != nil {
+				setupLog.Error(err, "pgxpool init failed — run-history disabled")
+			} else {
+				pgStore := store.NewPostgres(pool)
+				// Wire metric-parse warnings into controller-runtime's logger
+				// so unparseable values surface without failing the save.
+				pgStore.Warn = func(w store.MetricParseWarning) {
+					setupLog.Info("metric parse skipped",
+						"key", w.Key, "value", w.RawValue, "reason", w.Err.Error())
+				}
+				// Ensure partitions covering the current retention window +
+				// a month of lookahead so a month-rollover doesn't wedge the
+				// first write of the new month.
+				partCtx, partCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				parts := store.PartitionsToCreate(time.Now().UTC(),
+					30*24*time.Hour, 32*24*time.Hour)
+				if err := pgStore.EnsurePartitions(partCtx, parts); err != nil {
+					setupLog.Error(err, "EnsurePartitions failed — run-history disabled")
+				} else {
+					runStore = pgStore
+					pgPool = pool
+					setupLog.Info("Postgres run-history enabled", "partitions", len(parts))
+				}
+				partCancel()
+			}
+		}
+	} else {
+		setupLog.Info("--postgres-dsn not set — run-history disabled (dev mode)")
+	}
+
 	// Log-streaming registry. Wired only when --logs-enabled is set; the
 	// reconciler treats a nil LogRegistry as "logs disabled" and never calls
 	// into it. We also need MinIO up — chunk flushes go there.
@@ -377,6 +439,7 @@ func main() {
 		CompilerOpts: compilerOpts,
 		Results:      resultReader, // step 07: real MinIO reader when configured
 		LogRegistry:  logRegistry,  // step 08: nil when --logs-enabled=false
+		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
 		os.Exit(1)
@@ -401,5 +464,8 @@ func main() {
 	// goroutines and the last chunks land in MinIO.
 	if logRegistryConcrete != nil {
 		logRegistryConcrete.Shutdown()
+	}
+	if pgPool != nil {
+		pgPool.Close()
 	}
 }

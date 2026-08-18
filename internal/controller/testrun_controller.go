@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -72,6 +73,19 @@ type TestRunReconciler struct {
 	// a lightweight recorder without a real k8s log source.
 	LogRegistry LogRegistry
 
+	// RunStore persists finished TestRuns to Postgres for the API server
+	// (step 10) and retention (§9). Called from transitionTerminal AFTER
+	// the Status Update succeeds — so the DB row always matches the CR's
+	// terminal state. Nil disables the write path (unit tests without a
+	// Postgres, cmd/operator without --postgres-dsn).
+	//
+	// Failure semantics: SaveFinished errors are LOGGED, not returned. Run
+	// correctness > run history. The next reconcile retries the write
+	// (transitionTerminal is a no-op once the CR phase is already terminal,
+	// but the reconciler enters this code path again after fallback requeue
+	// so we still get a retry — the RunStore's UID upsert keeps it idempotent).
+	RunStore RunStorePersister
+
 	// FallbackRequeue is a safety-net requeue for lost Job/Pod events; the
 	// primary trigger is Owns(Job) + Watches(Pod). Default 30s.
 	FallbackRequeue time.Duration
@@ -85,6 +99,13 @@ type TestRunReconciler struct {
 	// Now returns the current time. Overridable so tests get deterministic
 	// timestamps. Defaults to metav1.Now.
 	Now func() metav1.Time
+
+	// persistedRuns dedupes SaveFinished calls per TestRun UID. Populated
+	// on successful save; consulted on every reconcile-of-terminal to skip
+	// unnecessary DB traffic (Job GC / status subresource updates fire
+	// reconciles even after the CR is terminal). Cleared implicitly on
+	// operator restart — subsequent re-persist is a no-op idempotent upsert.
+	persistedRuns sync.Map
 }
 
 // LogRegistry is the reconciler-facing surface of logstream.Registry. Kept
@@ -98,6 +119,13 @@ type LogRegistry interface {
 	// StopTailer stops and removes the tailer for runID. No-op if absent.
 	// Called on terminal transitions and finalize.
 	StopTailer(runID string)
+}
+
+// RunStorePersister is the reconciler-facing surface of store.Postgres.
+// Interface so envtest injects a fake without a real database. Matches
+// store.RunStore's SaveFinished — controller doesn't need Get/List.
+type RunStorePersister interface {
+	SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun) error
 }
 
 // SetupWithManager registers the reconciler with the controller manager and
@@ -191,7 +219,13 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Terminal phases are frozen — no writes, no requeue. This is what keeps
 	// the event-driven design from hot-looping on its own status updates.
+	// Still run the persist path: if the very first save failed (DB down,
+	// network flake) we get a retry on every subsequent reconcile-of-
+	// terminal (Job GC, status subresource update, fallback requeue).
+	// persistFinished dedupes via persistedRuns so a successful save
+	// short-circuits every subsequent call cheaply.
 	if IsTerminalPhase(run.Status.Phase) {
+		r.persistFinished(ctx, &run)
 		return ctrl.Result{}, nil
 	}
 
@@ -424,6 +458,10 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 	if _, err := r.transitionTerminal(ctx, run, phase, reason, message); err != nil {
 		return ctrl.Result{}, err
 	}
+	// Persist to run-history DB AFTER the CR reaches terminal state so the
+	// row reflects the same finishedAt/durationMs/message the CR shows.
+	// Error is logged, NOT returned — run history < run correctness.
+	r.persistFinished(ctx, run)
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(run.Name)
 	}
@@ -434,6 +472,25 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 		}
 	}
 	return ctrl.Result{}, nil
+}
+
+// persistFinished writes the (terminal) TestRun to the run-history store,
+// once per UID per operator lifetime. Errors are logged but never returned:
+// the plan (§step-09) makes run history strictly secondary to run correctness.
+// Retry on subsequent reconciles until success, then dedupe via persistedRuns.
+func (r *TestRunReconciler) persistFinished(ctx context.Context, run *testsv1alpha1.TestRun) {
+	if r.RunStore == nil || run == nil || run.UID == "" {
+		return
+	}
+	if _, done := r.persistedRuns.Load(run.UID); done {
+		return
+	}
+	if err := r.RunStore.SaveFinished(ctx, run); err != nil {
+		log.FromContext(ctx).Error(err, "SaveFinished to run store failed (will retry on next reconcile)",
+			"run", run.Name, "uid", run.UID)
+		return
+	}
+	r.persistedRuns.Store(run.UID, struct{}{})
 }
 
 // deleteJobBackground deletes a Job with Background propagation so its pods
@@ -567,6 +624,10 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(run.Name)
 	}
+	// Drop the persisted-set entry so a future TestRun with the same UID
+	// (impossible in practice for k8s UUIDs, but cheap safety) is treated
+	// as fresh. Also bounds the map from growing forever as runs are deleted.
+	r.persistedRuns.Delete(run.UID)
 	var job batchv1.Job
 	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &job); err == nil {
 		if err := deleteJobBackground(ctx, r.Client, &job); err != nil {

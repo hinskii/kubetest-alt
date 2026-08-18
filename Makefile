@@ -60,16 +60,28 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests with -race.
+test: manifests generate fmt vet setup-envtest ## Run tests with -race (no Docker).
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -race $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+
+.PHONY: test-integration
+test-integration: manifests generate fmt vet setup-envtest ## Run integration tests (requires Docker: testcontainers-go).
+	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
+		go test -tags integration -race -timeout 5m $$(go list ./... | grep -v /e2e)
 
 # COVERAGE_PKGS lists packages that must meet the coverage bar. Entries take
 # the form `path` (uses COVERAGE_MIN as the floor) or `path:min` (per-package
 # override). Compiler is the pure-function core so gets 90; pkg/executor has
 # some inherent fs-error branches that are impractical to trigger without
 # fs mocks — 80 matches the plan/README.md convention for core-logic packages.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85
+#
+# internal/store is set to 40 because postgres.go / migrations.go can only
+# be exercised via the `integration` build tag (real Postgres via
+# testcontainers-go), which `make test` deliberately excludes to keep the
+# default gate Docker-free (§step-09 acceptance). Pure-function coverage
+# (partition math, row mapping) sits well above the gate; DB paths get
+# exhaustive coverage under `make test-integration`.
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/store:40
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
