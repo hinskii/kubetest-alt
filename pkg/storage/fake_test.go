@@ -83,3 +83,44 @@ func TestFake_Reset(t *testing.T) {
 	assert.Empty(t, f.Keys("b"))
 	assert.Nil(t, f.PutErrors)
 }
+
+func TestFake_RemovePrefix_DropsMatchingKeys(t *testing.T) {
+	f := NewFake()
+	ctx := context.Background()
+	// Populate two runs' worth of chunks + a decoy key that must NOT be
+	// touched (adjacent prefix, different run).
+	_ = f.Put(ctx, "logs", "kubetest-logs/run-A/00000000.log", strings.NewReader("a0"), 2, "")
+	_ = f.Put(ctx, "logs", "kubetest-logs/run-A/00000001.log", strings.NewReader("a1"), 2, "")
+	_ = f.Put(ctx, "logs", "kubetest-logs/run-A-decoy/x.log", strings.NewReader("dc"), 2, "")
+	_ = f.Put(ctx, "logs", "kubetest-logs/run-B/00000000.log", strings.NewReader("b0"), 2, "")
+
+	require.NoError(t, f.RemovePrefix(ctx, "logs", "kubetest-logs/run-A/"))
+
+	assert.Equal(t, []string{
+		"kubetest-logs/run-A-decoy/x.log",
+		"kubetest-logs/run-B/00000000.log",
+	}, f.Keys("logs"))
+	assert.Equal(t, 1, f.RemoveCalls)
+}
+
+func TestFake_RemovePrefix_EmptyPrefixRejected(t *testing.T) {
+	f := NewFake()
+	err := f.RemovePrefix(context.Background(), "logs", "")
+	require.Error(t, err)
+}
+
+func TestFake_RemovePrefix_MissingPrefixIsNoop(t *testing.T) {
+	f := NewFake()
+	// Empty bucket → no-op, no error.
+	require.NoError(t, f.RemovePrefix(context.Background(), "logs", "kubetest-logs/run-X/"))
+	assert.Equal(t, 1, f.RemoveCalls)
+}
+
+func TestFake_RemovePrefix_ErrorQueue(t *testing.T) {
+	f := NewFake()
+	f.RemoveErrors = []error{errors.New("boom")}
+	err := f.RemovePrefix(context.Background(), "logs", "kubetest-logs/run/")
+	require.EqualError(t, err, "boom")
+	// Next call succeeds (queue drained).
+	require.NoError(t, f.RemovePrefix(context.Background(), "logs", "kubetest-logs/run/"))
+}

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -44,10 +45,14 @@ type Fake struct {
 	// GetErrors mirrors PutErrors for Get.
 	GetErrors []error
 
-	// PutCalls / GetCalls count invocations (including failed ones) for
-	// tests that need to assert retry counts.
-	PutCalls int
-	GetCalls int
+	// RemoveErrors mirrors PutErrors for RemovePrefix.
+	RemoveErrors []error
+
+	// PutCalls / GetCalls / RemoveCalls count invocations (including failed
+	// ones) for tests that need to assert retry counts.
+	PutCalls    int
+	GetCalls    int
+	RemoveCalls int
 }
 
 // NewFake builds an empty Fake ready for use.
@@ -134,6 +139,33 @@ func (f *Fake) Reset() {
 	f.GetErrors = nil
 	f.PutCalls = 0
 	f.GetCalls = 0
+	f.RemoveErrors = nil
+	f.RemoveCalls = 0
+}
+
+// RemovePrefix implements Remover. Deletes every stored key that starts with
+// bucket/prefix. Empty prefix is rejected to match the interface contract.
+func (f *Fake) RemovePrefix(_ context.Context, bucket, prefix string) error {
+	if prefix == "" {
+		return fmt.Errorf("fake: RemovePrefix requires a non-empty prefix")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RemoveCalls++
+	if len(f.RemoveErrors) > 0 {
+		err := f.RemoveErrors[0]
+		f.RemoveErrors = f.RemoveErrors[1:]
+		if err != nil {
+			return err
+		}
+	}
+	fullPrefix := fakeKey(bucket, prefix)
+	for k := range f.objects {
+		if strings.HasPrefix(k, fullPrefix) {
+			delete(f.objects, k)
+		}
+	}
+	return nil
 }
 
 func fakeKey(bucket, key string) string { return bucket + "/" + key }

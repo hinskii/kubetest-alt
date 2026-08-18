@@ -22,6 +22,8 @@ import (
 	"io"
 	"sync"
 
+	ctrlLog "sigs.k8s.io/controller-runtime/pkg/log"
+
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -31,13 +33,34 @@ import (
 // idempotent, which matters because controller-runtime reconciles are
 // event-driven and duplicate events are expected (§15.4 watch reconnect).
 //
+// # Restart-resume policy: wipe prefix, do NOT resume seq
+//
+// When the operator restarts mid-run, EnsureTailer starts a fresh Tailer
+// for a still-Running pod. That Tailer reads pod logs from the beginning
+// again (follow=true, no TailLines) and its chunk sequence resets to 0 —
+// but the old operator may have left chunks 0..K under the same prefix in
+// object storage. Their byte boundaries were flush-timing-dependent, so
+// new chunks 0..K′ almost certainly split the same log at different
+// positions, producing a mixed prefix with duplicates and interleaved
+// bytes when the API server serves the log by lex-listing the prefix.
+//
+// We resolve this by wiping kubetest-logs/<runID>/ BEFORE the new Tailer
+// starts. Fresh start, monotonic chunks. The alternative — resume from
+// seq K+1 — would require the Tailer to also skip already-flushed bytes
+// on the source side, and there is no way to correlate "MinIO chunk
+// boundary" to "pod stdout byte offset" cheaply. Kubelet log rotation
+// (§15.4) can lose bytes between the old operator's crash and the new
+// operator's start regardless; wipe-and-restart doesn't lose anything the
+// resume path would have kept.
+//
 // The Registry does NOT own the LogSource — production wires a
-// K8sLogSource, tests inject a fake. Same for the Uploader.
+// K8sLogSource, tests inject a fake. Same for the Uploader and Remover.
 type Registry struct {
 	mu       sync.Mutex
 	tailers  map[string]*Tailer
 	source   PodLogSource
 	uploader storage.Uploader
+	remover  storage.Remover
 	bucket   string
 
 	// TailerConfig is a template applied to every EnsureTailer call. RunID +
@@ -53,14 +76,25 @@ type PodLogSource interface {
 	Open(ctx context.Context, namespace, podName string) (io.ReadCloser, error)
 }
 
-// NewRegistry constructs an empty registry.
-func NewRegistry(source PodLogSource, uploader storage.Uploader, bucket string) *Registry {
+// NewRegistry constructs an empty registry. remover may be nil — the
+// restart-resume wipe is best-effort and a nil Remover simply skips it
+// (with the caveat documented on Registry).
+func NewRegistry(source PodLogSource, uploader storage.Uploader, remover storage.Remover, bucket string) *Registry {
 	return &Registry{
 		tailers:  map[string]*Tailer{},
 		source:   source,
 		uploader: uploader,
+		remover:  remover,
 		bucket:   bucket,
 	}
+}
+
+// LogPrefix returns the object-store prefix for a run's log chunks — the
+// path we wipe on restart-resume and the path the API server lists to
+// serve a historical log. Ends in "/" so listing this prefix never picks
+// up a lookalike sibling (e.g. run "abc-decoy" vs "abc").
+func LogPrefix(runID string) string {
+	return "kubetest-logs/" + runID + "/"
 }
 
 // ErrRegistryClosed is returned by EnsureTailer after Shutdown.
@@ -71,11 +105,17 @@ var ErrRegistryClosed = errors.New("logstream: registry closed")
 // map-lookups. Returns nil on success — callers that need the Tailer for
 // subscription (API server) use Get(runID) instead.
 //
+// On first creation for a given runID, wipes kubetest-logs/<runID>/ so a
+// restarted operator doesn't produce a mixed-boundary chunk prefix (see
+// package-level docstring). The wipe is best-effort: on Remover error we
+// log but continue — the tailer runs, some chunks may be duplicates, and
+// step 10's reader can still show live logs from the new stream.
+//
 // Because the controller calls this from Reconcile and Reconcile's ctx is
 // per-request, we DO NOT pass it as the tailer's parent — the tailer must
 // outlive the reconcile. We use context.Background() and rely on
 // StopTailer / Shutdown for the tailer's lifecycle.
-func (r *Registry) EnsureTailer(_ context.Context, runID, namespace, podName string) error {
+func (r *Registry) EnsureTailer(ctx context.Context, runID, namespace, podName string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -85,6 +125,20 @@ func (r *Registry) EnsureTailer(_ context.Context, runID, namespace, podName str
 
 	if _, ok := r.tailers[runID]; ok {
 		return nil
+	}
+
+	// Wipe any stale chunks left by a previous operator lifetime BEFORE
+	// starting the new tailer. Same-lifetime re-creation is impossible
+	// (map lookup above catches it), so a wipe here always targets crash-
+	// recovery leftovers, never in-progress writes.
+	if r.remover != nil && r.uploader != nil {
+		if err := r.remover.RemovePrefix(ctx, r.bucket, LogPrefix(runID)); err != nil {
+			// Log-and-continue: we've decided log durability is second to
+			// run durability. A failed wipe means the new tailer may
+			// produce a mixed prefix, but the run itself proceeds.
+			ctrlLog.Log.Info("logstream: RemovePrefix failed, continuing with fresh tailer",
+				"runID", runID, "error", err.Error())
+		}
 	}
 
 	cfg := r.TailerConfig

@@ -84,9 +84,10 @@ const (
 
 // LogChunkKey returns the object-store key for a given run + chunk sequence.
 // Exported so the API server can construct the same paths without importing
-// package internals.
+// package internals. Prefix comes from LogPrefix so restart-wipe and
+// chunk-write always target the same path.
 func LogChunkKey(runID string, seq uint64) string {
-	return fmt.Sprintf("kubetest-logs/%s/%08d.log", runID, seq)
+	return fmt.Sprintf("%s%08d.log", LogPrefix(runID), seq)
 }
 
 // Config is the Tailer constructor input. Zero fields pick defaults; RunID

@@ -53,6 +53,22 @@ type Downloader interface {
 	Get(ctx context.Context, bucket, key string) (io.ReadCloser, error)
 }
 
+// Remover deletes all objects under a key prefix. Used by the log-streaming
+// registry to wipe a run's stale chunk-prefix on operator restart before a
+// new tailer starts writing.
+//
+// Contract:
+//   - Empty prefix returns an error — callers must never bulk-delete a whole
+//     bucket by accident.
+//   - Missing prefix is NOT an error; RemovePrefix on an absent prefix is a
+//     no-op (idempotent restart).
+//   - Best-effort partial deletion: implementations SHOULD attempt to delete
+//     as many objects as possible before returning the first error, so a
+//     retry converges toward an empty prefix.
+type Remover interface {
+	RemovePrefix(ctx context.Context, bucket, prefix string) error
+}
+
 // ErrNotFound is the sentinel Downloader implementations return when the
 // requested key doesn't exist. errors.Is-friendly.
 var ErrNotFound = errors.New("storage: object not found")

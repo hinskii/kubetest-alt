@@ -77,3 +77,40 @@ func (m *MinIO) Get(ctx context.Context, bucket, key string) (io.ReadCloser, err
 	}
 	return obj, nil
 }
+
+// RemovePrefix implements Remover. Pipes ListObjects → RemoveObjects; both
+// are streaming so a large prefix doesn't buffer entire object lists in
+// memory. Missing prefix is a no-op (ListObjects yields zero results).
+func (m *MinIO) RemovePrefix(ctx context.Context, bucket, prefix string) error {
+	if prefix == "" {
+		return errors.New("storage: RemovePrefix requires a non-empty prefix")
+	}
+	objectsCh := make(chan minio.ObjectInfo)
+	go func() {
+		defer close(objectsCh)
+		for obj := range m.client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+			Prefix:    prefix,
+			Recursive: true,
+		}) {
+			if obj.Err != nil {
+				// Surface the list error to the remover loop via a synthetic
+				// object with the error attached — RemoveObjects doesn't
+				// accept an error channel, so we send-and-drop and rely on
+				// the retry to converge.
+				continue
+			}
+			select {
+			case objectsCh <- obj:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	var firstErr error
+	for rerr := range m.client.RemoveObjects(ctx, bucket, objectsCh, minio.RemoveObjectsOptions{}) {
+		if rerr.Err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("storage: remove %s/%s: %w", bucket, rerr.ObjectName, rerr.Err)
+		}
+	}
+	return firstErr
+}

@@ -22,6 +22,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -535,7 +537,7 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 	fr := newFakeReader()
 	src := &fakePodSource{reader: fr}
 	up := &captureUploader{}
-	reg := NewRegistry(src, up, "logs")
+	reg := NewRegistry(src, up, up, "logs")
 
 	ctx := t.Context()
 
@@ -589,7 +591,7 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 // R7 Registry Shutdown stops every tailer.
 func TestRegistry_ShutdownStopsAllTailers(t *testing.T) {
 	src := &fakePodSource{makeReader: newFakeReader}
-	reg := NewRegistry(src, nil, "")
+	reg := NewRegistry(src, nil, nil, "")
 
 	ctx := t.Context()
 	if err := reg.EnsureTailer(ctx, "run-A", "ns", "pod-A"); err != nil {
@@ -674,6 +676,154 @@ func TestUnsubscribe_ClosesWithReason(t *testing.T) {
 	<-tailer.Done()
 }
 
+// R-restart Restart-resume: operator crash left stale chunks under the run's
+// prefix. On EnsureTailer, the Registry wipes the prefix BEFORE the new
+// tailer runs, so the final MinIO layout is monotonically owned by the new
+// operator lifetime — no duplicates, no interleave when step 10 lists the
+// prefix in lex order.
+func TestRegistry_RestartResume_WipesStalePrefix(t *testing.T) {
+	fr := newFakeReader()
+	src := &fakePodSource{reader: fr}
+	up := &captureUploader{}
+	reg := NewRegistry(src, up, up, "logs")
+
+	// Simulate 3 stale chunks from the previous operator lifetime, plus a
+	// decoy under a lookalike sibling prefix that MUST survive the wipe.
+	up.preloadChunk(LogChunkKey("run-X", 0), []byte("OLD0"))
+	up.preloadChunk(LogChunkKey("run-X", 1), []byte("OLD1"))
+	up.preloadChunk(LogChunkKey("run-X", 2), []byte("OLD2"))
+	up.preloadChunk(LogPrefix("run-X-sibling")+"00000000.log", []byte("SIB"))
+
+	if err := reg.EnsureTailer(t.Context(), "run-X", "ns", "pod-X"); err != nil {
+		t.Fatalf("EnsureTailer: %v", err)
+	}
+	tailer := reg.Get("run-X")
+	<-tailer.Started()
+
+	// Wipe recorded BEFORE any Put — that's the ordering guarantee the
+	// package doc promises.
+	wipes := up.removedPrefixes()
+	if len(wipes) != 1 || wipes[0] != LogPrefix("run-X") {
+		t.Fatalf("expected exactly one wipe of %q, got %v", LogPrefix("run-X"), wipes)
+	}
+
+	// Drive the new tailer to completion.
+	gate := tailer.Subscribe()
+	fr.Push([]byte("NEW"))
+	for len(readAll(gate.Frames, 3)) < 3 {
+	}
+	_ = fr.Close()
+	reg.StopTailer("run-X")
+	// Drain the subscription so goleak passes.
+	for range gate.Frames {
+	}
+
+	// After the run, prefix contains ONLY the fresh chunk written by the
+	// new tailer + the sibling decoy. No OLD* bytes anywhere.
+	keys, bodies := up.snapshot()
+	for i, k := range keys {
+		if strings.HasPrefix(k, LogPrefix("run-X")) {
+			if !strings.Contains(string(bodies[i]), "NEW") {
+				t.Errorf("stale content survived wipe: key=%s body=%q", k, bodies[i])
+			}
+		}
+	}
+	// Sibling decoy preserved.
+	if !slices.Contains(keys, LogPrefix("run-X-sibling")+"00000000.log") {
+		t.Errorf("sibling prefix was wiped — RemovePrefix over-matched: %v", keys)
+	}
+}
+
+// R-restart-b Wipe failure does NOT prevent the tailer from starting: log
+// durability is second to run durability (§15.4 trade-off).
+func TestRegistry_RestartResume_WipeErrorIsNonFatal(t *testing.T) {
+	fr := newFakeReader()
+	src := &fakePodSource{reader: fr}
+	// A Remover that always fails.
+	badRemover := &failingRemover{err: errors.New("s3 timeout")}
+	up := &captureUploader{}
+	reg := NewRegistry(src, up, badRemover, "logs")
+
+	if err := reg.EnsureTailer(t.Context(), "run-Y", "ns", "pod-Y"); err != nil {
+		t.Fatalf("EnsureTailer must not fail on wipe error: %v", err)
+	}
+	if reg.Get("run-Y") == nil {
+		t.Fatalf("tailer must be created even when wipe fails")
+	}
+
+	// Cleanup: stop the tailer so goleak passes.
+	_ = fr.Close()
+	reg.StopTailer("run-Y")
+}
+
+// R-double-stop Two goroutines calling StopTailer for the same runID must
+// not race, panic, or spawn extra finalize flushes. sync.Once inside Tailer
+// covers this structurally; the test proves it under -race.
+func TestRegistry_ConcurrentDoubleStop(t *testing.T) {
+	fr := newFakeReader()
+	src := &fakePodSource{reader: fr}
+	up := &captureUploader{}
+	reg := NewRegistry(src, up, up, "logs")
+
+	if err := reg.EnsureTailer(t.Context(), "run-DS", "ns", "pod-DS"); err != nil {
+		t.Fatalf("EnsureTailer: %v", err)
+	}
+	tailer := reg.Get("run-DS")
+	<-tailer.Started()
+
+	// Publish some bytes so the tailer has a non-empty pending buffer to
+	// flush during finalize — makes "exactly one flush" a meaningful assertion.
+	gate := tailer.Subscribe()
+	fr.Push([]byte("BYE"))
+	for len(readAll(gate.Frames, 3)) < 3 {
+	}
+
+	// Two goroutines call StopTailer simultaneously.
+	var wg sync.WaitGroup
+	wg.Go(func() { reg.StopTailer("run-DS") })
+	wg.Go(func() { reg.StopTailer("run-DS") })
+	wg.Wait()
+
+	// Registry no longer tracks it, and exactly ONE final chunk landed
+	// (the "BYE" bytes) — a second finalize would have produced a second
+	// flush (empty, but +1 chunkSeq is visible via keys count).
+	if got := reg.Active(); len(got) != 0 {
+		t.Errorf("Active() = %v after double stop, want []", got)
+	}
+	keys, bodies := up.snapshot()
+	if len(keys) != 1 {
+		t.Fatalf("expected exactly 1 chunk after double stop, got %d: %v", len(keys), keys)
+	}
+	if string(bodies[0]) != "BYE" {
+		t.Errorf("chunk body = %q, want %q", bodies[0], "BYE")
+	}
+
+	// Drain the subscription so goleak passes.
+	for range gate.Frames {
+	}
+}
+
+// failingRemover is a storage.Remover that always returns the same error.
+type failingRemover struct{ err error }
+
+func (f *failingRemover) RemovePrefix(_ context.Context, _bucket, _prefix string) error {
+	return f.err
+}
+
+// readAll accumulates up to n bytes from ch, blocking on receive. Helper
+// for tests that need to gate on "at least N bytes have been published."
+func readAll(ch <-chan Frame, want int) []byte {
+	var out []byte
+	for len(out) < want {
+		f, ok := <-ch
+		if !ok {
+			return out
+		}
+		out = append(out, f.Data...)
+	}
+	return out
+}
+
 // R10 Reopen budget exhausted → tailer exits cleanly.
 func TestReopen_BudgetExhausted(t *testing.T) {
 	openErr := errors.New("open failed")
@@ -748,13 +898,15 @@ func TestLogChunkKey_Format(t *testing.T) {
 // Test helpers below this line — no test functions.
 // -----------------------------------------------------------------------------
 
-// captureUploader is a synchronous, in-memory Uploader that records every
-// Put call in the order it happened. Used by flush tests to assert chunk
-// keys and payloads.
+// captureUploader is a synchronous, in-memory Uploader + Remover that
+// records every Put/RemovePrefix call in the order it happened. Used by
+// flush and restart-resume tests to assert chunk keys, payloads, and
+// prefix-wipe ordering.
 type captureUploader struct {
-	mu     sync.Mutex
-	keys   []string
-	bodies [][]byte
+	mu           sync.Mutex
+	keys         []string
+	bodies       [][]byte
+	removedPrefs []string
 }
 
 func (c *captureUploader) Put(_ context.Context, _bucket, key string,
@@ -771,6 +923,26 @@ func (c *captureUploader) Put(_ context.Context, _bucket, key string,
 	return nil
 }
 
+// RemovePrefix implements storage.Remover. Drops every recorded key that
+// starts with prefix, and appends the prefix to removedPrefs for tests
+// that need to assert wipe ordering.
+func (c *captureUploader) RemovePrefix(_ context.Context, _bucket, prefix string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.removedPrefs = append(c.removedPrefs, prefix)
+	filteredKeys := c.keys[:0]
+	filteredBodies := c.bodies[:0]
+	for i, k := range c.keys {
+		if !strings.HasPrefix(k, prefix) {
+			filteredKeys = append(filteredKeys, k)
+			filteredBodies = append(filteredBodies, c.bodies[i])
+		}
+	}
+	c.keys = filteredKeys
+	c.bodies = filteredBodies
+	return nil
+}
+
 func (c *captureUploader) snapshot() ([]string, [][]byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -780,6 +952,22 @@ func (c *captureUploader) snapshot() ([]string, [][]byte) {
 		bodies[i] = append([]byte(nil), b...)
 	}
 	return keys, bodies
+}
+
+// preloadChunk simulates a chunk left over from a previous operator
+// lifetime — used by the restart-resume test.
+func (c *captureUploader) preloadChunk(key string, body []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.keys = append(c.keys, key)
+	c.bodies = append(c.bodies, append([]byte(nil), body...))
+}
+
+// removedPrefixes returns a copy of the wipe-history for assertion.
+func (c *captureUploader) removedPrefixes() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.removedPrefs...)
 }
 
 // fakePodSource is a PodLogSource that hands out a fake reader per Open.

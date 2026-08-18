@@ -322,7 +322,9 @@ func main() {
 					setupLog.Error(uerr, "Failed to init MinIO client for logs; log streaming disabled")
 				} else {
 					src := &logstream.K8sLogSource{Client: kubeClient}
-					logRegistryConcrete = logstream.NewRegistry(src, uploader, minioBucket)
+					// uploader is *storage.MinIO which also implements Remover —
+					// same client wipes the run's chunk-prefix on restart.
+					logRegistryConcrete = logstream.NewRegistry(src, uploader, uploader, minioBucket)
 					logRegistry = logRegistryConcrete
 					setupLog.Info("log streaming enabled", "bucket", minioBucket)
 				}
