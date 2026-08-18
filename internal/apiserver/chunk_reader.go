@@ -57,11 +57,24 @@ type chunkStream struct {
 	// PollInterval defaults to 1s if zero.
 	PollInterval time.Duration
 
-	// PollDeadline caps how long we wait for a NEW chunk to appear before
-	// declaring the stream complete. Prevents leaking a goroutine when the
-	// run terminated but we missed the "no more chunks coming" signal.
-	// Defaults to 5 minutes.
+	// PollDeadline is the LAST-RESORT idle timeout: how long we wait for a
+	// NEW chunk to appear before declaring the stream complete when
+	// IsTerminal is nil (or hasn't fired). Prevents leaking a goroutine
+	// when a run terminated but we missed every terminal signal. Defaults
+	// to 5 minutes. In the happy path (IsTerminal wired) this NEVER fires:
+	// the CR-phase check trips first and we exit cleanly within one
+	// PollInterval of the phase flip.
 	PollDeadline time.Duration
+
+	// IsTerminal, if set, is polled once per round (before the poll sleep)
+	// so a live→terminal transition on the CR side triggers a clean exit
+	// instead of waiting for PollDeadline. The stream ALWAYS does one
+	// final List+emit after IsTerminal returns true — the operator's
+	// finalize() flush can race the phase Update, so a chunk may land in
+	// MinIO after the CR is already terminal. Callback runs on the loop
+	// goroutine, so a blocking implementation blocks the reader (use a
+	// cached / short-timeout k8s Get).
+	IsTerminal func() bool
 }
 
 // stream iterates chunks and calls emit for each byte batch as it reads.
@@ -81,41 +94,67 @@ func (c *chunkStream) stream(ctx context.Context, emit func([]byte) error) error
 	prefix := logstream.LogPrefix(c.RunID)
 	sent := map[string]bool{} // keys we've already streamed
 	lastProgressAt := time.Now()
+	terminalSeen := false // set once by IsTerminal; triggers ONE final round
 
-	for {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+	drainOnce := func() (emitted bool, err error) {
 		keys, err := c.Lister.List(ctx, c.Bucket, prefix)
 		if err != nil {
-			return fmt.Errorf("list chunks: %w", err)
+			return false, fmt.Errorf("list chunks: %w", err)
 		}
-		emittedThisRound := false
 		for _, k := range keys {
 			if sent[k] {
 				continue
 			}
 			body, err := c.readChunk(ctx, k)
 			if err != nil {
-				return fmt.Errorf("read %s: %w", k, err)
+				return emitted, fmt.Errorf("read %s: %w", k, err)
 			}
 			if err := emit(body); err != nil {
 				if errors.Is(err, io.EOF) {
 					// Client disconnected — clean exit.
-					return nil
+					return emitted, io.EOF
 				}
-				return err
+				return emitted, err
 			}
 			sent[k] = true
-			emittedThisRound = true
+			emitted = true
+		}
+		return emitted, nil
+	}
+
+	for {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		emitted, err := drainOnce()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if emitted {
 			lastProgressAt = time.Now()
 		}
 
 		if !c.KeepPolling {
 			return nil
 		}
-		if !emittedThisRound && time.Since(lastProgressAt) > c.PollDeadline {
-			// Nothing new for a long time — assume run finished, exit.
+		if terminalSeen {
+			// We already did the "one final round after terminal" above —
+			// no more chunks are coming. Exit before the next poll sleep.
+			return nil
+		}
+		if c.IsTerminal != nil && c.IsTerminal() {
+			// Phase flipped to terminal. Loop once more so a chunk landing
+			// after the phase Update (operator's finalize() flush) doesn't
+			// get lost; then exit on the check above.
+			terminalSeen = true
+			continue
+		}
+		if !emitted && time.Since(lastProgressAt) > c.PollDeadline {
+			// Fallback: no CR-side phase signal and nothing new for a long
+			// time. Assume the run finished, exit.
 			return nil
 		}
 		select {

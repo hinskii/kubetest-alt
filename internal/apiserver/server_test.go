@@ -535,6 +535,84 @@ func TestLogs_LiveRun_StreamsNewChunksAsTheyAppear(t *testing.T) {
 	assert.Error(t, err, "server should close after PollDeadline")
 }
 
+// R-logs-terminal: live→terminal transition must close the WS cleanly and
+// stream any final chunks. Without this, a run that finished cleanly would
+// keep the WS open until PollDeadline (5 minutes) or the 2h handler cap.
+//
+// Timeline the test simulates:
+//  1. CR is Running; client dials; handler goes into live mode.
+//  2. Operator flushes chunk 0 → client reads "one".
+//  3. Operator flushes chunk 1 (final) AND flips CR phase to passed.
+//  4. Handler's IsTerminal fires on the next poll tick, does one final
+//     list pass, emits chunk 1, exits clean.
+//  5. Client's next Read gets a clean close (not a timeout).
+func TestLogs_LiveToTerminal_StreamsFinalChunksAndCloses(t *testing.T) {
+	sch := newTestScheme(t)
+	cr := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "flip-run", Namespace: "default"},
+		Status:     testsv1alpha1.TestRunStatus{Phase: "running"},
+	}
+	c := fake.NewClientBuilder().
+		WithScheme(sch).
+		WithObjects(cr).
+		WithStatusSubresource(cr).
+		Build()
+	uploader := storageFake()
+	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("flip-run", 0), "one")
+
+	s := &Server{
+		K8sClient:       c,
+		Namespace:       "default",
+		Downloader:      uploader,
+		Lister:          uploader,
+		LogsBucket:      "kubetest-logs",
+		LogPollInterval: 20 * time.Millisecond,
+		// Deliberately LONG so the test proves we close via IsTerminal, not
+		// via the fallback deadline. If IsTerminal didn't work, the test
+		// would hang here for 30s and t.Context() would cancel.
+		LogPollDeadline: 30 * time.Second,
+	}
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/runs/flip-run/logs"
+	conn, _, err := websocket.Dial(t.Context(), wsURL, nil)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+
+	// Read initial chunk.
+	_, data, err := conn.Read(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "one", string(data))
+
+	// Simulate the operator's terminal transition — final chunk lands
+	// FIRST (matches the real operator: StopTailer's finalize flushes the
+	// pending buffer before status Update), then CR phase flips.
+	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("flip-run", 1), "final")
+	patch := cr.DeepCopy()
+	patch.Status.Phase = testsv1alpha1.PhasePassed
+	require.NoError(t, c.Status().Update(t.Context(), patch))
+
+	// Client MUST get the final chunk (proves one-final-round-after-terminal
+	// works) — reading in a bounded time proves we didn't wait for
+	// PollDeadline.
+	readCtx, readCancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer readCancel()
+	_, data, err = conn.Read(readCtx)
+	require.NoError(t, err, "expected final chunk within 3s (IsTerminal fired)")
+	assert.Equal(t, "final", string(data))
+
+	// Next Read gets a clean WS close — NOT a timeout — because the
+	// handler exited via IsTerminal, not via poll-deadline expiry.
+	closeCtx, closeCancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer closeCancel()
+	_, _, err = conn.Read(closeCtx)
+	require.Error(t, err, "server must close after final round")
+	// If we exited via PollDeadline we'd be here after ~30s; ctx above caps
+	// at 3s so the test would fail-fast. TestMain's goleak also catches any
+	// leftover poll goroutine.
+}
+
 func TestLogs_ClientDisconnectMidStream_NoLeak(t *testing.T) {
 	// Client dials, reads one frame, then hangs up. Handler must notice
 	// (chunkStream.emit returns io.EOF via Write failure) and exit cleanly.

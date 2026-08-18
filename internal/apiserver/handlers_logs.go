@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -62,6 +63,31 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 		// NotFound is fine — archived run, still serve.
 	}
 
+	// isTerminal is checked once per poll round so a live→terminal transition
+	// on the CR closes the stream within one PollInterval of the phase flip,
+	// instead of waiting out PollDeadline (default 5 minutes). Returns true
+	// when the CR is gone OR its phase is terminal — either is a stop signal.
+	//
+	// Uses a bounded child context so a wedged API server can't stall the
+	// reader loop; failure to fetch phase returns false (better to keep
+	// polling than to close prematurely on a network flake).
+	isTerminal := func() bool {
+		if !keepPolling {
+			return true // archived-run path never sets IsTerminal, but be safe
+		}
+		checkCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		var cur testsv1alpha1.TestRun
+		if err := s.K8sClient.Get(checkCtx,
+			types.NamespacedName{Namespace: s.Namespace, Name: id}, &cur); err != nil {
+			if apierrors.IsNotFound(err) {
+				return true // CR gone → nothing more coming
+			}
+			return false // transient error — retry next round
+		}
+		return controller.IsTerminalPhase(cur.Status.Phase)
+	}
+
 	// Upgrade. Origin check: default-deny; production wires CORS via a
 	// reverse proxy, tests hit http://127.0.0.1 which the "insecure" mode
 	// below accepts.
@@ -87,6 +113,9 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 		KeepPolling:  keepPolling,
 		PollInterval: s.LogPollInterval,
 		PollDeadline: s.LogPollDeadline,
+	}
+	if keepPolling {
+		stream.IsTerminal = isTerminal
 	}
 	err = stream.stream(ctx, func(chunk []byte) error {
 		if err := conn.Write(ctx, websocket.MessageBinary, chunk); err != nil {
