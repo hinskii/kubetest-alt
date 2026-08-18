@@ -63,6 +63,15 @@ type TestRunReconciler struct {
 	// MinIO-backed implementation.
 	Results ResultReader
 
+	// LogRegistry starts/stops per-run log tailers as pods transition to
+	// Running and then to a terminal phase. Nil disables the log-streaming
+	// path entirely (backwards-compatible: existing tests don't need it and
+	// cmd/operator only wires it when --logs-enabled is set).
+	//
+	// Interface, not the concrete *logstream.Registry, so envtest can inject
+	// a lightweight recorder without a real k8s log source.
+	LogRegistry LogRegistry
+
 	// FallbackRequeue is a safety-net requeue for lost Job/Pod events; the
 	// primary trigger is Owns(Job) + Watches(Pod). Default 30s.
 	FallbackRequeue time.Duration
@@ -76,6 +85,19 @@ type TestRunReconciler struct {
 	// Now returns the current time. Overridable so tests get deterministic
 	// timestamps. Defaults to metav1.Now.
 	Now func() metav1.Time
+}
+
+// LogRegistry is the reconciler-facing surface of logstream.Registry. Kept
+// as an interface so envtest can inject a recorder — a real registry needs
+// a k8s LogSource that envtest doesn't provide.
+type LogRegistry interface {
+	// EnsureTailer starts a tailer for runID + pod, or no-ops if one already
+	// exists. Called on pod Running (may fire multiple times).
+	EnsureTailer(ctx context.Context, runID, namespace, podName string) error
+
+	// StopTailer stops and removes the tailer for runID. No-op if absent.
+	// Called on terminal transitions and finalize.
+	StopTailer(runID string)
 }
 
 // SetupWithManager registers the reconciler with the controller manager and
@@ -137,6 +159,7 @@ func (r *TestRunReconciler) mapPodToTestRun(_ context.Context, obj client.Object
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=tests,verbs=get;list;watch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
@@ -357,14 +380,27 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 		return r.terminalAndDeleteJob(ctx, run, phase, reason, msg, job)
 
 	case JobStillRunning:
-		if IsPodRunning(pod) && run.Status.Phase != testsv1alpha1.PhaseRunning {
-			run.Status.Phase = testsv1alpha1.PhaseRunning
-			if run.Status.StartedAt == nil {
-				now := r.Now()
-				run.Status.StartedAt = &now
+		if IsPodRunning(pod) {
+			// Start log tail on first Running observation. EnsureTailer is
+			// idempotent, so subsequent reconciles on the same running pod
+			// are cheap map-lookups. Failures here are logged but do NOT
+			// block the reconcile — losing live logs is preferable to
+			// stalling the run's lifecycle (§15.4 durability trade-off).
+			if r.LogRegistry != nil && pod != nil {
+				if err := r.LogRegistry.EnsureTailer(ctx, run.Name, pod.Namespace, pod.Name); err != nil {
+					log.FromContext(ctx).Error(err, "EnsureTailer failed",
+						"run", run.Name, "pod", pod.Name)
+				}
 			}
-			if err := r.Status().Update(ctx, run); err != nil {
-				return ctrl.Result{}, err
+			if run.Status.Phase != testsv1alpha1.PhaseRunning {
+				run.Status.Phase = testsv1alpha1.PhaseRunning
+				if run.Status.StartedAt == nil {
+					now := r.Now()
+					run.Status.StartedAt = &now
+				}
+				if err := r.Status().Update(ctx, run); err != nil {
+					return ctrl.Result{}, err
+				}
 			}
 		}
 		// Safety-net requeue in case we miss a Job/Pod event; the primary
@@ -378,11 +414,18 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 // The order matters: §15.3 requires persistence before cleanup so a mid-crash
 // leaves us in "terminal + orphan Job" (recoverable) rather than "still
 // running + Job gone" (which the orphan detector treats as an error).
+//
+// Also stops the log tailer BEFORE deleting the Job: StopTailer blocks on
+// final flush, so we guarantee the last chunk lands in MinIO before the
+// pod's logs disappear along with the Job.
 func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *testsv1alpha1.TestRun,
 	phase testsv1alpha1.Phase, reason, message string, job *batchv1.Job) (ctrl.Result, error) {
 
 	if _, err := r.transitionTerminal(ctx, run, phase, reason, message); err != nil {
 		return ctrl.Result{}, err
+	}
+	if r.LogRegistry != nil {
+		r.LogRegistry.StopTailer(run.Name)
 	}
 	if job != nil {
 		if err := deleteJobBackground(ctx, r.Client, job); err != nil {
@@ -512,11 +555,17 @@ func (r *TestRunReconciler) findPodForJob(ctx context.Context, job *batchv1.Job)
 	return newest, nil
 }
 
-// finalize handles the "TestRun is being deleted" path: delete owned Job then
-// remove the finalizer so k8s can reap the TestRun.
+// finalize handles the "TestRun is being deleted" path: stop the tailer,
+// delete owned Job, then remove the finalizer so k8s can reap the TestRun.
+// Stopping the tailer before deleting the Job flushes the final log chunk;
+// the finalizer path is the correct hook for "user deleted this while
+// running" per §15.5.
 func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.TestRun) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(run, FinalizerName) {
 		return ctrl.Result{}, nil
+	}
+	if r.LogRegistry != nil {
+		r.LogRegistry.StopTailer(run.Name)
 	}
 	var job batchv1.Job
 	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &job); err == nil {

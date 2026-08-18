@@ -62,7 +62,69 @@ var (
 
 	// fakeResults lets each test preload the wrapper's verdict per run ID.
 	fakeResults *FakeResultReader
+
+	// fakeLogRegistry records EnsureTailer/StopTailer invocations so tests
+	// can assert the reconciler's lifecycle hooks fire at the right time.
+	// See TestReconcile_LogRegistry_LifecycleHooks.
+	fakeLogRegistry *RecordingLogRegistry
 )
+
+// RecordingLogRegistry captures LogRegistry calls in order. It's the
+// controller-facing analog of a testify mock — deliberately hand-rolled so
+// tests can just read a slice.
+type RecordingLogRegistry struct {
+	mu    sync.Mutex
+	calls []LogRegistryCall
+}
+
+// LogRegistryCall is one recorded invocation. Kind is either "ensure" or
+// "stop".
+type LogRegistryCall struct {
+	Kind      string // "ensure" | "stop"
+	RunID     string
+	Namespace string
+	PodName   string
+}
+
+func (r *RecordingLogRegistry) EnsureTailer(_ context.Context, runID, ns, pod string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, LogRegistryCall{Kind: "ensure", RunID: runID, Namespace: ns, PodName: pod})
+	return nil
+}
+
+func (r *RecordingLogRegistry) StopTailer(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, LogRegistryCall{Kind: "stop", RunID: runID})
+}
+
+func (r *RecordingLogRegistry) Snapshot() []LogRegistryCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]LogRegistryCall, len(r.calls))
+	copy(out, r.calls)
+	return out
+}
+
+func (r *RecordingLogRegistry) Reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = nil
+}
+
+// CallsForRun returns calls filtered to a specific runID.
+func (r *RecordingLogRegistry) CallsForRun(runID string) []LogRegistryCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []LogRegistryCall
+	for _, c := range r.calls {
+		if c.RunID == runID {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // FakeResultReader is the ResultReader used across envtest tests. Concurrent-
 // safe because envtest reconciles run on manager goroutines.
@@ -188,11 +250,13 @@ func runTests(m *testing.M) (int, error) {
 	}
 
 	fakeResults = newFakeResultReader()
+	fakeLogRegistry = &RecordingLogRegistry{}
 	real := &TestRunReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compiler.Options{ContentFetcherImage: "test/content-fetcher:v0"},
 		Results:      fakeResults,
+		LogRegistry:  fakeLogRegistry,
 		// Short intervals for tests — production defaults are 30s / 10s.
 		FallbackRequeue:         500 * time.Millisecond,
 		ConcurrencyWaitInterval: 250 * time.Millisecond,

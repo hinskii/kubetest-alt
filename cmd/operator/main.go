@@ -28,6 +28,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -39,6 +40,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/controller"
+	"github.com/hinskii/kubetest-alt/internal/logstream"
 	webhookv1alpha1 "github.com/hinskii/kubetest-alt/internal/webhook/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 	// +kubebuilder:scaffold:imports
@@ -157,6 +159,15 @@ func main() {
 			"Alternatively set via env $MINIO_ACCESS_KEY.")
 	flag.StringVar(&minioSecretKey, "minio-secret-key", "",
 		"Secret key for the operator's MinIO client. Or $MINIO_SECRET_KEY.")
+
+	// Log-streaming (step 08). When enabled, the operator opens a follow=true
+	// PodLogs stream for every Running pod, fans out to any subscribers, and
+	// flushes chunk-objects to the MinIO bucket. Disabled by default because
+	// it requires pods/log RBAC.
+	var logsEnabled bool
+	flag.BoolVar(&logsEnabled, "logs-enabled", false,
+		"Tail pod logs, fan out to subscribers, and flush chunk-objects to MinIO. "+
+			"Requires MinIO to be configured (--minio-endpoint) and RBAC for pods/log.")
 
 	opts := zap.Options{
 		Development: true,
@@ -285,7 +296,41 @@ func main() {
 		metricsServerOptions.KeyName = metricsCertKey
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restCfg := ctrl.GetConfigOrDie()
+
+	// Log-streaming registry. Wired only when --logs-enabled is set; the
+	// reconciler treats a nil LogRegistry as "logs disabled" and never calls
+	// into it. We also need MinIO up — chunk flushes go there.
+	var logRegistry controller.LogRegistry
+	var logRegistryConcrete *logstream.Registry
+	if logsEnabled {
+		if minioEndpoint == "" {
+			setupLog.Info("WARNING: --logs-enabled requires --minio-endpoint; log streaming disabled")
+		} else {
+			kubeClient, err := kubernetes.NewForConfig(restCfg)
+			if err != nil {
+				setupLog.Error(err, "Failed to build kubernetes client for log source; log streaming disabled")
+			} else {
+				uploader, uerr := storage.NewMinIO(storage.Config{
+					Endpoint:  minioEndpoint,
+					Bucket:    minioBucket,
+					UseSSL:    minioUseSSL,
+					AccessKey: minioAccessKey,
+					SecretKey: minioSecretKey,
+				})
+				if uerr != nil {
+					setupLog.Error(uerr, "Failed to init MinIO client for logs; log streaming disabled")
+				} else {
+					src := &logstream.K8sLogSource{Client: kubeClient}
+					logRegistryConcrete = logstream.NewRegistry(src, uploader, minioBucket)
+					logRegistry = logRegistryConcrete
+					setupLog.Info("log streaming enabled", "bucket", minioBucket)
+				}
+			}
+		}
+	}
+
+	mgr, err := ctrl.NewManager(restCfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsServerOptions,
 		WebhookServer:          webhookServer,
@@ -329,6 +374,7 @@ func main() {
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compilerOpts,
 		Results:      resultReader, // step 07: real MinIO reader when configured
+		LogRegistry:  logRegistry,  // step 08: nil when --logs-enabled=false
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
 		os.Exit(1)
@@ -348,5 +394,10 @@ func main() {
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
+	}
+	// Manager exited — flush remaining tailers so shutdown doesn't leak
+	// goroutines and the last chunks land in MinIO.
+	if logRegistryConcrete != nil {
+		logRegistryConcrete.Shutdown()
 	}
 }
