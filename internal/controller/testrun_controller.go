@@ -100,12 +100,23 @@ type TestRunReconciler struct {
 	// timestamps. Defaults to metav1.Now.
 	Now func() metav1.Time
 
-	// persistedRuns dedupes SaveFinished calls per TestRun UID. Populated
-	// on successful save; consulted on every reconcile-of-terminal to skip
+	// persistedRuns dedupes SaveFinished calls per TestRun. Populated on
+	// successful save; consulted on every reconcile-of-terminal to skip
 	// unnecessary DB traffic (Job GC / status subresource updates fire
 	// reconciles even after the CR is terminal). Cleared implicitly on
 	// operator restart — subsequent re-persist is a no-op idempotent upsert.
-	persistedRuns sync.Map
+	//
+	// Key is types.NamespacedName, NOT UID, for two reasons:
+	//  1. On CR NotFound the reconciler only knows name+namespace, not UID
+	//     — so a UID-keyed map couldn't self-clean when a CR is deleted
+	//     without our finalize path firing (finalizer force-stripped, or
+	//     bug elsewhere). Name-keyed map cleans up on every NotFound seen.
+	//  2. Recreation collisions are semantically fine: a new TestRun with
+	//     the same name gets a new UID; when it reaches terminal, its own
+	//     persistFinished call overwrites the entry via .Store. The map's
+	//     job is "have we written THIS lifetime's current row?" — DB row
+	//     PK is still UID, so no cross-lifetime confusion in Postgres.
+	persistedRuns sync.Map // types.NamespacedName → struct{}
 }
 
 // LogRegistry is the reconciler-facing surface of logstream.Registry. Kept
@@ -199,7 +210,17 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	var run testsv1alpha1.TestRun
 	if err := r.Get(ctx, req.NamespacedName, &run); err != nil {
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		if apierrors.IsNotFound(err) {
+			// CR is gone. Drop any persistedRuns entry so the map stays
+			// bounded on a long-lived operator. Covers the edge cases
+			// where finalize() didn't run (finalizer force-stripped,
+			// external eviction) — the finalizer normally guarantees
+			// cleanup, but this belt-and-suspenders keeps growth bounded
+			// against operator lifetime instead of finalizer discipline.
+			r.persistedRuns.Delete(req.NamespacedName)
+			return ctrl.Result{}, nil
+		}
+		return ctrl.Result{}, err
 	}
 
 	// Deletion path — always runs, terminal or not.
@@ -475,14 +496,16 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 }
 
 // persistFinished writes the (terminal) TestRun to the run-history store,
-// once per UID per operator lifetime. Errors are logged but never returned:
-// the plan (§step-09) makes run history strictly secondary to run correctness.
-// Retry on subsequent reconciles until success, then dedupe via persistedRuns.
+// once per NamespacedName per operator lifetime. Errors are logged but never
+// returned: the plan (§step-09) makes run history strictly secondary to run
+// correctness. Retry on subsequent reconciles until success, then dedupe
+// via persistedRuns. See the field docstring for why the key isn't UID.
 func (r *TestRunReconciler) persistFinished(ctx context.Context, run *testsv1alpha1.TestRun) {
 	if r.RunStore == nil || run == nil || run.UID == "" {
 		return
 	}
-	if _, done := r.persistedRuns.Load(run.UID); done {
+	key := types.NamespacedName{Namespace: run.Namespace, Name: run.Name}
+	if _, done := r.persistedRuns.Load(key); done {
 		return
 	}
 	if err := r.RunStore.SaveFinished(ctx, run); err != nil {
@@ -490,7 +513,7 @@ func (r *TestRunReconciler) persistFinished(ctx context.Context, run *testsv1alp
 			"run", run.Name, "uid", run.UID)
 		return
 	}
-	r.persistedRuns.Store(run.UID, struct{}{})
+	r.persistedRuns.Store(key, struct{}{})
 }
 
 // deleteJobBackground deletes a Job with Background propagation so its pods
@@ -624,10 +647,11 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(run.Name)
 	}
-	// Drop the persisted-set entry so a future TestRun with the same UID
-	// (impossible in practice for k8s UUIDs, but cheap safety) is treated
-	// as fresh. Also bounds the map from growing forever as runs are deleted.
-	r.persistedRuns.Delete(run.UID)
+	// Drop the persisted-set entry so a future TestRun with the same name
+	// starts fresh, and the map stays bounded as runs are deleted. Reconcile's
+	// NotFound handler is the primary bound-guarantee; this covers the
+	// normal delete path so we don't wait for an eventual NotFound observation.
+	r.persistedRuns.Delete(types.NamespacedName{Namespace: run.Namespace, Name: run.Name})
 	var job batchv1.Job
 	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &job); err == nil {
 		if err := deleteJobBackground(ctx, r.Client, &job); err != nil {

@@ -67,7 +67,38 @@ test: manifests generate fmt vet setup-envtest ## Run tests with -race (no Docke
 .PHONY: test-integration
 test-integration: manifests generate fmt vet setup-envtest ## Run integration tests (requires Docker: testcontainers-go).
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test -tags integration -race -timeout 5m $$(go list ./... | grep -v /e2e)
+		go test -tags integration -race -timeout 5m $$(go list ./... | grep -v /e2e) -coverprofile cover.integration.out
+
+# COVERAGE_PKGS_INTEGRATION covers packages whose non-trivial code paths
+# only exercise under the `integration` build tag (real Postgres for
+# internal/store). Same 80 floor the plan sets for core-logic packages —
+# split from the default gate so `make test` stays Docker-free.
+COVERAGE_PKGS_INTEGRATION ?= internal/store:80
+
+.PHONY: test-coverage-integration
+test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION floors on integration test coverage.
+	@if [ -z "$(COVERAGE_PKGS_INTEGRATION)" ]; then \
+		echo "test-coverage-integration: COVERAGE_PKGS_INTEGRATION is empty."; \
+		exit 0; \
+	fi; \
+	fail=0; \
+	for entry in $(COVERAGE_PKGS_INTEGRATION); do \
+		pkg=$${entry%%:*}; \
+		min=$${entry##*:}; \
+		if [ "$$min" = "$$entry" ]; then min="$(COVERAGE_MIN)"; fi; \
+		pct=$$(awk -v p="$$pkg" ' \
+			NR == 1 { next } \
+			$$1 ~ p { total += $$2; if ($$3 > 0) covered += $$2 } \
+			END { if (total > 0) printf "%.1f", 100.0 * covered / total; else print "NA" }' \
+			cover.integration.out); \
+		if [ "$$pct" = "NA" ]; then \
+			echo "test-coverage-integration: no coverage data for $$pkg"; fail=1; continue; \
+		fi; \
+		awk -v pct="$$pct" -v min="$$min" 'BEGIN { exit !(pct+0 >= min+0) }' \
+			&& echo "test-coverage-integration: $$pkg $$pct%% >= $$min%%" \
+			|| { echo "test-coverage-integration: $$pkg $$pct%% < $$min%%"; fail=1; }; \
+	done; \
+	exit $$fail
 
 # COVERAGE_PKGS lists packages that must meet the coverage bar. Entries take
 # the form `path` (uses COVERAGE_MIN as the floor) or `path:min` (per-package
@@ -75,13 +106,13 @@ test-integration: manifests generate fmt vet setup-envtest ## Run integration te
 # some inherent fs-error branches that are impractical to trigger without
 # fs mocks — 80 matches the plan/README.md convention for core-logic packages.
 #
-# internal/store is set to 40 because postgres.go / migrations.go can only
-# be exercised via the `integration` build tag (real Postgres via
-# testcontainers-go), which `make test` deliberately excludes to keep the
-# default gate Docker-free (§step-09 acceptance). Pure-function coverage
-# (partition math, row mapping) sits well above the gate; DB paths get
-# exhaustive coverage under `make test-integration`.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/store:40
+# internal/store is enforced under `make test-coverage-integration` at 80
+# (plan-mandated core-logic bar), NOT here — postgres.go / migrations.go
+# require the `integration` build tag + real Postgres via testcontainers-go,
+# which the default `make test` deliberately excludes to stay Docker-free
+# (§step-09 acceptance). Splitting keeps two invariants intact: default gate
+# has no Docker dep, and store still meets the same 80% bar the plan sets.
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
