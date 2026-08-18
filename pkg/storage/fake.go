@@ -21,9 +21,11 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Fake is an in-memory Uploader + Downloader for tests. Concurrent-safe
@@ -48,11 +50,15 @@ type Fake struct {
 	// RemoveErrors mirrors PutErrors for RemovePrefix.
 	RemoveErrors []error
 
-	// PutCalls / GetCalls / RemoveCalls count invocations (including failed
-	// ones) for tests that need to assert retry counts.
-	PutCalls    int
-	GetCalls    int
-	RemoveCalls int
+	// PresignErrors mirrors PutErrors for PresignGetURL.
+	PresignErrors []error
+
+	// PutCalls / GetCalls / RemoveCalls / PresignCalls count invocations
+	// (including failed ones) for tests that need to assert retry counts.
+	PutCalls     int
+	GetCalls     int
+	RemoveCalls  int
+	PresignCalls int
 }
 
 // NewFake builds an empty Fake ready for use.
@@ -141,6 +147,51 @@ func (f *Fake) Reset() {
 	f.GetCalls = 0
 	f.RemoveErrors = nil
 	f.RemoveCalls = 0
+	f.PresignErrors = nil
+	f.PresignCalls = 0
+}
+
+// List implements Lister. Returns keys under bucket/prefix, sorted
+// lexicographically. Empty prefix is rejected — the interface contract
+// forbids bucket-wide listing.
+func (f *Fake) List(_ context.Context, bucket, prefix string) ([]string, error) {
+	if prefix == "" {
+		return nil, fmt.Errorf("fake: List requires a non-empty prefix")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	fullPrefix := fakeKey(bucket, prefix)
+	prefixLen := len(bucket + "/")
+	var out []string
+	for k := range f.objects {
+		if strings.HasPrefix(k, fullPrefix) {
+			out = append(out, k[prefixLen:]) // strip "<bucket>/" from key
+		}
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// PresignGetURL implements Presigner. Returns a deterministic fake URL that
+// encodes bucket/key/expiry so tests can assert on shape without a real
+// signing algorithm.
+func (f *Fake) PresignGetURL(_ context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	if expiry <= 0 {
+		return "", fmt.Errorf("fake: PresignGetURL requires positive expiry")
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.PresignCalls++
+	if len(f.PresignErrors) > 0 {
+		err := f.PresignErrors[0]
+		f.PresignErrors = f.PresignErrors[1:]
+		if err != nil {
+			return "", err
+		}
+	}
+	q := url.Values{}
+	q.Set("expires", fmt.Sprintf("%d", int64(expiry.Seconds())))
+	return fmt.Sprintf("fake://%s/%s?%s", bucket, key, q.Encode()), nil
 }
 
 // RemovePrefix implements Remover. Deletes every stored key that starts with

@@ -61,6 +61,12 @@ linters:
       - linters:
           - goconst
         path: _test\.go$
+      # OpenAPI spec is a data DSL — every "get"/"summary"/"responses" is
+      # a required JSON key, not a candidate for extraction into a constant.
+      # Splitting them out makes the spec's structure unreadable.
+      - linters:
+          - goconst
+        path: internal/apiserver/openapi\.go$
     paths:
       - third_party$
       - builtin$

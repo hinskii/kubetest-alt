@@ -22,6 +22,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,4 +124,51 @@ func TestFake_RemovePrefix_ErrorQueue(t *testing.T) {
 	require.EqualError(t, err, "boom")
 	// Next call succeeds (queue drained).
 	require.NoError(t, f.RemovePrefix(context.Background(), "logs", "kubetest-logs/run/"))
+}
+
+func TestFake_List_ReturnsSortedKeysUnderPrefix(t *testing.T) {
+	f := NewFake()
+	ctx := context.Background()
+	_ = f.Put(ctx, "b", "kubetest-logs/run-A/00000002.log", strings.NewReader("c2"), 2, "")
+	_ = f.Put(ctx, "b", "kubetest-logs/run-A/00000000.log", strings.NewReader("c0"), 2, "")
+	_ = f.Put(ctx, "b", "kubetest-logs/run-A/00000001.log", strings.NewReader("c1"), 2, "")
+	_ = f.Put(ctx, "b", "kubetest-logs/run-B/00000000.log", strings.NewReader("bx"), 2, "")
+
+	keys, err := f.List(ctx, "b", "kubetest-logs/run-A/")
+	require.NoError(t, err)
+	assert.Equal(t, []string{
+		"kubetest-logs/run-A/00000000.log",
+		"kubetest-logs/run-A/00000001.log",
+		"kubetest-logs/run-A/00000002.log",
+	}, keys)
+}
+
+func TestFake_List_EmptyPrefixRejected(t *testing.T) {
+	f := NewFake()
+	_, err := f.List(context.Background(), "b", "")
+	require.Error(t, err)
+}
+
+func TestFake_PresignGetURL_EncodesExpiry(t *testing.T) {
+	f := NewFake()
+	u, err := f.PresignGetURL(context.Background(), "artifacts", "run-1/results/junit.xml", 5*time.Minute)
+	require.NoError(t, err)
+	assert.Contains(t, u, "fake://artifacts/run-1/results/junit.xml")
+	assert.Contains(t, u, "expires=300")
+	assert.Equal(t, 1, f.PresignCalls)
+}
+
+func TestFake_PresignGetURL_ZeroExpiryRejected(t *testing.T) {
+	f := NewFake()
+	_, err := f.PresignGetURL(context.Background(), "b", "k", 0)
+	require.Error(t, err)
+}
+
+func TestFake_PresignGetURL_ErrorQueue(t *testing.T) {
+	f := NewFake()
+	f.PresignErrors = []error{errors.New("no creds")}
+	_, err := f.PresignGetURL(context.Background(), "b", "k", time.Minute)
+	require.EqualError(t, err, "no creds")
+	_, err = f.PresignGetURL(context.Background(), "b", "k", time.Minute)
+	require.NoError(t, err)
 }

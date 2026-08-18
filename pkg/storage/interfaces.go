@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
 
 // Uploader writes objects. The wrapper's scraper uses this.
@@ -67,6 +68,36 @@ type Downloader interface {
 //     retry converges toward an empty prefix.
 type Remover interface {
 	RemovePrefix(ctx context.Context, bucket, prefix string) error
+}
+
+// Lister enumerates keys under a prefix. The API server (step 10) uses it
+// to page through log chunks (kubetest-logs/<runID>/<8d>.log) and artifact
+// listings without pulling every object body first.
+//
+// Contract:
+//   - Missing prefix returns an empty slice + nil error.
+//   - Empty prefix is allowed but implementations SHOULD refuse (caller
+//     almost never wants a bucket-wide list). Real impls cap results and
+//     return an error on unbounded lists.
+//   - Keys are returned sorted lexicographically — the log-chunk naming
+//     scheme (8-digit zero-padded seq) depends on this so listing order
+//     reproduces chronological order.
+type Lister interface {
+	List(ctx context.Context, bucket, prefix string) ([]string, error)
+}
+
+// Presigner issues time-bounded pre-signed URLs. The API server (step 10)
+// returns these to browsers so artifact downloads go direct to MinIO
+// without proxying bytes through the operator.
+//
+// Contract:
+//   - expiry must be positive; implementations return an error on 0/negative.
+//   - The URL is opaque — callers MUST NOT append query params.
+//   - Presigning does NOT check object existence; a URL for a missing key
+//     works fine and yields 404 at download time. Caller decides whether
+//     to Stat first.
+type Presigner interface {
+	PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error)
 }
 
 // ErrNotFound is the sentinel Downloader implementations return when the

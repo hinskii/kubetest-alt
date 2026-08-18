@@ -21,6 +21,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"slices"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -76,6 +79,39 @@ func (m *MinIO) Get(ctx context.Context, bucket, key string) (io.ReadCloser, err
 		return nil, fmt.Errorf("storage: stat %s/%s: %w", bucket, key, err)
 	}
 	return obj, nil
+}
+
+// List implements Lister. Streams ListObjects → sorted []string. Bounded by
+// the caller: pass a specific prefix (never "").
+func (m *MinIO) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+	if prefix == "" {
+		return nil, errors.New("storage: List requires a non-empty prefix")
+	}
+	var out []string
+	for obj := range m.client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if obj.Err != nil {
+			return nil, fmt.Errorf("storage: list %s/%s: %w", bucket, prefix, obj.Err)
+		}
+		out = append(out, obj.Key)
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+// PresignGetURL implements Presigner. Delegates to minio-go's
+// PresignedGetObject; the returned URL is opaque and self-contained.
+func (m *MinIO) PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+	if expiry <= 0 {
+		return "", errors.New("storage: PresignGetURL requires positive expiry")
+	}
+	u, err := m.client.PresignedGetObject(ctx, bucket, key, expiry, url.Values{})
+	if err != nil {
+		return "", fmt.Errorf("storage: presign %s/%s: %w", bucket, key, err)
+	}
+	return u.String(), nil
 }
 
 // RemovePrefix implements Remover. Pipes ListObjects → RemoveObjects; both

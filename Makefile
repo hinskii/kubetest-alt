@@ -59,8 +59,25 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: openapi
+openapi: ## Regenerate openapi/openapi.json from internal/apiserver.OpenAPISpec.
+	go run ./cmd/gen-openapi openapi/openapi.json
+
+.PHONY: openapi-check
+openapi-check: ## Zero-diff gate: regenerate the spec into a tmpfile and diff against committed.
+	@tmp=$$(mktemp); \
+	go run ./cmd/gen-openapi $$tmp; \
+	if ! diff -q $$tmp openapi/openapi.json >/dev/null; then \
+		echo "openapi-check: openapi/openapi.json is out of date — run 'make openapi'"; \
+		diff -u openapi/openapi.json $$tmp | head -40; \
+		rm -f $$tmp; \
+		exit 1; \
+	fi; \
+	rm -f $$tmp; \
+	echo "openapi-check: openapi/openapi.json is in sync with code"
+
 .PHONY: test
-test: manifests generate fmt vet setup-envtest ## Run tests with -race (no Docker).
+test: manifests generate fmt vet openapi-check setup-envtest ## Run tests with -race (no Docker).
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -race $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
@@ -112,7 +129,7 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # which the default `make test` deliberately excludes to stay Docker-free
 # (§step-09 acceptance). Splitting keeps two invariants intact: default gate
 # has no Docker dep, and store still meets the same 80% bar the plan sets.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
