@@ -136,7 +136,17 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # cover without introducing a wall-clock dependency. The floor is a
 # regression guard on the LOGIC, not a completeness target — dropping below
 # 65 means someone deleted a Tick/evaluate test, which SHOULD alarm.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65
+#
+# pkg/expr is the step-13 templating engine — the injection-safety guarantee
+# lives here, so the 90 floor mirrors the compiler's. Any drop is a red flag.
+#
+# internal/resolver is the templates + config resolver on top of pkg/expr.
+# Floored at 75 (not 90): every merge-helper's "field-set → replace" and
+# "field-unset → keep template" branch is a separate arm, and exhaustively
+# covering the cartesian product of "which template field set" × "which
+# Test field set" runs into diminishing returns. The 75 floor covers the
+# happy path + all merge branches at least once + every error class.
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage

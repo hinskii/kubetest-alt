@@ -426,6 +426,13 @@ func main() {
 		Results:      resultReader, // step 07: real MinIO reader when configured
 		LogRegistry:  logRegistry,  // step 08: nil when --logs-enabled=false
 		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
+		// Step 13: template resolution. Store reads TestTemplates from the
+		// manager cache; ResolverEnv is intentionally empty by default —
+		// the operator does NOT project os.Environ() into `{{ env.* }}`
+		// (would leak operator-pod secrets). Populate via a future
+		// --resolver-env flag when a use case appears.
+		TemplateStore: &controller.ClientTemplateStore{Client: mgr.GetClient()},
+		ResolverEnv:   nil,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
 		os.Exit(1)

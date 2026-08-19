@@ -37,6 +37,13 @@ const (
 	ReasonJobDeadline        = "JobActiveDeadlineExceeded"
 	ReasonContentFetchFailed = "ContentFetchFailed"
 
+	// ReasonResolveFailed is set on TestRun.status.message when template
+	// resolution, config coercion, expression eval, or post-resolution
+	// validation fails. Step 13 introduced this because those checks
+	// happen in the controller (cross-object lookup + template resolution)
+	// rather than the webhook.
+	ReasonResolveFailed = "ResolveFailed"
+
 	// k8sReasonDeadlineExceeded is the string batch/v1 sets on JobCondition
 	// when activeDeadlineSeconds fires. Kept as an unexported const so goconst
 	// doesn't complain about the literal appearing on the reader-side too.

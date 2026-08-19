@@ -42,13 +42,28 @@ func baseValidSpec() testsv1alpha1.TestSpec {
 }
 
 // TestValidateTest_ImageRequired: the workflows model has no built-in tool
-// images; every Test must supply spec.container.image.
+// images; a Test WITHOUT spec.use must supply spec.container.image directly.
 func TestValidateTest_ImageRequired(t *testing.T) {
 	spec := baseValidSpec()
 	spec.Container.Image = ""
 	err := validateTest(&spec)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "spec.container.image is required")
+}
+
+// TestValidateTest_ImageOptional_WhenSpecUse: step 13 — a Test that
+// references a TestTemplate via spec.use may leave image empty; the
+// template may supply it. Final validation happens in the controller
+// post-resolution.
+func TestValidateTest_ImageOptional_WhenSpecUse(t *testing.T) {
+	spec := baseValidSpec()
+	spec.Container.Image = ""
+	spec.Container.Command = nil
+	spec.Container.Args = nil
+	spec.Use = []string{"my-k6-template"}
+	err := validateTest(&spec)
+	assert.NoError(t, err,
+		"webhook must permit missing image/command when spec.use is non-empty; controller re-validates post-resolution")
 }
 
 // TestValidateTest_CommandOrArgsRequired: at least one of command / args

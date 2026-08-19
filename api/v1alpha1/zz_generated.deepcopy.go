@@ -719,6 +719,11 @@ func (in *TestSpec) DeepCopyInto(out *TestSpec) {
 	*out = *in
 	in.Content.DeepCopyInto(&out.Content)
 	in.Container.DeepCopyInto(&out.Container)
+	if in.Use != nil {
+		in, out := &in.Use, &out.Use
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Pod != nil {
 		in, out := &in.Pod, &out.Pod
 		*out = new(PodConfig)

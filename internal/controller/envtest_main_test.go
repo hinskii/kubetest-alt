@@ -351,6 +351,9 @@ func runTests(m *testing.M) (int, error) {
 		Results:      fakeResults,
 		LogRegistry:  fakeLogRegistry,
 		RunStore:     fakeRunStore,
+		// Step 13: template store backed by the envtest client so tests
+		// that put TestTemplate CRs in the api server resolve them.
+		TemplateStore: &ClientTemplateStore{Client: mgr.GetClient()},
 		// Short intervals for tests — production defaults are 30s / 10s.
 		FallbackRequeue:         500 * time.Millisecond,
 		ConcurrencyWaitInterval: 250 * time.Millisecond,

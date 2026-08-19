@@ -46,6 +46,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 )
 
 // TestRunReconciler owns the TestRun lifecycle: setup → snapshot + concurrency
@@ -85,6 +86,18 @@ type TestRunReconciler struct {
 	// but the reconciler enters this code path again after fallback requeue
 	// so we still get a retry — the RunStore's UID upsert keeps it idempotent).
 	RunStore RunStorePersister
+
+	// TemplateStore resolves spec.use[] references to TestTemplate CRs.
+	// Nil disables template resolution (spec.use is treated as an error);
+	// production wires a client-backed store (see NewClientTemplateStore).
+	//
+	// Kept as an interface so tests can inject an in-memory MapStore.
+	TemplateStore resolver.TemplateStore
+
+	// ResolverEnv is the map projected to `{{ env.X }}` during expression
+	// evaluation. Nil is equivalent to "empty env" — no OS env leaks in.
+	// cmd/operator wires the operator-curated subset it wants to expose.
+	ResolverEnv map[string]string
 
 	// FallbackRequeue is a safety-net requeue for lost Job/Pod events; the
 	// primary trigger is Owns(Job) + Watches(Pod). Default 30s.
@@ -276,16 +289,39 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		return ctrl.Result{}, err
 	}
 
-	if err := ValidateConfigKeys(run.Spec.Config, test.Spec.Config); err != nil {
+	// Config-keys validation runs AFTER template resolution because a
+	// template may declare `spec.config` entries the Test itself doesn't
+	// mention (that's the whole point of shared templates). But we still
+	// want to surface an unknown-key error with reason=InvalidConfig
+	// rather than ResolveFailed — those are two different classes of
+	// bug (user typo vs. missing template). To keep the reasons distinct
+	// we validate keys against the RESOLVED spec.config right after
+	// resolveSpec succeeds.
+
+	// Resolve templates + config + expressions BEFORE concurrency checks:
+	// a resolve failure should surface immediately, not sit behind a
+	// prior-run gate. §15.5: the snapshot in status.resolvedSpec is the
+	// FULLY resolved spec so historical runs remain interpretable after
+	// templates are edited.
+	//
+	// Reason mapping: ErrUnknownConfigKey → InvalidConfig (user typo);
+	// every other resolve error → ResolveFailed (template missing,
+	// coercion failure, expression eval error, ValidateResolved failure).
+	resolvedSpec, resolveErr := r.resolveSpec(&test, run)
+	if resolveErr != nil {
+		reason := ReasonResolveFailed
+		if errors.Is(resolveErr, resolver.ErrUnknownConfigKey) {
+			reason = ReasonInvalidConfig
+		}
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
-			ReasonInvalidConfig, err.Error())
+			reason, resolveErr.Error())
 	}
 
 	priors, err := r.listPriorRuns(ctx, run)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	action := DecideConcurrency(priors, run, test.Spec.ConcurrencyPolicy)
+	action := DecideConcurrency(priors, run, resolvedSpec.ConcurrencyPolicy)
 
 	switch action {
 	case ConcurrencyWait:
@@ -315,9 +351,9 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		// Fall through.
 	}
 
-	snap, err := json.Marshal(test.Spec)
+	snap, err := json.Marshal(resolvedSpec)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("snapshot Test spec: %w", err)
+		return ctrl.Result{}, fmt.Errorf("snapshot resolved spec: %w", err)
 	}
 	run.Status.ResolvedSpec = string(snap)
 	run.Status.Phase = testsv1alpha1.PhaseQueued
@@ -332,6 +368,32 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 	// Don't requeue explicitly — the Update above triggers a Reconcile that
 	// enters observeOrCreateJob to create the Job.
 	return ctrl.Result{}, nil
+}
+
+// resolveSpec runs the step-13 pipeline: templates → config coercion →
+// `{{ }}` expression eval → post-resolution validation (image + command
+// present, since the webhook allows them to be empty when spec.use is set).
+//
+// Returns the fully-resolved spec on success; a human-readable error on
+// failure (surfaced as TestRun.status.message with ReasonResolveFailed).
+func (r *TestRunReconciler) resolveSpec(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun) (*testsv1alpha1.TestSpec, error) {
+	store := r.TemplateStore
+	if store == nil {
+		// No template store wired — treat as "no templates available".
+		// A Test with spec.use will error via ErrTemplateNotFound; a Test
+		// without spec.use passes through unchanged.
+		store = resolver.MapStore{}
+	}
+	spec, err := resolver.Resolve(test, run, store, resolver.Options{
+		Env: r.ResolverEnv,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := resolver.ValidateResolved(spec); err != nil {
+		return nil, err
+	}
+	return spec, nil
 }
 
 // observeOrCreateJob is entered when ResolvedSpec is set. Either the Job

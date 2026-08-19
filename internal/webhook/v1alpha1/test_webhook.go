@@ -130,11 +130,14 @@ func (v *TestCustomValidator) ValidateDelete(_ context.Context, _ *testsv1alpha1
 // validateTest is a pure function so unit tests can hit each rule directly
 // without spinning up envtest.
 //
-// Workflows-model rules (step 11):
-//   - spec.container.image REQUIRED — the wrapper needs SOMETHING to run.
-//   - spec.container.{command|args} REQUIRED (at least one) — otherwise
-//     the wrapper has no invocation to dispatch beyond "start the image's
-//     ENTRYPOINT with no args", which is almost never what a test wants.
+// Workflows-model rules (step 11) + step 13 template relaxation:
+//   - spec.container.image REQUIRED unless spec.use is non-empty (a template
+//     may supply it). Final image+command validity is enforced by the
+//     TestRun controller AFTER template resolution — phase=error with
+//     reason=ResolveFailed. Reason: the webhook can't fetch the templates
+//     the Test references (cross-object lookup is race-prone at admission).
+//   - spec.container.{command|args} REQUIRED (at least one) UNLESS spec.use
+//     is non-empty — same reasoning.
 //   - spec.verdict.from in {exitCode, junit, jtl} (empty = exitCode).
 //   - spec.verdict.errorRateMax: only valid when from=jtl, must parse as
 //     float in [0,1]. Empty otherwise (setting it with from!=jtl is a
@@ -143,11 +146,15 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if spec == nil {
 		return errors.New("spec is required")
 	}
-	if spec.Container.Image == "" {
-		return errors.New("spec.container.image is required (workflows model: no built-in tool images)")
+	// Step 13: relax image/command requirements when spec.use is set. A
+	// template may supply them; the TestRun controller re-validates
+	// post-resolution and surfaces failures with reason=ResolveFailed.
+	requiresLocalContainer := len(spec.Use) == 0
+	if requiresLocalContainer && spec.Container.Image == "" {
+		return errors.New("spec.container.image is required (workflows model: no built-in tool images) — or reference a template via spec.use[] that supplies it")
 	}
-	if len(spec.Container.Command) == 0 && len(spec.Container.Args) == 0 {
-		return errors.New("spec.container: at least one of command or args is required")
+	if requiresLocalContainer && len(spec.Container.Command) == 0 && len(spec.Container.Args) == 0 {
+		return errors.New("spec.container: at least one of command or args is required — or reference a template via spec.use[] that supplies one")
 	}
 	if _, ok := allowedConcurrencyPolicies[spec.ConcurrencyPolicy]; !ok {
 		return fmt.Errorf("spec.concurrencyPolicy %q is not one of [Allow Forbid Replace]", spec.ConcurrencyPolicy)

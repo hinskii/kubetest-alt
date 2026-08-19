@@ -39,6 +39,18 @@ type TestSpec struct {
 	// +optional
 	Container ContainerConfig `json:"container,omitempty"`
 
+	// Use references TestTemplate names IN THE SAME NAMESPACE to merge under
+	// this Test. Templates are merged in order (later wins) BEFORE this Test's
+	// own fields overlay (Test always wins over templates). See CLAUDE.md §2
+	// (step 13). Empty = no template composition.
+	//
+	// Because a template may supply container.image and container.command/args,
+	// the Test webhook accepts a Test with EMPTY container.image only when
+	// spec.use is non-empty; final image+command validity is enforced by the
+	// TestRun controller AFTER template resolution (phase=error reason=ResolveFailed).
+	// +optional
+	Use []string `json:"use,omitempty"`
+
 	// +optional
 	Pod *PodConfig `json:"pod,omitempty"`
 
