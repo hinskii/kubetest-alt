@@ -1,0 +1,38 @@
+# Postman collection runner (newman) template.
+#
+# Verdict: exit code (honest — non-zero on assertion failure). JUnit
+# reporter used for count aggregation via the scraper — the JUnit
+# processor is opt-in via spec.verdict.from=junit if the caller
+# wants counts-driven override.
+#
+# Smoke verified: pass=0 / fail=1 on postman/newman:6.1.3-alpine (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: newman
+  labels:
+    kubetest.io/tool: newman
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: postman/newman:6.1.3-alpine
+    # postman/newman's entrypoint is `newman`; we override for /entry
+    # compatibility.
+    command: ["newman"]
+    args:
+      - "run"
+      - "/data/repo/{{ config.collection }}"
+      - "--reporters"
+      - "cli,junit"
+      - "--reporter-junit-export"
+      - "/data/repo/results/junit.xml"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+      - "results/**/*.json"
+  config:
+    # Path to the Postman collection JSON inside the content-fetcher's
+    # /data/repo working tree.
+    collection:
+      type: string
+      # Required.

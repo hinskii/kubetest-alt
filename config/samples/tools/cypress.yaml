@@ -1,0 +1,18 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-cypress
+  namespace: default
+spec:
+  use: [cypress]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    projectDir:
+      type: string
+      default: "cypress"
+    spec:
+      type: string
+      default: "cypress/e2e/**/*.cy.js"

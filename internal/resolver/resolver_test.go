@@ -385,6 +385,51 @@ func TestValidateResolved_Table(t *testing.T) {
 	}
 }
 
+// TestResolve_TemplateVerdictContributes_TestOverrides: the step-15
+// invariant — a template can carry verdictFrom (e.g. JMeter's
+// jtl+errorRateMax="0") and consumers inherit it; if the Test explicitly
+// declares its own Verdict, the Test wins per §13 merge semantics.
+func TestResolve_TemplateVerdictContributes_TestOverrides(t *testing.T) {
+	// Case 1: template supplies verdict, Test doesn't → template wins.
+	tmpl := &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "jmeter-catalog", Namespace: "ns"},
+		Spec: testsv1alpha1.TestTemplateSpec{
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "alpine/jmeter:5.6.3",
+				Args:  []string{"-n", "-t", "plan.jmx"},
+			},
+			Verdict: &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "0"},
+		},
+	}
+	store := MapStore{"ns/jmeter-catalog": tmpl}
+
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "load", Namespace: "ns"},
+		Spec:       testsv1alpha1.TestSpec{Use: []string{"jmeter-catalog"}},
+	}
+	spec, err := Resolve(test, mkRun(), store, Options{})
+	require.NoError(t, err)
+	require.NotNil(t, spec.Verdict)
+	assert.Equal(t, "jtl", spec.Verdict.From)
+	assert.Equal(t, "0", spec.Verdict.ErrorRateMax)
+
+	// Case 2: Test declares its own Verdict → wins over template.
+	test2 := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "load2", Namespace: "ns"},
+		Spec: testsv1alpha1.TestSpec{
+			Use:     []string{"jmeter-catalog"},
+			Verdict: &testsv1alpha1.VerdictSpec{From: "junit"},
+		},
+	}
+	spec2, err := Resolve(test2, mkRun(), store, Options{})
+	require.NoError(t, err)
+	require.NotNil(t, spec2.Verdict)
+	assert.Equal(t, "junit", spec2.Verdict.From,
+		"Test-side Verdict wins over template per §13 merge semantics")
+	assert.Empty(t, spec2.Verdict.ErrorRateMax,
+		"Test's Verdict REPLACES template's — no cross-field bleed")
+}
+
 // TestResolve_DoesNotMutateInputs is the "pure-ish" invariant: resolving
 // twice should yield equivalent output; the first call must not have
 // touched the input Test or template.

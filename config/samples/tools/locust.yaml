@@ -1,0 +1,27 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-locust
+  namespace: default
+spec:
+  use: [locust]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    locustfile:
+      type: string
+      default: "locust/locustfile.py"
+    host:
+      type: string
+      default: "https://api.staging.example.com"
+    users:
+      type: integer
+      default: "10"
+    spawnRate:
+      type: integer
+      default: "2"
+    duration:
+      type: string
+      default: "1m"

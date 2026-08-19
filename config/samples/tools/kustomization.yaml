@@ -1,0 +1,21 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Apply-test entry point: `kubectl apply -k config/samples/tools/` applies
+# every catalog template + one Test per template. Real cluster only —
+# the samples reference an example git repo (users swap the repo for
+# their own).
+resources:
+  - ../../templates/k6.yaml
+  - ../../templates/cypress.yaml
+  - ../../templates/newman.yaml
+  - ../../templates/jmeter.yaml
+  - ../../templates/locust.yaml
+  - ../../templates/playwright.yaml
+  - ../../templates/pytest.yaml
+  - k6.yaml
+  - cypress.yaml
+  - newman.yaml
+  - jmeter.yaml
+  - locust.yaml
+  - playwright.yaml
+  - pytest.yaml

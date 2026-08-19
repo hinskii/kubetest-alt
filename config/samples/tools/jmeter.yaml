@@ -1,0 +1,20 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-jmeter
+  namespace: default
+spec:
+  use: [jmeter]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    plan:
+      type: string
+      default: "jmeter/smoke.jmx"
+  # Tests that tolerate some errors (soak, chaos) override errorRateMax
+  # per-Test — the template's default is 0 (strict).
+  # verdict:
+  #   from: jtl
+  #   errorRateMax: "0.01"

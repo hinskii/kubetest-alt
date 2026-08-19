@@ -1,0 +1,40 @@
+# pytest template.
+#
+# Verdict: exit code (honest) + --junit-xml for count aggregation.
+# pytest exit codes: 0=all pass, 1=some failed, 2=interrupted,
+# 3=internal error, 4=usage error, 5=no tests collected. All non-zero
+# codes map to phase=failed via the default exit-code rule.
+#
+# Smoke verified: pass=0 / fail=1 on python:3.13-slim with pytest 9.1.1 (arm64).
+#
+# Note: python:3.13-slim doesn't ship pytest — the template installs it
+# on every run via pip. Slow first-boot; a future optimization is to
+# pin an image with pytest pre-baked (there's no widely-adopted
+# community image today). Acceptable for MVP; documented in
+# docs/onboarding-a-tool.md.
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: pytest
+  labels:
+    kubetest.io/tool: pytest
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: python:3.13-slim
+    command: ["sh", "-c"]
+    args:
+      - "pip install --quiet pytest=={{ config.pytestVersion }} && cd /data/repo/{{ config.testsDir }} && pytest --junit-xml=/data/repo/results/junit.xml"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+  config:
+    testsDir:
+      type: string
+      default: "."
+    # Bumping this in a Test lets a specific project pin an older/newer
+    # pytest without forking the template.
+    pytestVersion:
+      type: string
+      default: "9.1.1"
+      pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"

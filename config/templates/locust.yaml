@@ -1,0 +1,62 @@
+# Locust load test template.
+#
+# Verdict: exit code (honest since ~Locust 2.15; verified 2.42.1). The
+# plan's warning that "Locust always exits 0 unless flag set" is out of
+# date for modern Locust — a headless run with request failures returns
+# exit=1 by default. No `--exit-code-on-error` flag needed.
+#
+# If a tighter policy is wanted (e.g. non-zero on p95 latency breach) the
+# consumer can add `--check-fail-ratio` or `--check-avg-response-time`
+# on the Test's container.args.
+#
+# Smoke verified: pass=0 / fail=1 on locustio/locust:2.42.1 (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: locust
+  labels:
+    kubetest.io/tool: locust
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: locustio/locust:2.42.1
+    command: ["locust"]
+    args:
+      - "--headless"
+      - "-u"
+      - "{{ config.users }}"
+      - "-r"
+      - "{{ config.spawnRate }}"
+      - "-t"
+      - "{{ config.duration }}"
+      - "--host"
+      - "{{ config.host }}"
+      - "-f"
+      - "/data/repo/{{ config.locustfile }}"
+      - "--csv"
+      - "/data/repo/results/locust"
+  artifacts:
+    # Locust `--csv` writes locust_stats.csv, locust_failures.csv,
+    # locust_history.csv, etc. under the prefix. Future perf-parser
+    # (planned but not in scope) will ingest these.
+    paths:
+      - "results/**/*.csv"
+      - "results/**/*.html"
+  config:
+    locustfile:
+      type: string
+      default: "locustfile.py"
+    host:
+      type: string
+      # Required — the target base URL under load.
+    users:
+      type: integer
+      default: "1"
+    spawnRate:
+      type: integer
+      default: "1"
+    duration:
+      # Locust accepts Go-style durations ("30s", "5m", "1h"). Kept
+      # as string so users can pin either format.
+      type: string
+      default: "30s"

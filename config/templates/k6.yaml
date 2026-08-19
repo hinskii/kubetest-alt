@@ -1,0 +1,35 @@
+# k6 load test template.
+#
+# Verdict: exit code (honest — 0 pass, 99 thresholds not met, other
+# non-zero for script bugs). Loses the failed-vs-error split for script
+# crashes (107/108 → phase=failed instead of error); acceptable trade-off
+# per CLAUDE.md §15.2.
+#
+# Smoke verified: pass=0 / fail=99 on grafana/k6:1.4.0 (arm64, k6 v1.4.0).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: k6
+  labels:
+    kubetest.io/tool: k6
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    # Pinned to the version smoked at commit time. Users overlay
+    # `container.image` on their Test to bump.
+    image: grafana/k6:1.4.0
+    command: ["k6"]
+    args: ["run", "/data/repo/{{ config.script }}"]
+  artifacts:
+    # k6 writes a summary.json when --summary-export is passed (see
+    # config.summaryExport below). Users add --summary-export
+    # /data/repo/results/summary.json manually if they want to override
+    # the default JSON summary shape.
+    paths:
+      - "results/**/*.json"
+      - "results/**/*.xml"
+  config:
+    script:
+      type: string
+      # Required — every k6 Test names its own script.
+      # Empty default = required per step-13 semantics.

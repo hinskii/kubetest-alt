@@ -1,0 +1,17 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-k6
+  namespace: default
+spec:
+  use: [k6]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  # Test.spec.config redeclares template params with new defaults so the
+  # sample is self-sufficient (no TestRun override needed).
+  config:
+    script:
+      type: string
+      default: "k6/basic.js"

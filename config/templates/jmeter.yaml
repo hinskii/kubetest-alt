@@ -1,0 +1,52 @@
+# Apache JMeter template — the CANONICAL "exit code lies" case.
+#
+# Verdict: verdictFrom: jtl, errorRateMax: "0". JMeter returns exit code 0
+# even when 100% of requests fail — the JTL processor reads
+# results/jmeter.jtl and flips the phase to failed when errorRate exceeds
+# the declared threshold. THIS is the reason verdictFrom exists at all.
+#
+# Smoke verified: pass=0 / fail=0 on alpine/jmeter:5.6.3 (arm64) — JMeter
+# lied on fail (100% error rate, exit 0). With verdictFrom: jtl the
+# wrapper's JTL processor produces the correct phase for both cases.
+# Regression-guarded end-to-end in pkg/executor/entry_test.go
+# (TestEntry_Verdict_ExitZeroButJTL100PctErrors_ShouldFail).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: jmeter
+  labels:
+    kubetest.io/tool: jmeter
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: alpine/jmeter:5.6.3
+    # alpine/jmeter's entrypoint IS jmeter; args are passed straight
+    # through. `-n` = non-GUI; `-t` = plan; `-l` = JTL output; `-j` =
+    # jmeter log. Writing JTL into results/ makes the scraper glob find it.
+    command: ["jmeter"]
+    args:
+      - "-n"
+      - "-t"
+      - "/data/repo/{{ config.plan }}"
+      - "-l"
+      - "/data/repo/results/jmeter.jtl"
+      - "-j"
+      - "/data/repo/results/jmeter.log"
+  artifacts:
+    paths:
+      - "results/**/*.jtl"
+      - "results/**/*.log"
+      - "results/**/*.xml"
+  config:
+    # Path to the .jmx test plan inside the content-fetcher tree.
+    plan:
+      type: string
+      # Required.
+  verdict:
+    # THE reason verdictFrom exists. Without this every JMeter run
+    # reports "passed" regardless of the actual failure rate.
+    from: jtl
+    # "0" = any failed sample flips the phase to failed. Tests that
+    # tolerate some errors (soak tests, chaos) override this on the
+    # Test (e.g. errorRateMax: "0.01" for 1%).
+    errorRateMax: "0"

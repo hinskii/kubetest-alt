@@ -253,6 +253,12 @@ func mergeTemplateInto(dst *testsv1alpha1.TestSpec, tmpl *testsv1alpha1.TestTemp
 	if tmpl.Parallel != nil && dst.Parallel == nil {
 		dst.Parallel = tmpl.Parallel.DeepCopy()
 	}
+	// Verdict (step 15): templates carry the verdictFrom mitigation for
+	// tools whose exit code lies. Fill only where dst.Verdict is unset —
+	// Test-side Verdict wins via mergeTestInto below.
+	if tmpl.Verdict != nil && dst.Verdict == nil {
+		dst.Verdict = tmpl.Verdict.DeepCopy()
+	}
 }
 
 // mergeTestInto overlays the Test's OWN spec fields onto dst — Test wins

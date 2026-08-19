@@ -38,9 +38,10 @@ spec:
             type: object
           spec:
             description: |-
-              TestTemplateSpec is a reusable, parameterizable partial Test spec. Step-02
-              keeps this shape minimal; the compose/inclusion semantics land with step 13
-              (templates + expression engine).
+              TestTemplateSpec is a reusable, parameterizable partial Test spec. Step 15
+              added Verdict — templates that wrap a tool whose exit code lies (JMeter is
+              the marquee example) MUST be able to carry the verdictFrom mitigation so
+              consumers don't have to re-declare it on every Test.
             properties:
               artifacts:
                 description: ArtifactSpec describes files to scrape after a run (globs
@@ -4738,6 +4739,31 @@ spec:
                 type: object
               timeout:
                 type: string
+              verdict:
+                description: |-
+                  Verdict is the declarative "verdict-from" processor selector shared
+                  with TestSpec.Verdict — templates carry it so the catalog can
+                  encode "JMeter's exit code lies, run the JTL processor with
+                  errorRateMax=0" in ONE place. Test-side Verdict overrides.
+                properties:
+                  errorRateMax:
+                    description: |-
+                      ErrorRateMax is the JTL error-rate threshold (fraction in [0,1]) —
+                      only meaningful when From=jtl. String rather than float so the CRD
+                      admits either "0" or "0.01" naturally without JSON-number gotchas
+                      (0.1 round-trip surprises, no way to say "unset"). Webhook parses
+                      this as a float in [0,1] and requires From=jtl.
+                    type: string
+                  from:
+                    default: exitCode
+                    description: From is the verdict source. Defaults to exitCode
+                      when unset.
+                    enum:
+                    - exitCode
+                    - junit
+                    - jtl
+                    type: string
+                type: object
             type: object
           status:
             description: TestTemplateStatus is intentionally minimal — templates are

@@ -1,0 +1,62 @@
+# Cypress e2e test template.
+#
+# Verdict: exit code (= number of failed tests, CAPPED AT 255) + JUnit
+# for the real counts. The wrapper's JUnit processor (spec.verdict.from=
+# junit) reads the report and overrides the exit code — so a suite with
+# 300 failing tests reports FAILED (not passed because 300 wraps around
+# in the 8-bit range).
+#
+# Smoke verified: pass=0 / fail=1 on cypress/included:15.5.0 (arm64).
+#
+# /dev/shm memory sizing: Cypress + Chromium needs ~2G shared memory or
+# the browser dies mid-test. This template supplies a memory-backed
+# emptyDir via pod.volumes — moved here from the compiler in step 11
+# so per-tool memory quirks live in the CATALOG, not the platform.
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: cypress
+  labels:
+    kubetest.io/tool: cypress
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: cypress/included:15.5.0
+    # `cypress/included` sets ENTRYPOINT=cypress; override to run our
+    # /entry-mediated invocation and pass args verbatim.
+    command: ["cypress"]
+    args: ["run", "--project", "/data/repo/{{ config.projectDir }}", "--spec", "{{ config.spec }}"]
+    volumeMounts:
+      # Mount the shared-memory emptyDir declared in spec.pod.volumes.
+      - name: dshm
+        mountPath: /dev/shm
+  pod:
+    volumes:
+      - name: dshm
+        emptyDir:
+          medium: Memory
+          # 2Gi is the empirically-observed floor for a typical Cypress
+          # suite; heavier suites (many parallel workers, large videos)
+          # may bump via a per-Test override.
+          sizeLimit: 2Gi
+  artifacts:
+    # cypress/included writes JUnit XML if the project's cypress.config.*
+    # sets `reporter: junit`. The catalog assumes projects follow that
+    # convention; templates DON'T mutate user config.
+    paths:
+      - "results/**/*.xml"
+      - "cypress/screenshots/**/*"
+      - "cypress/videos/**/*"
+  config:
+    # Cypress `--project` root — where cypress.config.js lives.
+    projectDir:
+      type: string
+      default: "."
+    # Cypress `--spec` glob — leave defaulted to run everything.
+    spec:
+      type: string
+      default: "cypress/e2e/**/*.cy.{js,ts}"
+  verdict:
+    # Cypress's exit code caps at 255; the JUnit processor reads real
+    # counts from the report and overrides the exit-code verdict.
+    from: junit

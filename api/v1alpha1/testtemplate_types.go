@@ -21,9 +21,10 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// TestTemplateSpec is a reusable, parameterizable partial Test spec. Step-02
-// keeps this shape minimal; the compose/inclusion semantics land with step 13
-// (templates + expression engine).
+// TestTemplateSpec is a reusable, parameterizable partial Test spec. Step 15
+// added Verdict — templates that wrap a tool whose exit code lies (JMeter is
+// the marquee example) MUST be able to carry the verdictFrom mitigation so
+// consumers don't have to re-declare it on every Test.
 type TestTemplateSpec struct {
 	// +optional
 	Content Content `json:"content,omitempty"`
@@ -51,6 +52,13 @@ type TestTemplateSpec struct {
 
 	// +optional
 	Parallel *ParallelSpec `json:"parallel,omitempty"`
+
+	// Verdict is the declarative "verdict-from" processor selector shared
+	// with TestSpec.Verdict — templates carry it so the catalog can
+	// encode "JMeter's exit code lies, run the JTL processor with
+	// errorRateMax=0" in ONE place. Test-side Verdict overrides.
+	// +optional
+	Verdict *VerdictSpec `json:"verdict,omitempty"`
 }
 
 // TestTemplateStatus is intentionally minimal — templates are pure definitions.

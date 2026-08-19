@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-newman
+  namespace: default
+spec:
+  use: [newman]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    collection:
+      type: string
+      default: "newman/smoke.postman_collection.json"

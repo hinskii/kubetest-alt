@@ -1,0 +1,34 @@
+# Playwright browser test template.
+#
+# Verdict: exit code + JUnit reporter for count aggregation.
+# `--reporter=junit` writes to PLAYWRIGHT_JUNIT_OUTPUT_NAME (or the
+# project's playwright.config.ts's `reporter` block). This template
+# passes --reporter=junit with an explicit output path so the scraper
+# finds it without depending on user config.
+#
+# Smoke verified: pass=0 / fail=1 on mcr.microsoft.com/playwright:v1.56.0-noble (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: playwright
+  labels:
+    kubetest.io/tool: playwright
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: mcr.microsoft.com/playwright:v1.56.0-noble
+    # Playwright image ships as a Node base image — no default
+    # entrypoint. Run npx playwright from the user's project root.
+    command: ["sh", "-c"]
+    args:
+      - "cd /data/repo/{{ config.projectDir }} && npm ci --silent && PLAYWRIGHT_JUNIT_OUTPUT_NAME=/data/repo/results/junit.xml npx playwright test --reporter=junit"
+    workingDir: "/data/repo"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+      - "test-results/**/*"
+      - "playwright-report/**/*"
+  config:
+    projectDir:
+      type: string
+      default: "."
