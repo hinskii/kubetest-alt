@@ -116,6 +116,23 @@ type ExecutionResult struct {
 	// tool run into a failing status. Callers can surface this separately
 	// in the UI ("run passed, artifacts not saved: <reason>").
 	ScrapeError string `json:"scrapeError,omitempty"`
+
+	// ToolExitCode is the raw exit code from the tool process. Preserved
+	// even when a verdictFrom processor OVERRIDES the phase — the trace
+	// is diagnostic:
+	//
+	//   exit != 0 + phase=passed (JUnit-override case)  →  "tests passed
+	//     but something crashed after them: teardown failure, flaky
+	//     reporter, connection drop mid-teardown, port conflict on cleanup"
+	//   exit == 0 + phase=failed (JTL-override case)    →  "tool lied
+	//     about success (JMeter default): assertion/error-rate exceeded
+	//     the declared threshold"
+	//
+	// Losing this signal (nil-ing it out on override) would hide a whole
+	// class of near-passing bugs. Nil when the wrapper couldn't produce a
+	// meaningful code (e.g. exec-failure before the process ran) or when
+	// the run was aborted before exit.
+	ToolExitCode *int `json:"toolExitCode,omitempty"`
 }
 
 // TestCounts aggregates JUnit-derived counts across all uploaded XML files.

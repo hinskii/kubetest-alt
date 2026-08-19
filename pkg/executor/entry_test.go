@@ -260,6 +260,12 @@ func TestEntry_Verdict_JTLBadThresholdString_IsError(t *testing.T) {
 // TestEntry_Verdict_JUnitOverridesNonZeroExit: flaky-runner scenario. Base
 // verdict from exit 1 → failed; JUnit says all pass → OVERRIDES to passed.
 // Referenced by name from the entry.go docstring — DO NOT RENAME lightly.
+//
+// Critical assertion: the raw tool exit code is PRESERVED in
+// ExecutionResult.ToolExitCode even when the override flips phase to
+// passed. exit ≠ 0 + clean JUnit is often a diagnostic signal ("tests
+// passed but teardown crashed / flaky reporter / connection drop") —
+// hiding it would silently swallow a whole class of near-passing bugs.
 func TestEntry_Verdict_JUnitOverridesNonZeroExit(t *testing.T) {
 	req := ExecutionRequest{
 		Args:           []string{"/bin/false"},
@@ -277,6 +283,59 @@ func TestEntry_Verdict_JUnitOverridesNonZeroExit(t *testing.T) {
 	assert.Empty(t, got.ErrorMessage)
 	require.NotNil(t, got.TestCounts)
 	assert.Equal(t, 10, got.TestCounts.Total)
+
+	// Trace preservation: the raw exit code survives the override so
+	// the UI / operator can surface "phase=passed BUT tool exited 1"
+	// as a warning rather than silently smoothing over the signal.
+	require.NotNil(t, got.ToolExitCode, "ToolExitCode must survive JUnit override")
+	assert.Equal(t, 1, *got.ToolExitCode,
+		"raw tool exit code preserved even when JUnit flips phase to passed")
+}
+
+// TestEntry_Verdict_ToolExitCode_PreservedOnJTLOverrideToFailed: symmetric
+// trace for the other direction — jmeter exit 0 (tool lied), JTL says
+// failed. The 0 is the diagnostic signal ("tool lied") — preserved.
+func TestEntry_Verdict_ToolExitCode_PreservedOnJTLOverrideToFailed(t *testing.T) {
+	req := ExecutionRequest{
+		Args:           []string{"/bin/true"},
+		TimeoutSeconds: 30,
+		Verdict:        VerdictSpec{From: VerdictFromJTL, ErrorRateMax: "0"},
+	}
+	e := entryFor(t, req, 0, nil)
+	e.WorkingDir = t.TempDir()
+	e.JTLProcessor = func(_ string, threshold float64) (JTLProcessorResult, error) {
+		return JTLProcessorResult{
+			SamplesTotal: 100, SamplesFailed: 100, ErrorRate: 1.0,
+			Threshold: threshold, Passed: false,
+		}, nil
+	}
+	require.NoError(t, e.Execute(context.Background()))
+	got := readResult(t, e.ResultDir)
+	assert.Equal(t, PhaseFailed, got.Phase)
+	require.NotNil(t, got.ToolExitCode, "ToolExitCode must survive JTL override")
+	assert.Equal(t, 0, *got.ToolExitCode, "exit 0 preserved even when JTL flips to failed")
+}
+
+// TestEntry_Verdict_ToolExitCode_NilOnExecFailure: no meaningful "tool
+// exit code" when the tool never ran. Field stays nil (omitempty in
+// JSON) rather than a misleading -1.
+func TestEntry_Verdict_ToolExitCode_NilOnExecFailure(t *testing.T) {
+	req := ExecutionRequest{Args: []string{"/definitely/does/not/exist"}, TimeoutSeconds: 30}
+	e := &Entry{
+		Exec: func(ctx context.Context, name string, args ...string) *exec.Cmd {
+			// #nosec G204 -- test-only.
+			return exec.CommandContext(ctx, name, args...)
+		},
+		Stdout:      io.Discard,
+		Stderr:      io.Discard,
+		RequestPath: writeRequest(t, req),
+		ResultDir:   t.TempDir(),
+		Loader:      &bytes.Buffer{},
+	}
+	require.NoError(t, e.Execute(context.Background()))
+	got := readResult(t, e.ResultDir)
+	assert.Equal(t, PhaseError, got.Phase)
+	assert.Nil(t, got.ToolExitCode, "no exit code when the tool never ran")
 }
 
 // TestEntry_Verdict_JUnitFailsOverridesExitZero: k6-with-junit-plugin

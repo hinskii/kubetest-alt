@@ -211,10 +211,16 @@ func (e *Entry) runTool(ctx context.Context, req ExecutionRequest) ExecutionResu
 //   - exit 0 → passed, no message
 //   - non-zero exit → failed with "exit code N"
 //   - non-exit error (binary missing, permission denied) → error with the
-//     raw error text — the wrapper couldn't even run the tool
+//     raw error text — the wrapper couldn't even run the tool.
+//
+// Always populates ToolExitCode when the process actually ran (i.e. the
+// exit code is well-defined: 0 on success, N on ExitError). Leaves it nil
+// on exec-failure — there's no meaningful "tool exit code" when the tool
+// never started.
 func baseVerdict(exitCode int, runErr error) ExecutionResult {
 	if runErr == nil {
-		return ExecutionResult{Phase: PhasePassed}
+		code := 0
+		return ExecutionResult{Phase: PhasePassed, ToolExitCode: &code}
 	}
 	if !isExitError(runErr) {
 		return ExecutionResult{
@@ -222,9 +228,11 @@ func baseVerdict(exitCode int, runErr error) ExecutionResult {
 			ErrorMessage: fmt.Sprintf("exec failed: %v", runErr),
 		}
 	}
+	code := exitCode
 	return ExecutionResult{
 		Phase:        PhaseFailed,
 		ErrorMessage: fmt.Sprintf("exit code %d", exitCode),
+		ToolExitCode: &code,
 	}
 }
 
@@ -236,11 +244,16 @@ func baseVerdict(exitCode int, runErr error) ExecutionResult {
 //   - counts.Failed > 0 → failed with counts in ErrorMessage.
 //   - counts.Failed == 0 → PASSED, regardless of base exit code (this is
 //     the flaky-non-zero-but-tests-actually-passed override case).
+//
+// The base run's ToolExitCode is PRESERVED on every path — even when the
+// verdict flips passed. Losing it would hide the "tests passed but
+// teardown crashed" class of near-passing failures.
 func (e *Entry) applyJUnitVerdict(workingDir string, base ExecutionResult) ExecutionResult {
 	if e.JUnitProcessor == nil {
 		return ExecutionResult{
 			Phase:        PhaseError,
 			ErrorMessage: "verdictFrom=junit but no JUnit processor wired (wrapper misconfig)",
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	counts, err := e.JUnitProcessor(workingDir)
@@ -248,6 +261,7 @@ func (e *Entry) applyJUnitVerdict(workingDir string, base ExecutionResult) Execu
 		return ExecutionResult{
 			Phase:        PhaseError,
 			ErrorMessage: fmt.Sprintf("verdictFrom=junit: %v", err),
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	tc := counts
@@ -263,15 +277,16 @@ func (e *Entry) applyJUnitVerdict(workingDir string, base ExecutionResult) Execu
 			TestCounts:   &tc,
 			Metrics:      metrics,
 			ErrorMessage: fmt.Sprintf("verdictFrom=junit: %d of %d test(s) failed", tc.Failed, tc.Total),
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	// JUnit says all pass — OVERRIDES base exit-code verdict.
-	// Includes a comment-pinned test name below (TestEntry_Verdict_JUnitOverridesNonZeroExit).
-	_ = base
+	// Test name pinned: TestEntry_Verdict_JUnitOverridesNonZeroExit.
 	return ExecutionResult{
-		Phase:      PhasePassed,
-		TestCounts: &tc,
-		Metrics:    metrics,
+		Phase:        PhasePassed,
+		TestCounts:   &tc,
+		Metrics:      metrics,
+		ToolExitCode: base.ToolExitCode,
 	}
 }
 
@@ -288,6 +303,7 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 		return ExecutionResult{
 			Phase:        PhaseError,
 			ErrorMessage: "verdictFrom=jtl but no JTL processor wired (wrapper misconfig)",
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	max, perr := parseErrorRateMax(errorRateMaxStr)
@@ -295,6 +311,7 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 		return ExecutionResult{
 			Phase:        PhaseError,
 			ErrorMessage: fmt.Sprintf("verdictFrom=jtl: %v", perr),
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	res, err := e.JTLProcessor(workingDir, max)
@@ -302,6 +319,7 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 		return ExecutionResult{
 			Phase:        PhaseError,
 			ErrorMessage: fmt.Sprintf("verdictFrom=jtl: %v", err),
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
 	metrics := map[string]float64{
@@ -309,7 +327,6 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 		"samples_failed": float64(res.SamplesFailed),
 		"error_rate":     res.ErrorRate,
 	}
-	_ = base
 	if !res.Passed {
 		return ExecutionResult{
 			Phase:   PhaseFailed,
@@ -317,9 +334,15 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 			ErrorMessage: fmt.Sprintf(
 				"verdictFrom=jtl: error rate %.4f exceeds threshold %.4f (%d/%d samples failed)",
 				res.ErrorRate, res.Threshold, res.SamplesFailed, res.SamplesTotal),
+			ToolExitCode: base.ToolExitCode,
 		}
 	}
-	return ExecutionResult{Phase: PhasePassed, Metrics: metrics}
+	// JTL override to passed — preserve the raw exit code as a trace.
+	return ExecutionResult{
+		Phase:        PhasePassed,
+		Metrics:      metrics,
+		ToolExitCode: base.ToolExitCode,
+	}
 }
 
 // splitInvocation returns (binary, args) for exec. Precedence:
