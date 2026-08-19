@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,6 +46,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
+	"github.com/hinskii/kubetest-alt/internal/scheduler"
 )
 
 // Shared envtest state — all envtest tests in this package plug into the
@@ -72,6 +74,21 @@ var (
 	// the reconciler wrote at terminal transitions AND retried after
 	// transient errors. See TestReconcile_RunStore_*.
 	fakeRunStore *RecordingRunStore
+
+	// triggerReconciler is the shared TestTrigger controller wired into the
+	// envtest manager. Trigger tests reach into it to enqueue gates
+	// directly and to drive the fake clock. See testtrigger_envtest_test.go.
+	triggerReconciler *TestTriggerReconciler
+
+	// triggerClock is the fake clock the trigger reconciler + gate manager
+	// consult. Tests advance it to drive TTL/timeout/delay deterministically.
+	triggerClock *scheduler.FakeClock
+
+	// schedulerInstance is the cron scheduler wired into the envtest manager;
+	// scheduler-side envtest coverage is done via unit tests, but wiring it
+	// into the shared manager ensures its Start path doesn't regress on
+	// leader-election opt-in wiring.
+	schedulerInstance *scheduler.Scheduler
 )
 
 // RecordingLogRegistry captures LogRegistry calls in order. It's the
@@ -341,6 +358,35 @@ func runTests(m *testing.M) (int, error) {
 	}
 	if err := setupWithCountingWrapper(mgr, real); err != nil {
 		return 0, err
+	}
+
+	// Step 12: wire the TestTrigger controller + scheduler runnable into
+	// the envtest manager. Trigger controller uses a fake clock so timeout/
+	// delay/TTL tests never touch wall time. Scheduler is wired to prove
+	// its Runnable path builds; scheduler behavior is unit-tested elsewhere.
+	dynClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return 0, fmt.Errorf("dynamic client for trigger reconciler: %w", err)
+	}
+	triggerClock = scheduler.NewFakeClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	triggerReconciler = &TestTriggerReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Clock:            triggerClock,
+		Dyn:              dynClient,
+		Mapper:           mgr.GetRESTMapper(),
+		GateEvalInterval: 100 * time.Millisecond,
+	}
+	if err := triggerReconciler.SetupWithManager(mgr); err != nil {
+		return 0, fmt.Errorf("setup TestTriggerReconciler: %w", err)
+	}
+	schedulerInstance = &scheduler.Scheduler{
+		Client:       mgr.GetClient(),
+		Clock:        triggerClock,   // share the fake clock so tests can drive both
+		TickInterval: 24 * time.Hour, // effectively "off" — tests drive Tick directly
+	}
+	if err := mgr.Add(schedulerInstance); err != nil {
+		return 0, fmt.Errorf("add scheduler runnable: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

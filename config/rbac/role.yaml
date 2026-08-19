@@ -39,6 +39,14 @@ rules:
   - get
   - list
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - batch
   resources:
   - jobs
@@ -72,6 +80,7 @@ rules:
   - tests.kubetest.io
   resources:
   - testruns/status
+  - testtriggers/status
   verbs:
   - get
   - patch
@@ -83,4 +92,14 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - testtriggers
+  verbs:
+  - get
+  - list
+  - patch
+  - update
   - watch

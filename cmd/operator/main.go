@@ -29,8 +29,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/discovery"
+	memcached "k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/restmapper"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -44,6 +48,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/logstream"
+	"github.com/hinskii/kubetest-alt/internal/scheduler"
 	"github.com/hinskii/kubetest-alt/internal/store"
 	webhookv1alpha1 "github.com/hinskii/kubetest-alt/internal/webhook/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
@@ -152,6 +157,18 @@ func main() {
 	flag.StringVar(&postgresDSN, "postgres-dsn", "",
 		"Postgres DSN for run-history + retention. Empty disables persistence. "+
 			"Or set via $POSTGRES_DSN.")
+
+	// Step 12 tuning knobs. Defaults match the plan: cron tick every 30s,
+	// trigger gate evaluation every 1s. Both are safe to leave at defaults
+	// in production — testing knobs are here for kind runs / debugging.
+	var schedulerTickInterval time.Duration
+	var triggerGateEvalInterval time.Duration
+	flag.DurationVar(&schedulerTickInterval, "scheduler-tick-interval", 30*time.Second,
+		"How often the cron scheduler evaluates Tests for scheduled instants. "+
+			"Behind manager leader election. Reduce for tighter cron responsiveness.")
+	flag.DurationVar(&triggerGateEvalInterval, "trigger-gate-eval-interval", 1*time.Second,
+		"How often TestTrigger pending gates are evaluated for "+
+			"conditions/timeout/delay resolution. Behind leader election.")
 
 	opts := zap.Options{
 		Development: true,
@@ -411,6 +428,46 @@ func main() {
 		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
+		os.Exit(1)
+	}
+
+	// Step 12: cron scheduler + TestTrigger controller. Both live in-process,
+	// behind manager leader election (their Runnables opt in via
+	// NeedLeaderElection()). No separate binaries, no CronJob-per-Test.
+	if err := mgr.Add(&scheduler.Scheduler{
+		Client:       mgr.GetClient(),
+		Clock:        scheduler.RealClock{},
+		TickInterval: schedulerTickInterval,
+	}); err != nil {
+		setupLog.Error(err, "Failed to add scheduler runnable")
+		os.Exit(1)
+	}
+
+	// Dynamic client + REST mapper feed the TestTrigger reconciler's
+	// per-GVK informer machinery. Mapper is cached in-memory so repeated
+	// resource resolutions don't re-hit discovery on every event.
+	dynClient, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		setupLog.Error(err, "Failed to build dynamic client for TestTrigger controller")
+		os.Exit(1)
+	}
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(restCfg)
+	if err != nil {
+		setupLog.Error(err, "Failed to build discovery client for RESTMapper")
+		os.Exit(1)
+	}
+	cachedDisco := memcached.NewMemCacheClient(discoveryClient)
+	restMapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedDisco)
+
+	if err := (&controller.TestTriggerReconciler{
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Clock:            scheduler.RealClock{},
+		Dyn:              dynClient,
+		Mapper:           restMapper,
+		GateEvalInterval: triggerGateEvalInterval,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "TestTrigger")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
