@@ -161,6 +161,16 @@ func TestReconcile_Step13_ResolvedSpec_FullResolutionSnapshotted(t *testing.T) {
 //
 // Otherwise historical runs would correspond to no recorded definition
 // (the current definition on-disk is a different template body).
+//
+// Assertion strategy: DO NOT sleep. A sleep-based test passes by
+// accident if the reconciler simply doesn't wake up during the sleep,
+// which would leave the invariant untested. Instead, after the template
+// edit, we FORCE a TestRun reconcile by touching an annotation on the
+// TestRun (a metadata change enqueues a reconcile), then wait for the
+// reconcile count to actually increase past the pre-touch baseline
+// before we assert the snapshot is unchanged. This proves the
+// reconciler DID run and DID see the edited template — and still left
+// ResolvedSpec alone.
 func TestReconcile_Step13_TemplateEditAfterStart_DoesNotChangeSnapshot(t *testing.T) {
 	fakeResults.Reset()
 	resetReconcileCounts()
@@ -193,25 +203,43 @@ func TestReconcile_Step13_TemplateEditAfterStart_DoesNotChangeSnapshot(t *testin
 	runKey := client.ObjectKey{Namespace: ns, Name: run.Name}
 	waitForPhase(t, ctx, runKey, testsv1alpha1.PhaseQueued, 5*time.Second)
 
-	// Capture the snapshot now.
+	// Capture the snapshot BEFORE the template edit.
 	var snap1 testsv1alpha1.TestRun
 	require.NoError(t, k8sClient.Get(ctx, runKey, &snap1))
 	firstSnap := snap1.Status.ResolvedSpec
 	require.NotEmpty(t, firstSnap)
 
-	// Edit the template — different Args.
+	// Edit the template — different Args. This alone does NOT enqueue
+	// the TestRun (the TestRun reconciler doesn't watch TestTemplates);
+	// the forced reconcile below is what proves the invariant.
 	require.NoError(t, k8sClient.Get(ctx,
 		client.ObjectKey{Namespace: ns, Name: tmpl.Name}, tmpl))
 	tmpl.Spec.Container.Args = []string{"run", "changed.js"}
 	require.NoError(t, k8sClient.Update(ctx, tmpl))
 
-	// Give the reconciler a chance to re-run (fallback requeue = 500ms in tests).
-	time.Sleep(1200 * time.Millisecond)
+	// Force-reconcile path: capture baseline count, then patch a fresh
+	// annotation onto the TestRun. controller-runtime enqueues a
+	// reconcile for the object on any metadata change; we then wait
+	// until the reconcile counter has advanced past baseline.
+	baseline := reconcileCount(runKey)
+	patch := client.MergeFrom(snap1.DeepCopy())
+	if snap1.Annotations == nil {
+		snap1.Annotations = map[string]string{}
+	}
+	snap1.Annotations["kubetest.io/test-force-reconcile"] = "template-edit-invariant"
+	require.NoError(t, k8sClient.Patch(ctx, &snap1, patch))
 
+	require.Eventually(t, func() bool {
+		return reconcileCount(runKey) > baseline
+	}, 3*time.Second, 20*time.Millisecond,
+		"forced reconcile must fire after annotation patch — otherwise the invariant is untested")
+
+	// The reconciler ran with the edited template visible in the cache.
+	// ResolvedSpec MUST still equal the pre-edit snapshot.
 	var snap2 testsv1alpha1.TestRun
 	require.NoError(t, k8sClient.Get(ctx, runKey, &snap2))
 	assert.Equal(t, firstSnap, snap2.Status.ResolvedSpec,
-		"§15.5: template edit after run start MUST NOT change TestRun.status.resolvedSpec")
+		"§15.5: template edit after run start MUST NOT change TestRun.status.resolvedSpec, even when a reconcile fires with the edited template visible")
 }
 
 // TestReconcile_Step13_WebhookAllowsMissingImage_WhenSpecUse: end-to-end
