@@ -3,42 +3,47 @@ kind: Job
 metadata:
   labels:
     app.kubernetes.io/managed-by: kubetest-alt
-    kubetest.io/run-id: sample-git-auth-run
-  name: sample-git-auth-run
+    kubetest.io/run-id: sample-run
+  name: sample-run
   namespace: kubetest-samples
   ownerReferences:
   - apiVersion: tests.kubetest.io/v1alpha1
     blockOwnerDeletion: true
     controller: true
     kind: TestRun
-    name: sample-git-auth-run
+    name: sample-run
     uid: 00000000-0000-0000-0000-0000cafe0001
 spec:
-  activeDeadlineSeconds: 1860
+  activeDeadlineSeconds: 360
   backoffLimit: 0
   template:
     metadata:
+      annotations:
+        foo/bar: baz
+        sidecar.istio.io/inject: "false"
       labels:
         app.kubernetes.io/managed-by: kubetest-alt
-        kubetest.io/run-id: sample-git-auth-run
+        kubetest.io/run-id: sample-run
+        team: sre
     spec:
       automountServiceAccountToken: false
       containers:
       - args:
         - run
-        - --summary-export=summary.json
         - script.js
         command:
-        - /entry
+        - /kubetest-bin/entry
         env:
         - name: KUBETEST_DATADIR
           value: /data
         - name: KUBETEST_RESULTDIR
           value: /etc/kubetest/result
         - name: KUBETEST_RUN_ID
-          value: sample-git-auth-run
+          value: sample-run
         - name: KUBETEST_TEST_REF
-          value: sample-git-auth
+          value: sample
+        - name: FEATURE_X
+          value: "on"
         image: grafana/k6:2.2.0
         name: wrapper
         resources: {}
@@ -50,7 +55,19 @@ spec:
           readOnly: true
         - mountPath: /etc/kubetest/result
           name: result
+        - mountPath: /kubetest-bin
+          name: kubetest-bin
       initContainers:
+      - command:
+        - sh
+        - -c
+        - cp /entry /kubetest-bin/entry
+        image: ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0
+        name: kubetest-bin-install
+        resources: {}
+        volumeMounts:
+        - mountPath: /kubetest-bin
+          name: kubetest-bin
       - command:
         - /entry
         - fetch
@@ -83,47 +100,55 @@ spec:
         name: data
       - emptyDir: {}
         name: result
+      - emptyDir: {}
+        name: kubetest-bin
       - configMap:
           items:
           - key: request.json
             path: request.json
           - key: content.json
             path: content.json
-          name: sample-git-auth-run-request
+          name: sample-run-request
         name: request
   ttlSecondsAfterFinished: 3600
 status: {}
 ---
 apiVersion: v1
 data:
-  content.json: '{"git":{"uri":"https://example.com/private.git","revision":"main","authType":"basic","usernameFrom":{"secretKeyRef":{"name":"git-creds","key":"username"}},"tokenFrom":{"secretKeyRef":{"name":"git-creds","key":"token"}}}}'
+  content.json: '{"git":{"uri":"https://example.com/tests.git","revision":"main","authType":"basic","usernameFrom":{"secretKeyRef":{"name":"git-creds","key":"username"}},"tokenFrom":{"secretKeyRef":{"name":"git-creds","key":"token"}}}}'
   request.json: |-
     {
-      "type": "k6",
-      "runId": "sample-git-auth-run",
-      "testRef": "sample-git-auth",
+      "runId": "sample-run",
+      "testRef": "sample",
       "dataDir": "/data",
       "args": [
         "run",
-        "--summary-export=summary.json",
         "script.js"
       ],
+      "env": {
+        "FEATURE_X": "on"
+      },
       "config": {
         "vus": "10"
       },
-      "timeoutSeconds": 1800
+      "artifacts": {
+        "paths": [
+          "results/**/*.xml"
+        ]
+      },
+      "timeoutSeconds": 300
     }
 kind: ConfigMap
 metadata:
   labels:
     app.kubernetes.io/managed-by: kubetest-alt
-    kubetest.io/run-id: sample-git-auth-run
-  name: sample-git-auth-run-request
+    kubetest.io/run-id: sample-run
+  name: sample-run-request
   namespace: kubetest-samples
   ownerReferences:
   - apiVersion: tests.kubetest.io/v1alpha1
     blockOwnerDeletion: true
     controller: true
     kind: TestRun
-    name: sample-git-auth-run
+    name: sample-run
     uid: 00000000-0000-0000-0000-0000cafe0001

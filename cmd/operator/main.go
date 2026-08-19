@@ -21,7 +21,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"strings"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -57,34 +56,9 @@ import (
 // AnalyzePod). Step 06 ships the real image.
 const placeholderContentFetcherImage = "ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0-placeholder"
 
-// parseExecutorImages accepts "k6=repo/k6:v1,cypress=repo/cypress:v2" and
-// returns the map for compiler.Options.ExecutorImages. Empty input → nil.
-func parseExecutorImages(s string) map[string]string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	out := map[string]string{}
-	for pair := range strings.SplitSeq(s, ",") {
-		pair = strings.TrimSpace(pair)
-		if pair == "" {
-			continue
-		}
-		k, v, ok := strings.Cut(pair, "=")
-		if !ok {
-			continue
-		}
-		k, v = strings.TrimSpace(k), strings.TrimSpace(v)
-		if k == "" || v == "" {
-			continue
-		}
-		out[k] = v
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
+// (Workflows model, step 11: --executor-images and parseExecutorImages
+// were removed along with compiler.DefaultExecutorImages. The main
+// container's image comes verbatim from spec.container.image.)
 
 var (
 	scheme   = runtime.NewScheme()
@@ -126,22 +100,18 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 
-	// Compiler-facing flags — feed into every TestRun compile. Kept in
-	// cmd/operator (not the controller) so the controller stays free of
-	// hard-coded infra.
+	// Compiler-facing flags — feed into every TestRun compile.
 	var contentFetcherImage string
 	var imageRegistry string
-	var executorImagesRaw string
 	flag.StringVar(&contentFetcherImage, "content-fetcher-image",
 		placeholderContentFetcherImage,
-		"Init container image populating /data from Test.spec.content. "+
-			"MUST be overridden in production; the placeholder default is unusable.")
+		"Init container image supplying /entry (workflows model, step 11). "+
+			"Also runs the content-fetcher subcommand. MUST be overridden in "+
+			"production; the placeholder default is unusable.")
 	flag.StringVar(&imageRegistry, "image-registry", "",
-		"If set, prepended to every executor image (e.g. mirror.internal). "+
-			"Per-Test container.image overrides bypass this prefix.")
-	flag.StringVar(&executorImagesRaw, "executor-images", "",
-		"Comma-separated executor image overrides: k6=repo/k6:v1,cypress=repo/cypress:v1. "+
-			"Missing keys fall back to compiler.DefaultExecutorImages.")
+		"If set, prepended to the content-fetcher image reference (workflows "+
+			"model: main image comes verbatim from spec.container.image, not "+
+			"through this prefix).")
 
 	// MinIO wiring (step 07). When --minio-endpoint is empty, artifact
 	// scraping is disabled and the controller uses NoResultReader. Setting
@@ -215,7 +185,6 @@ func main() {
 	compilerOpts := compiler.Options{
 		ContentFetcherImage: contentFetcherImage,
 		ImageRegistry:       imageRegistry,
-		ExecutorImages:      parseExecutorImages(executorImagesRaw),
 		MinIO: compiler.MinIOOptions{
 			Endpoint:   minioEndpoint,
 			Bucket:     minioBucket,

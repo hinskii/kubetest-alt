@@ -135,7 +135,7 @@ func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 		updated.Labels = map[string]string{}
 	}
 	maps.Copy(updated.Labels, patch.Labels)
-	if patch.Spec.Type != "" || patch.Spec.Content.Git != nil {
+	if patch.Spec.Container.Image != "" || patch.Spec.Content.Git != nil {
 		updated.Spec = patch.Spec
 	}
 	// managed-by always stays ui (spoof rejected above; also survives spec swap).

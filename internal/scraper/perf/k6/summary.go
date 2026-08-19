@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package k6 parses grafana/k6's --summary-export JSON. Metrics-only —
+// verdict lives in /entry (exit code + optional verdictFrom processor).
+// Consumed by internal/scraper/perf.go via the perf registry.
 package k6
 
 import (
@@ -22,6 +25,11 @@ import (
 	"os"
 	"slices"
 )
+
+// SummaryFileName is the default relative path k6's --summary-export
+// writes to. Callers building an absolute path do
+// filepath.Join(workingDir, SummaryFileName).
+const SummaryFileName = "summary.json"
 
 // Summary is the (partial) shape of k6's --summary-export=summary.json output.
 // We only decode the fields we surface — unknown fields are ignored, which

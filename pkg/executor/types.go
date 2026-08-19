@@ -24,13 +24,11 @@ package executor
 // ExecutionRequest is the JSON payload the compiler serializes into
 // $KUBETEST_REQUEST_DIR/request.json (via ConfigMap projection) and the
 // wrapper reads back inside the pod. See CLAUDE.md §11.
+//
+// Workflows model (step 11): no `type` field — the wrapper is generic and
+// runs Command/Args verbatim. Verdict semantics are declared per-Test via
+// the Verdict field.
 type ExecutionRequest struct {
-	// Type is the executor kind ("k6", "cypress", ...). The wrapper picks
-	// which Runner to invoke from its registry keyed by this value. Step 11
-	// wires the dispatcher; step 05 ships a k6-only wrapper that validates
-	// Type == "k6" when non-empty (defense-in-depth on misconfiguration).
-	Type string `json:"type,omitempty"`
-
 	RunID          string            `json:"runId"`
 	TestRef        string            `json:"testRef"`
 	DataDir        string            `json:"dataDir"`
@@ -41,7 +39,30 @@ type ExecutionRequest struct {
 	Config         map[string]string `json:"config,omitempty"`
 	Artifacts      ArtifactSpec      `json:"artifacts,omitzero"`
 	TimeoutSeconds int64             `json:"timeoutSeconds,omitempty"`
+
+	// Verdict, if set, overrides the default exit-code verdict rule. Empty
+	// From (or omitted Verdict) means "verdict from process exit code".
+	// See VerdictSpec + entry.go's post-tool processor pipeline.
+	Verdict VerdictSpec `json:"verdict,omitzero"`
 }
+
+// VerdictSpec mirrors testsv1alpha1.VerdictSpec on the wire. The wrapper
+// doesn't import the CRD types package (keeps the image small and free of
+// k8s API dependencies).
+type VerdictSpec struct {
+	// From is one of "exitCode" (default), "junit", "jtl".
+	From string `json:"from,omitempty"`
+	// ErrorRateMax is the JTL error-rate threshold (float in [0,1] as
+	// a decimal string) — only meaningful when From=jtl.
+	ErrorRateMax string `json:"errorRateMax,omitempty"`
+}
+
+// VerdictFrom* string values recognized in VerdictSpec.From.
+const (
+	VerdictFromExitCode = "exitCode"
+	VerdictFromJUnit    = "junit"
+	VerdictFromJTL      = "jtl"
+)
 
 // ArtifactSpec mirrors testsv1alpha1.ArtifactSpec on the wire. Kept here so
 // the wire format is self-contained (no cross-package dep from the wrapper).

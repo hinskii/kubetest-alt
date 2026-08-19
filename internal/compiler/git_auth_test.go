@@ -18,13 +18,11 @@ package compiler
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -119,7 +117,7 @@ func TestCompile_GitAuth_SecretsNeverInJobSpecPlaintext(t *testing.T) {
 	// output — only if someone mistakenly resolved the secret and embedded it.
 	const sentinel = "SECRET_SENTINEL_VALUE_MUST_NEVER_APPEAR_IN_JOB_SPEC"
 
-	test := newValidTest("k6")
+	test := canonicalTest()
 	test.Spec.Content.Git = &testsv1alpha1.GitContent{
 		URI:      "https://example.com/private.git",
 		AuthType: "basic",
@@ -135,7 +133,7 @@ func TestCompile_GitAuth_SecretsNeverInJobSpecPlaintext(t *testing.T) {
 			},
 		},
 	}
-	job, _, err := Compile(test, newValidTestRun("myrun", test.Name), defaultOpts())
+	job, _, err := Compile(test, canonicalTestRun(), defaultOpts())
 	require.NoError(t, err)
 
 	// Marshal the whole Job to JSON and confirm no EnvVar carries a literal
@@ -145,9 +143,11 @@ func TestCompile_GitAuth_SecretsNeverInJobSpecPlaintext(t *testing.T) {
 	assert.NotContains(t, string(b), sentinel,
 		"secret value must not materialize in Job spec — always ValueFrom")
 
-	// Structural check: find the init container's KUBETEST_GIT_TOKEN env,
-	// assert Value is empty and ValueFrom is set.
-	init := job.Spec.Template.Spec.InitContainers[0]
+	// Structural check: find the content-fetcher init container's
+	// KUBETEST_GIT_TOKEN env, assert Value is empty and ValueFrom is set.
+	// Workflows model: the kubetest-bin-install init container comes
+	// FIRST; content-fetcher is index [1].
+	init := findInitContainer(t, job, ContainerContentFetcher)
 	for _, e := range init.Env {
 		if e.Name == executor.EnvGitToken {
 			assert.Empty(t, e.Value)
@@ -161,69 +161,23 @@ func TestCompile_GitAuth_SecretsNeverInJobSpecPlaintext(t *testing.T) {
 	t.Fatalf("init container missing %s env var", executor.EnvGitToken)
 }
 
-// TestGolden_CompileWithGitAuth is a NEW golden fixture — separate from the
-// existing 5 per-executor goldens so this feature can evolve without churning
-// their diffs. Regenerable via -update like the others.
-func TestGolden_CompileWithGitAuth(t *testing.T) {
-	test := &testsv1alpha1.Test{
-		ObjectMeta: canonicalTest("k6").ObjectMeta,
-		Spec: testsv1alpha1.TestSpec{
-			Type:              "k6",
-			ConcurrencyPolicy: "Allow",
-			Content: testsv1alpha1.Content{
-				Git: &testsv1alpha1.GitContent{
-					URI:      "https://example.com/private.git",
-					Revision: "main",
-					AuthType: "basic",
-					UsernameFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: "git-creds"},
-							Key:                  "username",
-						},
-					},
-					TokenFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: "git-creds"},
-							Key:                  "token",
-						},
-					},
-				},
-			},
-		},
-	}
-	// Override the name to keep this golden distinct from the k6 one.
-	test.Name = "sample-git-auth"
-	run := canonicalTestRun("k6")
-	run.Name = "sample-git-auth-run"
-	run.Spec.TestRef = "sample-git-auth"
+// TestGolden_CompileWithGitAuth: moved to TestGolden_GitAuth in golden_test.go
+// (part of the workflows-model golden regeneration). Kept the structural
+// tests above (TestInitContainerEnv_* and TestCompile_GitAuth_Secrets…)
+// so the secret-ref invariants remain covered without duplicating the
+// fixture path.
 
-	job, aux, err := Compile(test, run, Options{
-		ContentFetcherImage: "ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0",
-	})
-	require.NoError(t, err)
-	require.Len(t, aux, 1)
-
-	got, err := marshalMultiDoc(job, aux[0])
-	require.NoError(t, err)
-
-	path := filepath.Join("testdata", "golden", "git-auth.yaml")
-	if *updateGolden {
-		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o750))
-		// #nosec G306 -- committed fixture, perms match golden_test.go.
-		require.NoError(t, os.WriteFile(path, got, 0o644))
-		t.Logf("updated %s", path)
-		return
+// findInitContainer returns the init container with the given name, or
+// fails the test. Workflows model: init containers are ordered
+// [kubetest-bin-install, content-fetcher], so callers can't index by
+// position anymore.
+func findInitContainer(t *testing.T, job *batchv1.Job, name string) corev1.Container {
+	t.Helper()
+	for _, ic := range job.Spec.Template.Spec.InitContainers {
+		if ic.Name == name {
+			return ic
+		}
 	}
-	// #nosec G304 -- path is a compile-time-literal test fixture location.
-	want, err := os.ReadFile(path)
-	require.NoError(t, err, "read golden (run with -update to regenerate)")
-	if strings.TrimSpace(string(got)) != strings.TrimSpace(string(want)) {
-		assert.Equal(t, string(want), string(got),
-			"golden mismatch — rerun with -update if intentional")
-	}
-	// Extra assertion: golden must NOT contain any literal token bytes; only
-	// secretKeyRef structure. A future compiler change that resolved secrets
-	// into Values would spring both this AND the structural test above.
-	assert.NotContains(t, string(got), `value: token`,
-		"golden must reference secrets via secretKeyRef, not literal Values")
+	t.Fatalf("init container %q not found", name)
+	return corev1.Container{}
 }

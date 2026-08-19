@@ -29,33 +29,70 @@ import (
 
 // baseValidSpec is the minimum spec that passes every validateTest rule.
 // Individual test cases mutate a copy of it to isolate the rule under test.
+//
+// Workflows model: image + command|args required. No spec.type anymore.
 func baseValidSpec() testsv1alpha1.TestSpec {
 	return testsv1alpha1.TestSpec{
-		Type:              "k6",
 		ConcurrencyPolicy: "Allow",
+		Container: testsv1alpha1.ContainerConfig{
+			Image: "grafana/k6:2.2.0",
+			Args:  []string{"run", "script.js"},
+		},
 	}
 }
 
-func TestValidateTest_Type(t *testing.T) {
+// TestValidateTest_ImageRequired: the workflows model has no built-in tool
+// images; every Test must supply spec.container.image.
+func TestValidateTest_ImageRequired(t *testing.T) {
+	spec := baseValidSpec()
+	spec.Container.Image = ""
+	err := validateTest(&spec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.container.image is required")
+}
+
+// TestValidateTest_CommandOrArgsRequired: at least one of command / args
+// must be set — otherwise the wrapper has no invocation to run.
+func TestValidateTest_CommandOrArgsRequired(t *testing.T) {
+	spec := baseValidSpec()
+	spec.Container.Args = nil
+	spec.Container.Command = nil
+	err := validateTest(&spec)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one of command or args is required")
+
+	// Command-only is fine.
+	spec.Container.Command = []string{"/opt/tool/entrypoint.sh"}
+	assert.NoError(t, validateTest(&spec))
+}
+
+func TestValidateTest_Verdict(t *testing.T) {
 	cases := []struct {
 		name       string
-		typ        string
+		verdict    *testsv1alpha1.VerdictSpec
 		wantErr    bool
 		wantSubstr string
 	}{
-		{"valid k6", "k6", false, ""},
-		{"valid cypress", "cypress", false, ""},
-		{"valid newman", "newman", false, ""},
-		{"valid locust", "locust", false, ""},
-		{"valid jmeter", "jmeter", false, ""},
-		{"invalid empty", "", true, "spec.type"},
-		{"invalid unknown tool", "artillery", true, "spec.type"},
-		{"invalid case sensitive", "K6", true, "spec.type"},
+		{"nil verdict (default exitCode)", nil, false, ""},
+		{"empty From (treated as exitCode)", &testsv1alpha1.VerdictSpec{}, false, ""},
+		{"exitCode explicit", &testsv1alpha1.VerdictSpec{From: "exitCode"}, false, ""},
+		{"junit no threshold", &testsv1alpha1.VerdictSpec{From: "junit"}, false, ""},
+		{"jtl with threshold 0", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "0"}, false, ""},
+		{"jtl with threshold 0.05", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "0.05"}, false, ""},
+		{"jtl with threshold 1", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "1"}, false, ""},
+		{"invalid From", &testsv1alpha1.VerdictSpec{From: "coinflip"}, true, "spec.verdict.from"},
+		{"junit + errorRateMax → 400 (misplaced knob)",
+			&testsv1alpha1.VerdictSpec{From: "junit", ErrorRateMax: "0.01"}, true, "only valid when spec.verdict.from=jtl"},
+		{"exitCode + errorRateMax → 400",
+			&testsv1alpha1.VerdictSpec{From: "exitCode", ErrorRateMax: "0.01"}, true, "only valid when spec.verdict.from=jtl"},
+		{"jtl + non-numeric errorRateMax", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "many"}, true, "not a valid float"},
+		{"jtl + negative errorRateMax", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "-0.1"}, true, "out of range"},
+		{"jtl + errorRateMax > 1", &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "1.5"}, true, "out of range"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := baseValidSpec()
-			spec.Type = tc.typ
+			spec.Verdict = tc.verdict
 			err := validateTest(&spec)
 			if tc.wantErr {
 				require.Error(t, err)

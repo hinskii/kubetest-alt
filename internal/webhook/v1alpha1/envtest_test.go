@@ -32,13 +32,25 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
 
+// baseValidWireSpec is the minimum spec that clears both the OpenAPI
+// schema and the validating webhook. Kept here (not shared with the pure
+// unit tests) so an envtest failure points at the actual wire spec.
+func baseValidWireSpec() testsv1alpha1.TestSpec {
+	return testsv1alpha1.TestSpec{
+		Container: testsv1alpha1.ContainerConfig{
+			Image: "grafana/k6:2.2.0",
+			Args:  []string{"run", "script.js"},
+		},
+	}
+}
+
 // TestEnvtest_CreateValidTest exercises the full admission path: CRD schema +
 // mutating webhook (defaults concurrencyPolicy) + validating webhook.
 func TestEnvtest_CreateValidTest(t *testing.T) {
 	ctx := context.Background()
 	obj := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "valid-k6", Namespace: "default"},
-		Spec:       testsv1alpha1.TestSpec{Type: "k6"},
+		Spec:       baseValidWireSpec(),
 	}
 	require.NoError(t, k8sClient.Create(ctx, obj))
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })
@@ -47,21 +59,53 @@ func TestEnvtest_CreateValidTest(t *testing.T) {
 	assert.Equal(t, DefaultConcurrencyPolicy, obj.Spec.ConcurrencyPolicy)
 }
 
-// TestEnvtest_RejectInvalidTest_Type asserts wire-level rejection for a bad
-// executor type. NOTE: this test is double-covered — the +kubebuilder:validation:Enum
-// marker on TestSpec.Type rejects at the OpenAPI schema layer BEFORE the webhook
-// runs. It would pass even if the webhook were unwired. The webhook-hit signal
-// comes from TestEnvtest_RejectInvalidTest_InlineSize (aggregate-size rule is
-// not expressible in schema) and _Schedule (cron parsing likewise).
-func TestEnvtest_RejectInvalidTest_Type(t *testing.T) {
+// TestEnvtest_RejectMissingImage is one webhook-hit sentinel for the new
+// workflows model: image is required by webhook code only (openAPI marker
+// on ContainerConfig doesn't enforce presence — the type is optional).
+// If this passes without our webhook wired, the error would land somewhere
+// else (compile) later; we want it at admission.
+func TestEnvtest_RejectMissingImage(t *testing.T) {
 	ctx := context.Background()
 	obj := &testsv1alpha1.Test{
-		ObjectMeta: metav1.ObjectMeta{Name: "bad-type", Namespace: "default"},
-		Spec:       testsv1alpha1.TestSpec{Type: "artillery"},
+		ObjectMeta: metav1.ObjectMeta{Name: "no-image", Namespace: "default"},
+		Spec: testsv1alpha1.TestSpec{
+			Container: testsv1alpha1.ContainerConfig{Args: []string{"run"}},
+		},
 	}
 	err := k8sClient.Create(ctx, obj)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "spec.type")
+	assert.Contains(t, err.Error(), "spec.container.image is required")
+}
+
+// TestEnvtest_RejectMissingCommandAndArgs is a second webhook-only sentinel.
+func TestEnvtest_RejectMissingCommandAndArgs(t *testing.T) {
+	ctx := context.Background()
+	obj := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "no-invocation", Namespace: "default"},
+		Spec: testsv1alpha1.TestSpec{
+			Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:2.2.0"},
+		},
+	}
+	err := k8sClient.Create(ctx, obj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "command or args")
+}
+
+// TestEnvtest_RejectVerdictCrossFieldRule is a third webhook-hit sentinel:
+// "errorRateMax only valid when from=jtl" is a cross-field predicate the
+// openAPI schema can't express. If a payload with junit+errorRateMax
+// slips through, the webhook is off the path.
+func TestEnvtest_RejectVerdictCrossFieldRule(t *testing.T) {
+	ctx := context.Background()
+	spec := baseValidWireSpec()
+	spec.Verdict = &testsv1alpha1.VerdictSpec{From: "junit", ErrorRateMax: "0.01"}
+	obj := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "bad-verdict", Namespace: "default"},
+		Spec:       spec,
+	}
+	err := k8sClient.Create(ctx, obj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "only valid when spec.verdict.from=jtl")
 }
 
 // TestEnvtest_RejectInvalidTest_InlineSize is one of two webhook-hit sentinels:
@@ -73,14 +117,15 @@ func TestEnvtest_RejectInvalidTest_InlineSize(t *testing.T) {
 	ctx := context.Background()
 	obj := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "too-big", Namespace: "default"},
-		Spec: testsv1alpha1.TestSpec{
-			Type: "k6",
-			Content: testsv1alpha1.Content{
+		Spec: func() testsv1alpha1.TestSpec {
+			s := baseValidWireSpec()
+			s.Content = testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{
 					{Path: "huge.txt", Content: strings.Repeat("a", 513*1024)},
 				},
-			},
-		},
+			}
+			return s
+		}(),
 	}
 	err := k8sClient.Create(ctx, obj)
 	require.Error(t, err)
@@ -94,7 +139,11 @@ func TestEnvtest_RejectInvalidTest_Schedule(t *testing.T) {
 	ctx := context.Background()
 	obj := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "bad-cron", Namespace: "default"},
-		Spec:       testsv1alpha1.TestSpec{Type: "k6", Schedule: "61 * * * *"},
+		Spec: func() testsv1alpha1.TestSpec {
+			s := baseValidWireSpec()
+			s.Schedule = "61 * * * *"
+			return s
+		}(),
 	}
 	err := k8sClient.Create(ctx, obj)
 	require.Error(t, err)
@@ -110,10 +159,11 @@ func TestEnvtest_RejectInvalidTest_GitURI(t *testing.T) {
 	ctx := context.Background()
 	obj := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "no-git-uri", Namespace: "default"},
-		Spec: testsv1alpha1.TestSpec{
-			Type:    "k6",
-			Content: testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{Revision: "main"}},
-		},
+		Spec: func() testsv1alpha1.TestSpec {
+			s := baseValidWireSpec()
+			s.Content = testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{Revision: "main"}}
+			return s
+		}(),
 	}
 	err := k8sClient.Create(ctx, obj)
 	require.Error(t, err)
@@ -163,13 +213,14 @@ func TestEnvtest_PodConfigAnnotationsPassThrough(t *testing.T) {
 	userLab := map[string]string{"team": "sre", "env": "dev"}
 	obj := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "pod-passthrough", Namespace: "default"},
-		Spec: testsv1alpha1.TestSpec{
-			Type: "k6",
-			Pod: &testsv1alpha1.PodConfig{
+		Spec: func() testsv1alpha1.TestSpec {
+			s := baseValidWireSpec()
+			s.Pod = &testsv1alpha1.PodConfig{
 				Annotations: cloneStringMap(userAnn),
 				Labels:      cloneStringMap(userLab),
-			},
-		},
+			}
+			return s
+		}(),
 	}
 	require.NoError(t, k8sClient.Create(ctx, obj))
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })

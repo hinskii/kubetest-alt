@@ -4,9 +4,12 @@ metadata:
   labels:
     app.kubernetes.io/name: kubetest-alt
     app.kubernetes.io/managed-by: kustomize
+    # Workflows model (step 11): tool identity lives in a label, NOT
+    # spec.type. Templates + samples set this so kubectl printcolumn
+    # groups by tool without the compiler needing to know about tools.
+    kubetest.io/tool: k6
   name: test-sample
 spec:
-  type: k6
   schedule: "0 6 * * *"
   concurrencyPolicy: Forbid
   content:
@@ -16,7 +19,8 @@ spec:
       paths:
         - scenarios/checkout
   container:
-    image: grafana/k6:latest
+    # Image + (command OR args) are REQUIRED by the webhook.
+    image: grafana/k6:2.2.0
     args:
       - run
       - scenarios/checkout/script.js

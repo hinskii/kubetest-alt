@@ -41,7 +41,6 @@ func TestTestDefaulter_ConcurrencyPolicy(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			obj := &testsv1alpha1.Test{Spec: testsv1alpha1.TestSpec{
-				Type:              "k6",
 				ConcurrencyPolicy: tc.in,
 			}}
 			require.NoError(t, (&TestCustomDefaulter{}).Default(context.Background(), obj))
@@ -59,7 +58,6 @@ func TestTestDefaulter_DoesNotTouchPodAnnotations(t *testing.T) {
 	}
 	labels := map[string]string{"team": "sre"}
 	obj := &testsv1alpha1.Test{Spec: testsv1alpha1.TestSpec{
-		Type: "k6",
 		Pod: &testsv1alpha1.PodConfig{
 			Annotations: cloneStringMap(ann),
 			Labels:      cloneStringMap(labels),

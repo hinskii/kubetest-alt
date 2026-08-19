@@ -56,9 +56,14 @@ func newTestFixture(namespace, name string) *testsv1alpha1.Test {
 	return &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
 		Spec: testsv1alpha1.TestSpec{
-			Type:              "k6",
 			ConcurrencyPolicy: PolicyAllow,
 			Timeout:           &metav1.Duration{Duration: 5 * time.Minute},
+			// Workflows model: image + args required by the webhook. Args
+			// are placeholder — the controller test doesn't invoke the tool.
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:2.2.0",
+				Args:  []string{"run", "script.js"},
+			},
 		},
 	}
 }
@@ -222,7 +227,7 @@ func TestReconcile_HappyPath(t *testing.T) {
 		require.NotEmpty(t, fresh.Status.ResolvedSpec)
 		var snap testsv1alpha1.TestSpec
 		require.NoError(t, json.Unmarshal([]byte(fresh.Status.ResolvedSpec), &snap))
-		assert.Equal(t, test.Spec.Type, snap.Type)
+		assert.Equal(t, test.Spec.Container.Image, snap.Container.Image)
 	}
 
 	// Simulate pod running.

@@ -1,0 +1,4 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
+1787047215531,304,GET example.com,404,Not Found,tg 1-1,text,false,,788,131,1,1,https://example.com/x,301,0,245
+1787047215836,179,GET example.com,404,Not Found,tg 1-1,text,false,,788,131,1,1,https://example.com/x,178,0,123
+1787047216015,139,GET example.com,404,Not Found,tg 1-1,text,false,,788,131,1,1,https://example.com/x,138,0,94

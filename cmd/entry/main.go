@@ -14,32 +14,41 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// /entry is the in-container wrapper. Two modes:
+// /entry is the in-container wrapper. Three subcommands from ONE binary:
 //
-//   - default (no args, or unrecognized subcommand): tool wrapper. Reads
-//     request.json, runs the tool via the Runner, writes result.json.
-//     See pkg/executor.
+//   - default: workflows-model tool wrapper. Reads request.json,
+//     runs req.Command/Args verbatim, applies the optional verdictFrom
+//     processor (junit/jtl), writes result.json. See pkg/executor.
 //
-//   - "fetch" (argv[1] == "fetch"): init-container mode. Reads content.json,
-//     materializes git/files/tarball into $KUBETEST_DATADIR. See
-//     pkg/executor/fetcher.
+//   - "fetch" (argv[1] == "fetch"): init-container mode. Reads content.json
+//     from the projected ConfigMap and materializes git/files/tarball into
+//     $KUBETEST_DATADIR. See pkg/executor/fetcher.
 //
-// One binary, two subcommands — deliberate. Per-tool /entry binaries were
-// considered and rejected in step 05 (see plan/step-11 NOTE).
+//   - "install" is IMPLICIT — the compiler's init container that copies
+//     /entry into the shared kubetest-bin emptyDir uses `sh -c "cp
+//     /entry /kubetest-bin/entry"` directly (see internal/compiler). No
+//     Go-side subcommand needed for a one-line file copy.
+//
+// Workflows-model change (step 11): the wrapper has NO per-tool Runner
+// dispatch. Tool identity lives in the kubetest.io/tool label on the
+// Test, propagated to Job/Pod labels by the compiler — the wrapper
+// itself is generic and doesn't need to know what tool it's running.
 package main
 
 import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
 	"github.com/hinskii/kubetest-alt/internal/scraper"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/executor/fetcher"
-	"github.com/hinskii/kubetest-alt/pkg/executor/k6"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
+	verdictjtl "github.com/hinskii/kubetest-alt/pkg/verdict/jtl"
+	verdictjunit "github.com/hinskii/kubetest-alt/pkg/verdict/junit"
 )
 
 func main() {
@@ -65,8 +74,10 @@ func runFetch(ctx context.Context) int {
 	return 0
 }
 
-// runWrapper dispatches to the tool wrapper. Step 05 ships only k6; step 11
-// swaps this for a map[string]Runner keyed by request.Type.
+// runWrapper is the generic tool-runner path. Constructs the Entry with
+// the shared verdict processors (JUnit + JTL) — the tool-agnostic
+// processors are always wired; whether one runs is determined by the
+// declared spec.verdict.from in the Test.
 func runWrapper(ctx context.Context) int {
 	resultDir := os.Getenv(executor.EnvResultDir)
 	if resultDir == "" {
@@ -74,11 +85,15 @@ func runWrapper(ctx context.Context) int {
 	}
 
 	entry := &executor.Entry{
-		Runner:      k6.NewRunner(),
-		Scraper:     newScraperFromEnv(), // nil when MINIO_ENDPOINT unset
-		RequestPath: executor.RequestPath,
-		ResultDir:   resultDir,
-		Stderr:      os.Stderr,
+		Exec:           exec.CommandContext,
+		Stdout:         os.Stdout,
+		Stderr:         os.Stderr,
+		JUnitProcessor: junitProcessorFromDir,
+		JTLProcessor:   jtlProcessorFromDir,
+		Scraper:        newScraperFromEnv(), // nil when MINIO_ENDPOINT unset
+		RequestPath:    executor.RequestPath,
+		ResultDir:      resultDir,
+		Loader:         os.Stderr,
 	}
 	if err := entry.Execute(ctx); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -87,10 +102,43 @@ func runWrapper(ctx context.Context) int {
 	return 0
 }
 
+// junitProcessorFromDir wraps pkg/verdict/junit.Scan into the signature
+// Entry.JUnitProcessor expects. Uses DefaultGlobs — templates that need
+// custom glob patterns supply them via Args and the tool writes reports
+// wherever they end up (the default globs cover all common cases).
+func junitProcessorFromDir(workingDir string) (executor.TestCounts, error) {
+	counts, err := verdictjunit.Scan(workingDir, nil)
+	if err != nil {
+		return executor.TestCounts{}, err
+	}
+	return executor.TestCounts{
+		Total:   counts.Total,
+		Passed:  counts.Passed,
+		Failed:  counts.Failed,
+		Skipped: counts.Skipped,
+	}, nil
+}
+
+// jtlProcessorFromDir wraps pkg/verdict/jtl.Load into the signature
+// Entry.JTLProcessor expects. JTL file location convention: workingDir/out.jtl.
+// Templates using JMeter set -l out.jtl in their args by convention.
+func jtlProcessorFromDir(workingDir string, threshold float64) (executor.JTLProcessorResult, error) {
+	agg, err := verdictjtl.Load(workingDir + "/out.jtl")
+	if err != nil {
+		return executor.JTLProcessorResult{}, err
+	}
+	rate := agg.ErrorRate()
+	return executor.JTLProcessorResult{
+		SamplesTotal:  agg.SamplesTotal,
+		SamplesFailed: agg.SamplesFailed,
+		ErrorRate:     rate,
+		Threshold:     threshold,
+		Passed:        rate <= threshold,
+	}, nil
+}
+
 // newScraperFromEnv builds the wrapper-side artifact scraper (step 07) when
-// the operator has configured MinIO. Returns nil when disabled so Entry
-// skips the scrape path cleanly. Credentials come from envFrom (the compiler
-// wires the Secret ref on the container) — this function only reads env vars.
+// the operator has configured MinIO.
 func newScraperFromEnv() executor.Scraper {
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	if endpoint == "" {
@@ -110,8 +158,6 @@ func newScraperFromEnv() executor.Scraper {
 		SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
 	})
 	if err != nil {
-		// Log to stderr but keep going — Entry treats nil Scraper as "don't
-		// scrape", the run still produces result.json on the local emptyDir.
 		_, _ = fmt.Fprintf(os.Stderr, "wrapper: minio init failed, skipping scrape: %v\n", err)
 		return nil
 	}

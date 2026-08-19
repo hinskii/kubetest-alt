@@ -1,0 +1,4 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
+1787047206791,388,GET example.com,200,OK,tg 1-1,text,true,,868,111,1,1,https://example.com/,385,0,313
+1787047207181,148,GET example.com,200,OK,tg 1-1,text,true,,868,111,1,1,https://example.com/,146,0,95
+1787047207329,164,GET example.com,200,OK,tg 1-1,text,true,,868,111,1,1,https://example.com/,163,0,106

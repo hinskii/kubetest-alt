@@ -52,7 +52,11 @@ func TestE2E_512KBInline_ThroughCompilerAndFetcher(t *testing.T) {
 	test := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: "big-inline", Namespace: "ns"},
 		Spec: testsv1alpha1.TestSpec{
-			Type: "k6",
+			// Workflows model: image + command drive execution; no spec.type.
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:2.2.0",
+				Args:  []string{"run", "script.js"},
+			},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{
 					{Path: "big-a.txt", Content: payloadA},

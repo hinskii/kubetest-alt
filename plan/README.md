@@ -41,7 +41,8 @@ make test-coverage        # core logic packages (compiler, executor, scraper, ex
 | 08 | step-08-logstream.md | Pod log tail → websocket + MinIO |
 | 09 | step-09-postgres-store.md | Run history repo + retention |
 | 10 | step-10-apiserver.md | REST/WS API for GUI, managed-by enforcement |
-| 11 | step-11-executors-remaining.md | cypress/newman/locust/jmeter wrappers |
+| 11 | step-11-workflows-refactor.md | Workflows-model refactor: drop spec.type + runners, adopt image+command + verdictFrom |
 | 12 | step-12-scheduler-triggers.md | Cron scheduler + TestTrigger controller |
 | 13 | step-13-templates-expr.md | TestTemplate, config params, {{ }} engine |
 | 14 | step-14-webhooks-metrics.md | Notifications + Prometheus metrics |
+| 15 | step-15-tool-catalog.md | Curated TestTemplate catalog (Testkube parity) — tool names live here |

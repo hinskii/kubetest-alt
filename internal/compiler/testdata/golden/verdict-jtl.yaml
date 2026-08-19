@@ -3,15 +3,15 @@ kind: Job
 metadata:
   labels:
     app.kubernetes.io/managed-by: kubetest-alt
-    kubetest.io/run-id: sample-cypress-run
-  name: sample-cypress-run
+    kubetest.io/run-id: sample-run
+  name: sample-run
   namespace: kubetest-samples
   ownerReferences:
   - apiVersion: tests.kubetest.io/v1alpha1
     blockOwnerDeletion: true
     controller: true
     kind: TestRun
-    name: sample-cypress-run
+    name: sample-run
     uid: 00000000-0000-0000-0000-0000cafe0001
 spec:
   activeDeadlineSeconds: 360
@@ -23,30 +23,28 @@ spec:
         sidecar.istio.io/inject: "false"
       labels:
         app.kubernetes.io/managed-by: kubetest-alt
-        kubetest.io/run-id: sample-cypress-run
+        kubetest.io/run-id: sample-run
         team: sre
     spec:
       automountServiceAccountToken: false
       containers:
       - args:
-        - cypress
         - run
-        - --reporter
-        - junit
+        - script.js
         command:
-        - /entry
+        - /kubetest-bin/entry
         env:
         - name: KUBETEST_DATADIR
           value: /data
         - name: KUBETEST_RESULTDIR
           value: /etc/kubetest/result
         - name: KUBETEST_RUN_ID
-          value: sample-cypress-run
+          value: sample-run
         - name: KUBETEST_TEST_REF
-          value: sample-cypress
+          value: sample
         - name: FEATURE_X
           value: "on"
-        image: cypress/included:15.20.1
+        image: grafana/k6:2.2.0
         name: wrapper
         resources: {}
         volumeMounts:
@@ -57,9 +55,19 @@ spec:
           readOnly: true
         - mountPath: /etc/kubetest/result
           name: result
-        - mountPath: /dev/shm
-          name: dev-shm
+        - mountPath: /kubetest-bin
+          name: kubetest-bin
       initContainers:
+      - command:
+        - sh
+        - -c
+        - cp /entry /kubetest-bin/entry
+        image: ghcr.io/hinskii/kubetest-alt/content-fetcher:v0.0.0
+        name: kubetest-bin-install
+        resources: {}
+        volumeMounts:
+        - mountPath: /kubetest-bin
+          name: kubetest-bin
       - command:
         - /entry
         - fetch
@@ -82,17 +90,16 @@ spec:
         name: data
       - emptyDir: {}
         name: result
+      - emptyDir: {}
+        name: kubetest-bin
       - configMap:
           items:
           - key: request.json
             path: request.json
           - key: content.json
             path: content.json
-          name: sample-cypress-run-request
+          name: sample-run-request
         name: request
-      - emptyDir:
-          medium: Memory
-        name: dev-shm
   ttlSecondsAfterFinished: 3600
 status: {}
 ---
@@ -101,15 +108,12 @@ data:
   content.json: '{"git":{"uri":"https://example.com/tests.git","revision":"main"}}'
   request.json: |-
     {
-      "type": "cypress",
-      "runId": "sample-cypress-run",
-      "testRef": "sample-cypress",
+      "runId": "sample-run",
+      "testRef": "sample",
       "dataDir": "/data",
       "args": [
-        "cypress",
         "run",
-        "--reporter",
-        "junit"
+        "script.js"
       ],
       "env": {
         "FEATURE_X": "on"
@@ -122,19 +126,23 @@ data:
           "results/**/*.xml"
         ]
       },
-      "timeoutSeconds": 300
+      "timeoutSeconds": 300,
+      "verdict": {
+        "from": "jtl",
+        "errorRateMax": "0.01"
+      }
     }
 kind: ConfigMap
 metadata:
   labels:
     app.kubernetes.io/managed-by: kubetest-alt
-    kubetest.io/run-id: sample-cypress-run
-  name: sample-cypress-run-request
+    kubetest.io/run-id: sample-run
+  name: sample-run-request
   namespace: kubetest-samples
   ownerReferences:
   - apiVersion: tests.kubetest.io/v1alpha1
     blockOwnerDeletion: true
     controller: true
     kind: TestRun
-    name: sample-cypress-run
+    name: sample-run
     uid: 00000000-0000-0000-0000-0000cafe0001

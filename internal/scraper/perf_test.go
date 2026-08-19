@@ -26,12 +26,13 @@ import (
 )
 
 // TestParseK6_ReadsSummaryFromWorkingDir: k6 perf parser fetches summary.json
-// from the wrapper's working directory. Real fixture from pkg/executor/k6.
+// from the wrapper's working directory. Real fixture from the co-located
+// perf/k6 subpackage (moved from pkg/executor/k6 in the step-11 refactor).
 func TestParseK6_ReadsSummaryFromWorkingDir(t *testing.T) {
 	// Copy a real k6 summary fixture into the working dir.
 	dir := t.TempDir()
-	// #nosec G304 -- fixed testdata path from the sibling k6 package.
-	src, err := os.ReadFile(filepath.Join("..", "..", "pkg", "executor", "k6", "testdata", "summary_passing.json"))
+	// #nosec G304 -- fixed testdata path from the sibling k6 subpackage.
+	src, err := os.ReadFile(filepath.Join("perf", "k6", "testdata", "summary_passing.json"))
 	require.NoError(t, err)
 	// #nosec G306,G703 -- test fixture; dir is t.TempDir().
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "summary.json"), src, 0o644))

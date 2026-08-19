@@ -104,9 +104,9 @@ func TestAnnotations_PassThrough_NoInjection(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			test := newValidTest("k6")
+			test := canonicalTest()
 			test.Spec.Pod = tc.testPod
-			run := newValidTestRun("myrun", test.Name)
+			run := canonicalTestRun()
 			run.Spec.Pod = tc.runPod
 
 			job, _, err := Compile(test, run, defaultOpts())
@@ -135,9 +135,9 @@ func TestAnnotations_PassThrough_NoInjection(t *testing.T) {
 //   - user attempts to set reserved keys are silently dropped.
 func TestLabels_MergeAndReservedOverlay(t *testing.T) {
 	t.Run("TestRun value wins on non-reserved key conflict", func(t *testing.T) {
-		test := newValidTest("k6")
+		test := canonicalTest()
 		test.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{"team": "sre"}}
-		run := newValidTestRun("myrun", test.Name)
+		run := canonicalTestRun()
 		run.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{"team": "platform"}}
 
 		job, _, err := Compile(test, run, defaultOpts())
@@ -146,29 +146,29 @@ func TestLabels_MergeAndReservedOverlay(t *testing.T) {
 	})
 
 	t.Run("user cannot override kubetest.io/run-id", func(t *testing.T) {
-		test := newValidTest("k6")
+		test := canonicalTest()
 		test.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{
 			"kubetest.io/run-id": "pwned",
 		}}
-		run := newValidTestRun("myrun", test.Name)
+		run := canonicalTestRun()
 		run.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{
 			"kubetest.io/run-id": "also-pwned",
 		}}
 
 		job, _, err := Compile(test, run, defaultOpts())
 		require.NoError(t, err)
-		assert.Equal(t, "myrun", job.Spec.Template.Labels[LabelRunID],
+		assert.Equal(t, "sample-run", job.Spec.Template.Labels[LabelRunID],
 			"operator must overwrite user-supplied kubetest.io/run-id")
 	})
 
 	t.Run("user cannot override app.kubernetes.io/managed-by on workloads", func(t *testing.T) {
 		// Distinct from CRD-level managed-by (gitops|ui) per §7 — on workloads
 		// this label is the operator's badge, always kubetest-alt.
-		test := newValidTest("k6")
+		test := canonicalTest()
 		test.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{
 			LabelManagedBy: "helm",
 		}}
-		job, _, err := Compile(test, newValidTestRun("myrun", test.Name), defaultOpts())
+		job, _, err := Compile(test, canonicalTestRun(), defaultOpts())
 		require.NoError(t, err)
 		assert.Equal(t, ManagedByValue, job.Spec.Template.Labels[LabelManagedBy])
 	})
@@ -176,12 +176,12 @@ func TestLabels_MergeAndReservedOverlay(t *testing.T) {
 	t.Run("arbitrary kubetest.io/* keys are dropped (future-reserved prefix)", func(t *testing.T) {
 		// Guards the reservation of the whole kubetest.io/ namespace — even
 		// keys we haven't defined yet must not be smuggled in by user config.
-		test := newValidTest("k6")
+		test := canonicalTest()
 		test.Spec.Pod = &testsv1alpha1.PodConfig{Labels: map[string]string{
 			"kubetest.io/future-feature-flag": "on",
 			"team":                            "sre",
 		}}
-		job, _, err := Compile(test, newValidTestRun("myrun", test.Name), defaultOpts())
+		job, _, err := Compile(test, canonicalTestRun(), defaultOpts())
 		require.NoError(t, err)
 		assert.NotContains(t, job.Spec.Template.Labels, "kubetest.io/future-feature-flag",
 			"reserved kubetest.io/* prefix must drop user values")
@@ -189,9 +189,11 @@ func TestLabels_MergeAndReservedOverlay(t *testing.T) {
 	})
 
 	t.Run("operator labels always present, even when user set no labels", func(t *testing.T) {
-		job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), defaultOpts())
+		test := canonicalTest()
+		test.Spec.Pod = nil // no user labels
+		job, _, err := Compile(test, canonicalTestRun(), defaultOpts())
 		require.NoError(t, err)
-		assert.Equal(t, "myrun", job.Spec.Template.Labels[LabelRunID])
+		assert.Equal(t, "sample-run", job.Spec.Template.Labels[LabelRunID])
 		assert.Equal(t, ManagedByValue, job.Spec.Template.Labels[LabelManagedBy])
 	})
 }
@@ -200,12 +202,12 @@ func TestLabels_MergeAndReservedOverlay(t *testing.T) {
 // PodConfig fields follow the TestRun-wins rule too — regression guard so a
 // future refactor of mergePodConfig doesn't silently drop TestRun overrides.
 func TestPodConfig_ScalarFields_MergedFromTestRunFirst(t *testing.T) {
-	test := newValidTest("k6")
+	test := canonicalTest()
 	test.Spec.Pod = &testsv1alpha1.PodConfig{
 		ServiceAccountName: "test-sa",
 		NodeSelector:       map[string]string{"disktype": "ssd"},
 	}
-	run := newValidTestRun("myrun", test.Name)
+	run := canonicalTestRun()
 	run.Spec.Pod = &testsv1alpha1.PodConfig{
 		ServiceAccountName: "override-sa",
 		NodeSelector:       map[string]string{"disktype": "nvme", "env": "prod"},

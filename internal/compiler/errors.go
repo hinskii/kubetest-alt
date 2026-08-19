@@ -18,20 +18,13 @@ package compiler
 
 import "errors"
 
-// Typed sentinel errors so callers can react programmatically
-// (`errors.Is(err, compiler.ErrUnknownExecutor)`).
+// Typed sentinel errors so callers can react programmatically.
 var (
 	// ErrNilTest indicates Compile was called with a nil *Test pointer.
 	ErrNilTest = errors.New("compiler: test is nil")
 
 	// ErrNilTestRun indicates Compile was called with a nil *TestRun pointer.
 	ErrNilTestRun = errors.New("compiler: testrun is nil")
-
-	// ErrUnknownExecutor indicates spec.type isn't in DefaultExecutorImages.
-	// (The Test webhook rejects unknown types at admission, but the compiler
-	// still validates as a defense-in-depth measure for tests that skip the
-	// webhook path.)
-	ErrUnknownExecutor = errors.New("compiler: unknown executor type")
 
 	// ErrMissingContentFetcherImage indicates Options.ContentFetcherImage
 	// wasn't provided; the operator must supply it (step 06 fills this in).

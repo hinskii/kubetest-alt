@@ -143,7 +143,10 @@ func mkTest(name, labelVal string) *testsv1alpha1.Test {
 			Labels:    labels,
 		},
 		Spec: testsv1alpha1.TestSpec{
-			Type: "k6",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:2.2.0",
+				Args:  []string{"run", "script.js"},
+			},
 			Content: testsv1alpha1.Content{
 				Git: &testsv1alpha1.GitContent{URI: "https://example.com/tests.git"},
 			},
@@ -256,7 +259,12 @@ func TestManagedBy_PostSetsUILabelExactlyOnce(t *testing.T) {
 	rec, body := doRequest(t, h, "POST", "/tests",
 		&testsv1alpha1.Test{
 			ObjectMeta: metav1.ObjectMeta{Name: "clean", Namespace: "default"},
-			Spec:       testsv1alpha1.TestSpec{Type: "k6"},
+			Spec: testsv1alpha1.TestSpec{
+				Container: testsv1alpha1.ContainerConfig{
+					Image: "grafana/k6:2.2.0",
+					Args:  []string{"run", "script.js"},
+				},
+			},
 		})
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	labels := body["metadata"].(map[string]any)["labels"].(map[string]any)
@@ -946,7 +954,12 @@ func TestWriteAPIError_MapsAlreadyExists(t *testing.T) {
 	rec, body := doRequest(t, h, "POST", "/tests",
 		&testsv1alpha1.Test{
 			ObjectMeta: metav1.ObjectMeta{Name: "dup", Namespace: "default"},
-			Spec:       testsv1alpha1.TestSpec{Type: "k6"},
+			Spec: testsv1alpha1.TestSpec{
+				Container: testsv1alpha1.ContainerConfig{
+					Image: "grafana/k6:2.2.0",
+					Args:  []string{"run", "script.js"},
+				},
+			},
 		})
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, ReasonConflict, body["reason"])

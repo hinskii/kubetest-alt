@@ -12,7 +12,7 @@ Build an open-source-style in-house alternative to Testkube's OSS agent — but 
 - **Thin API server** for the GUI (read models + mutating actions that write CRs). GUI never holds private state that isn't reconstructable from cluster + Postgres run history.
 - **Postgres** for run history/results (NOT Mongo — see §9).
 - **MinIO/S3** for artifacts + logs.
-- **Pluggable executors:** k6, Cypress, Postman (newman), Locust, JMeter — as containerized steps, not bespoke Go binaries per tool (see §3, §6).
+- **Any containerized tool** — a Test is an image + command. Verdict = process exit code + a small set of declarative `verdictFrom` processors (JUnit, JTL) for tools whose exit codes lie. Curated `TestTemplate` catalog names the tools (`kubetest.io/tool` label); the operator itself is tool-agnostic.
 - Multi-namespace, GitOps-compatible, Istio-aware.
 - **No workload-level hacks for infra concerns.** The CRD exposes a fully generic pod annotations/labels passthrough (see §8) — the platform hardcodes NO specific annotations, and infra behavior (e.g. mesh) is never handled via in-wrapper hacks like quitquitquit.
 
@@ -124,7 +124,7 @@ Testkube's own post-mortem ("The Future of Testkube: Transitioning to Test Workf
 - **Image metadata fetching:** engine pulls image config from the registry to learn `WORKDIR`/`ENTRYPOINT`/`CMD`/`USER` (k8s doesn't expose these). Needs registry creds; can be bypassed by specifying `workingDir`+`securityContext`+explicit `command`. **[DOC]**
 - **Parallel/services:** the main execution pod talks directly to the k8s API to create/watch/destroy Jobs+Pods for each parallel worker/service. **[DOC]**
 
-> **Lesson → our executor model:** DO NOT build bespoke Go runner binaries per tool. Adopt the TestWorkflow container-step model: executors are just container images + a declarative step contract. Provide a small **run wrapper (`/entry`)** (our analog of `/init`) that fetches content, injects env/params, runs the tool, tails logs, scrapes artifacts, and writes a result JSON. Keep an optional Go `Runner` interface for a *thin* set of built-in wrappers, but the primary contract is container + declarative step. See §11.
+> **Lesson → our executor model:** Adopt the TestWorkflow container-step model in full — including the "no Runner interface" part we initially skipped. A Test is an `image` + `command|args`, nothing more (see §10). One generic `/entry` wrapper is injected into every image via a shared emptyDir (init container `cp`s it from the content-fetcher image). `/entry` runs the tool's argv verbatim; verdict comes from the exit code, optionally overridden by a declarative `verdictFrom` processor (JUnit / JTL — the two shapes worth first-class support because they fix the "exit code lies" cases at admission-time rather than in per-tool code). No Go `Runner` interface, no per-tool wrapper image, no `spec.type` in the CRD. Tool identity lives in the `kubetest.io/tool` label — set by templates or users, ignored by the operator except for propagation to Job/Pod labels for kubectl selectors. See §11.
 
 ---
 
@@ -276,7 +276,7 @@ import (
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
+// +kubebuilder:printcolumn:name="Tool",type=string,JSONPath=`.metadata.labels['kubetest\.io/tool']`
 // +kubebuilder:printcolumn:name="LastRun",type=string,JSONPath=`.status.latestRun.phase`
 type Test struct {
     metav1.TypeMeta   `json:",inline"`
@@ -285,12 +285,16 @@ type Test struct {
     Status TestStatus `json:"status,omitempty"`
 }
 
+// TestSpec has NO `type` field — see §3 lesson block. A Test is
+// image + command; tool identity lives in the `kubetest.io/tool` label
+// on ObjectMeta (added by templates or users, propagated to Job/Pod
+// labels by the compiler for kubectl selectors).
 type TestSpec struct {
-    // +kubebuilder:validation:Enum=k6;cypress;newman;locust;jmeter
-    Type string `json:"type"`
-
     Content   Content                `json:"content,omitempty"`
-    Container ContainerConfig        `json:"container,omitempty"` // image/command/args/env/resources overrides
+    // Container: image REQUIRED, at least one of command|args REQUIRED
+    // (both enforced by the validating webhook — the wrapper needs
+    // SOMETHING to run).
+    Container ContainerConfig        `json:"container,omitempty"`
     Pod       *PodConfig             `json:"pod,omitempty"`
     Config    map[string]Parameter   `json:"config,omitempty"`    // typed params
     Artifacts *ArtifactSpec          `json:"artifacts,omitempty"`
@@ -299,8 +303,25 @@ type TestSpec struct {
     Schedule  string                 `json:"schedule,omitempty"`  // cron; empty = manual
     Services  map[string]ServiceSpec `json:"services,omitempty"`  // dependent sidecar pods
     Parallel  *ParallelSpec          `json:"parallel,omitempty"`
+    // Verdict overrides the default exit-code rule. Empty (or From=
+    // exitCode) trusts the process exit code. From=junit|jtl runs the
+    // matching processor AFTER the tool and OVERRIDES the exit-code
+    // verdict in both directions. See §11 + §15.2.
+    Verdict *VerdictSpec `json:"verdict,omitempty"`
     // +kubebuilder:validation:Enum=Allow;Forbid;Replace
     ConcurrencyPolicy string          `json:"concurrencyPolicy,omitempty"` // default Allow
+}
+
+// VerdictSpec — small on purpose (one enum, one string). Tool-specific
+// knobs (JMeter threads, k6 summary keys) belong in container.args or a
+// TestTemplate, not here.
+type VerdictSpec struct {
+    // +kubebuilder:validation:Enum=exitCode;junit;jtl
+    // +kubebuilder:default=exitCode
+    From string `json:"from,omitempty"`
+    // ErrorRateMax is the JTL error-rate threshold as a decimal string
+    // (e.g. "0", "0.01"). Only valid when From=jtl; webhook enforces.
+    ErrorRateMax string `json:"errorRateMax,omitempty"`
 }
 
 // PodConfig is a generic, unopinionated passthrough to the execution Pod.
@@ -431,68 +452,85 @@ type StepResult struct {
 
 ---
 
-## 11. Executor Contract (Go interface + container contract)
+## 11. Executor Contract (container + `/entry` + verdict processors)
 
-Two layers. **Primary = container contract** (any language). **Optional = Go Runner** for our built-in wrappers.
+**One layer.** Container contract, language-agnostic. There is **no Go
+`Runner` interface** — the workflows-model refactor (step 11) deleted it.
+
+### The three moving parts
+
+1. **Any container image.** `spec.container.image` lands verbatim on
+   the pod's main container. No per-tool wrapper images, no
+   `DefaultExecutorImages` map, no `ImageRegistry` prefix on the main
+   image (prefix only applies to the content-fetcher).
+2. **One generic `/entry` binary**, injected via a shared `emptyDir`.
+   An install init container `cp`s `/entry` from the content-fetcher
+   image into `/kubetest-bin/`, then the main container runs
+   `/kubetest-bin/entry` with `spec.container.{command⊕args}` as its
+   argv. Works with any base image (alpine musl, glibc debian,
+   distroless static) because `/entry` is `CGO_ENABLED=0`.
+3. **Declarative `verdictFrom` processors.** Default verdict = process
+   exit code. `spec.verdict.from ∈ {junit, jtl}` runs the corresponding
+   processor AFTER the tool exits, and it OVERRIDES the exit-code
+   verdict in both directions (jmeter exit 0 + failing JTL → failed;
+   flaky non-zero + clean JUnit → passed).
+
+### Wire types
 
 ```go
-// pkg/executor/runner.go
-package executor
-
-import "context"
-
-// Runner is the optional Go-side interface for built-in tool wrappers.
-// It runs INSIDE the executor container as our /entry wrapper.
-type Runner interface {
-    Type() string                                                 // e.g. "k6"
-    Validate(ctx context.Context, req ExecutionRequest) error
-    // Run executes the tool. It MUST stream logs to stdout (line-buffered)
-    // and write result.json to $KUBETEST_RESULTDIR.
-    Run(ctx context.Context, req ExecutionRequest) (ExecutionResult, error)
-}
-
+// pkg/executor/types.go
 type ExecutionRequest struct {
-    RunID      string            `json:"runId"`
-    TestRef    string            `json:"testRef"`
-    DataDir    string            `json:"dataDir"`    // content mount (cf. RUNNER_DATADIR)
-    WorkingDir string            `json:"workingDir"`
-    Command    []string          `json:"command,omitempty"`
-    Args       []string          `json:"args,omitempty"`
-    Env        map[string]string `json:"env,omitempty"`
-    Config     map[string]string `json:"config,omitempty"`
-    Artifacts  ArtifactSpec      `json:"artifacts,omitempty"`
-    // Deadline the wrapper enforces itself; MUST be shorter than the Job's
-    // activeDeadlineSeconds so artifact scraping happens before SIGKILL — see §15.
-    TimeoutSeconds int64 `json:"timeoutSeconds,omitempty"`
+    RunID          string            `json:"runId"`
+    TestRef        string            `json:"testRef"`
+    DataDir        string            `json:"dataDir"`
+    WorkingDir     string            `json:"workingDir,omitempty"`
+    Command        []string          `json:"command,omitempty"`
+    Args           []string          `json:"args,omitempty"`
+    Env            map[string]string `json:"env,omitempty"`
+    Config         map[string]string `json:"config,omitempty"`
+    Artifacts      ArtifactSpec      `json:"artifacts,omitzero"`
+    TimeoutSeconds int64             `json:"timeoutSeconds,omitempty"`
+    Verdict        VerdictSpec       `json:"verdict,omitzero"`
 }
 
-// Phase values match the TestRun CRD enum.
-type ExecutionResult struct {
-    Phase        string       `json:"phase"` // passed|failed|error|aborted
-    ErrorMessage string       `json:"errorMessage,omitempty"`
-    Steps        []StepResult `json:"steps,omitempty"`
-    Artifacts    []string     `json:"artifacts,omitempty"`
+type VerdictSpec struct {
+    From         string `json:"from,omitempty"`         // exitCode|junit|jtl
+    ErrorRateMax string `json:"errorRateMax,omitempty"` // jtl only
 }
 ```
 
-**Container contract (language-agnostic — the real API):**
-- Operator injects `ExecutionRequest` JSON at `/etc/kubetest/request.json` + env vars.
-- Content pre-mounted at `$KUBETEST_DATADIR` (emptyDir populated by an init container doing git/tarball/file fetch — our analog of `testkube-executor-init`).
-- Wrapper (`/entry`) runs the tool, **streams logs to stdout** (operator tails via k8s API → websocket to GUI, then flushes to MinIO `kubetest-logs/<runID>/`).
-- On exit, wrapper writes `result.json` (`ExecutionResult`) to `$KUBETEST_RESULTDIR` and scrapes `artifacts.paths` (globs) → MinIO `kubetest-artifacts/<runID>/`.
-- Wrapper traps SIGTERM: flush partial result + artifacts before exiting (see §15).
-- Exit code: 0 = passed, non-zero = failed (unless `negative`). **The operator's verdict source of truth is `result.json`, not the raw exit code** — per-tool exit-code semantics are normalized by the wrapper (see §15).
+### `/entry` verdict matrix (the contract in one table)
 
-**Per-tool wrapper images (our 5):**
-| Type | Base image | Invoke | Result parse | Exit-code notes (→ §15) |
-|------|-----------|--------|--------------|--------------------------|
-| `k6` | `grafana/k6` | `k6 run --summary-export=summary.json script.js` | k6 summary JSON + thresholds | 0=passed, 99=thresholds failed, other≠0=error (script/infra) |
-| `cypress` | `cypress/included` | `cypress run --reporter junit` | JUnit XML | exit code = #failed tests (cap 255); needs memory-backed /dev/shm |
-| `newman` | `postman/newman` | `newman run coll.json -r cli,json,junit` | newman JSON + JUnit | ≠0 on assertion failures |
-| `locust` | `locustio/locust` | `locust --headless --csv=out -f locustfile.py` | CSV stats | always 0 unless `--exit-code-on-error`/failure ratio set — verdict from stats |
-| `jmeter` | `justb4/jmeter` | `jmeter -n -t plan.jmx -l out.jtl -e -o report` | JTL + HTML report | **exit 0 even at 100% request failure** — verdict computed from JTL |
+| base exit | verdictFrom | processor outcome        | phase written |
+|-----------|-------------|--------------------------|---------------|
+| 0         | (none)      | —                        | **passed**    |
+| ≠0        | (none)      | —                        | **failed** ("exit code N") |
+| exec-fail | (none)      | —                        | **error** (binary missing) |
+| 0         | jtl         | errorRate ≤ max          | **passed**    |
+| 0         | jtl         | errorRate > max          | **failed** (JTL override) |
+| ≠0        | jtl         | errorRate ≤ max          | **passed** (JTL override) |
+| ≠0        | jtl         | errorRate > max          | **failed** |
+| 0         | junit       | all pass                 | **passed**    |
+| 0         | junit       | any fail                 | **failed** |
+| ≠0        | junit       | all pass                 | **passed** (JUnit override) |
+| ≠0        | junit       | any fail                 | **failed** |
+| any       | junit       | no report / malformed    | **error** — NEVER silently passed |
+| any       | jtl         | missing / malformed JTL  | **error** |
 
-JUnit `.xml` and perf JSON/CSV auto-parsed by the operator scraper (steal Testkube's doublestar-glob + JUnit auto-scan + perf-JSON ingest approach — see §6).
+Container contract otherwise unchanged: operator projects
+`request.json` at `/etc/kubetest/request.json`; content pre-mounted at
+`$KUBETEST_DATADIR` by the content-fetcher init; `/entry` streams stdout
+(operator tails via k8s API); on exit writes `result.json` to
+`$KUBETEST_RESULTDIR` and scrapes `artifacts.paths` → MinIO; SIGTERM
+flushes partial state.
+
+### Per-tool exit-code notes (were here as a table — moved to §15.2 as catalog guidance)
+
+Per-tool quirks (JMeter exit 0 lies, Cypress exit code capped at 255,
+Locust always exit 0 unless flags set) are documented in §15.2 as
+CATALOG guidance — the mitigation is `verdictFrom` (or tool flags in
+the template), not runner code. See also `plan/step-15-tool-catalog.md`
+for the curated template list.
 
 ---
 
@@ -564,16 +602,41 @@ Priority order for this cluster: **Istio pod policy → JMeter exit-0 → log ro
 - Injected `istio-proxy` keeps a Job's pod Running forever after the test exits (sidecar never terminates). **Handled declaratively by the user, not by the platform (§8):** tests that don't need mesh set `sidecar.istio.io/inject: "false"` in `spec.pod.annotations` (or inherit it from a shared `TestTemplate`); tests that DO need mesh rely on native sidecar containers (k8s ≥1.29 beta / 1.33 GA + Istio `ENABLE_NATIVE_SIDECARS=true`), which makes Job completion correct with zero cooperation from the test container. The operator itself injects no annotations and contains no Istio-specific logic. **Out of the executor contract:** quitquitquit calls, pkill of the proxy, scuttle-style wrappers.
 - Pod metadata merge order: Test → TestRun override; only reserved `kubetest.io/*` tracking labels come from the operator.
 
-### 15.2 Exit codes — every tool lies differently
-The wrapper normalizes tool semantics into `result.json`; the operator NEVER derives a verdict from the raw exit code alone.
-- **JMeter: exit 0 even when 100% of requests fail.** Verdict must be computed from the JTL (assertion results / error rate against a configurable threshold). Without this, every JMeter run reports `passed`.
-- **k6:** 0 = passed; **99 = thresholds not met → `failed`**; other non-zero (e.g. 107/108 script/panic errors) → `error`, not `failed`. Distinguish "test says no" from "test broke".
-- **Cypress:** exit code = number of failed tests, capped at 255. Parse JUnit for the real counts.
-- **Locust:** exits 0 by default regardless of failures unless `--exit-code-on-error` / failure-ratio options are set; compute verdict from CSV stats.
-- **Missing `result.json`** (wrapper crash, OOM, SIGKILL): fallback path = container exit code + pod `containerStatuses[].lastState.terminated` → phase `error` with reason. Never assume result.json exists.
+### 15.2 Exit codes — every tool lies differently (catalog guidance)
+
+The wrapper is generic (step 11): base verdict = process exit code. Tools
+whose exit codes lie get a `verdictFrom` processor OR a tool flag in the
+template — mitigation lives in the catalog, NOT in Go runner code.
+
+- **JMeter: exit 0 even when 100% of requests fail.** Regression-guarded
+  in the `jtl` processor tests (`TestEntry_Verdict_ExitZeroButJTL100Pct
+  Errors_ShouldFail`). Template MUST set `spec.verdict.from: jtl` +
+  `errorRateMax: "0"` (or looser). Without `verdictFrom: jtl` every
+  JMeter run reports passed regardless of failures — the whole reason
+  `verdictFrom` exists.
+- **k6:** 0 = passed; 99 = thresholds not met → failed by default
+  exit-code rule; other non-zero (107/108 script/panic) → failed. Loses
+  the failed-vs-error split for script bugs (a broken script reports
+  `failed` not `error`); acceptable trade-off — the alternative was a k6
+  Go runner, which we retired.
+- **Cypress:** exit code = number of failed tests, capped at 255.
+  Template sets `spec.verdict.from: junit`; the JUnit processor reads
+  real counts from `results.xml` and overrides the capped exit code.
+  Regression-guarded in `TestClassify_ExitCodeCapAt255_CountsComeFromJUnit`
+  (moved to catalog-side once step 15 lands).
+- **Locust:** exits 0 by default regardless of failures unless
+  `--exit-code-on-error` / `--check-fail-ratio` are set. Template MUST
+  either (a) add `--exit-code-on-error 1` to args, or (b) once we grow
+  a `csv` verdict processor, wire `spec.verdict.from: csv`. First
+  approach ships in step 15; second is future work if the flag path
+  proves inadequate.
+- **Missing `result.json`** (wrapper crash, OOM, SIGKILL): fallback
+  path = container exit code + pod
+  `containerStatuses[].lastState.terminated` → phase `error` with
+  reason. Never assume result.json exists.
 
 ### 15.3 Job/Pod lifecycle
-- **OOMKilled (137):** no result.json, no artifacts. Read `terminated.reason=OOMKilled` from pod status → phase `error` ("OOMKilled — raise spec.container.resources"), NOT `failed`. **Cypress specifically:** mount memory-backed emptyDir at `/dev/shm` (`medium: Memory`) or Chrome crashes randomly.
+- **OOMKilled (137):** no result.json, no artifacts. Read `terminated.reason=OOMKilled` from pod status → phase `error` ("OOMKilled — raise spec.container.resources"), NOT `failed`. **Cypress-specific /dev/shm requirement** moved to the cypress TestTemplate (step 15): the template supplies a memory-backed emptyDir via `spec.pod.volumes`. The compiler no longer has a per-tool branch for this.
 - **`activeDeadlineSeconds` kills with SIGKILL — the scraper won't run.** Contract: wrapper enforces its own `TimeoutSeconds` (SIGTERM-trappable, flush partial results + artifacts), and the operator sets Job `activeDeadlineSeconds = test timeout + 60s` as the outer hard limit. Wrapper timeout < Job deadline, always.
 - **TTL vs operator restart:** if `ttlSecondsAfterFinished` deletes the Job before the operator records status, the TestRun hangs `running` forever. Policy: operator deletes the Job itself *after* persisting status; TTL is only a safety net (long, e.g. 3600s). Reconciler includes **orphan detection**: TestRun in `running`/`queued` with no matching Job → `error`/`aborted` with message.
 - **ImagePullBackOff / scheduling failures:** pod never starts, deadline eventually fires. Surface as `error` ("infra: ImagePullBackOff <image>"), not a test failure — read pod events/conditions in the reconciler.

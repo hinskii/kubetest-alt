@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 
+	"strconv"
+
 	"github.com/robfig/cron/v3"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -52,20 +54,28 @@ const (
 	oversizeMessage = "inline content exceeds %d bytes (found %d) — use git/tarball source instead"
 )
 
-var (
-	allowedTestTypes = map[string]struct{}{
-		"k6":      {},
-		"cypress": {},
-		"newman":  {},
-		"locust":  {},
-		"jmeter":  {},
-	}
+// VerdictFrom* mirror api/v1alpha1.VerdictSpec.From. Kept as local
+// constants so the webhook doesn't grow an import path back to the CRD
+// package just to name a string.
+const (
+	VerdictFromExitCode = "exitCode"
+	VerdictFromJUnit    = "junit"
+	VerdictFromJTL      = "jtl"
+)
 
+var (
 	allowedConcurrencyPolicies = map[string]struct{}{
 		"":                 {}, // empty = "not set" — defaulter fills it before validation on real requests
 		ConcurrencyAllow:   {},
 		ConcurrencyForbid:  {},
 		ConcurrencyReplace: {},
+	}
+
+	allowedVerdictFrom = map[string]struct{}{
+		"":                  {}, // empty → treat as exitCode (defaulted at read time)
+		VerdictFromExitCode: {},
+		VerdictFromJUnit:    {},
+		VerdictFromJTL:      {},
 	}
 
 	// cronParser matches k8s CronJob semantics: 5 fields, no seconds.
@@ -119,15 +129,31 @@ func (v *TestCustomValidator) ValidateDelete(_ context.Context, _ *testsv1alpha1
 
 // validateTest is a pure function so unit tests can hit each rule directly
 // without spinning up envtest.
+//
+// Workflows-model rules (step 11):
+//   - spec.container.image REQUIRED — the wrapper needs SOMETHING to run.
+//   - spec.container.{command|args} REQUIRED (at least one) — otherwise
+//     the wrapper has no invocation to dispatch beyond "start the image's
+//     ENTRYPOINT with no args", which is almost never what a test wants.
+//   - spec.verdict.from in {exitCode, junit, jtl} (empty = exitCode).
+//   - spec.verdict.errorRateMax: only valid when from=jtl, must parse as
+//     float in [0,1]. Empty otherwise (setting it with from!=jtl is a
+//     user mistake we surface early instead of silently ignoring).
 func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if spec == nil {
 		return errors.New("spec is required")
 	}
-	if _, ok := allowedTestTypes[spec.Type]; !ok {
-		return fmt.Errorf("spec.type %q is not one of [k6 cypress newman locust jmeter]", spec.Type)
+	if spec.Container.Image == "" {
+		return errors.New("spec.container.image is required (workflows model: no built-in tool images)")
+	}
+	if len(spec.Container.Command) == 0 && len(spec.Container.Args) == 0 {
+		return errors.New("spec.container: at least one of command or args is required")
 	}
 	if _, ok := allowedConcurrencyPolicies[spec.ConcurrencyPolicy]; !ok {
 		return fmt.Errorf("spec.concurrencyPolicy %q is not one of [Allow Forbid Replace]", spec.ConcurrencyPolicy)
+	}
+	if err := validateVerdict(spec.Verdict); err != nil {
+		return err
 	}
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
@@ -139,6 +165,36 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 		if _, err := cronParser.Parse(spec.Schedule); err != nil {
 			return fmt.Errorf("spec.schedule %q is not a valid cron expression: %w", spec.Schedule, err)
 		}
+	}
+	return nil
+}
+
+// validateVerdict enforces the VerdictSpec cross-field rules.
+func validateVerdict(v *testsv1alpha1.VerdictSpec) error {
+	if v == nil {
+		return nil
+	}
+	if _, ok := allowedVerdictFrom[v.From]; !ok {
+		return fmt.Errorf("spec.verdict.from %q is not one of [exitCode junit jtl]", v.From)
+	}
+	from := v.From
+	if from == "" {
+		from = VerdictFromExitCode
+	}
+	if v.ErrorRateMax == "" {
+		return nil
+	}
+	if from != VerdictFromJTL {
+		return fmt.Errorf(
+			"spec.verdict.errorRateMax is only valid when spec.verdict.from=jtl (got from=%q)",
+			from)
+	}
+	f, err := strconv.ParseFloat(v.ErrorRateMax, 64)
+	if err != nil {
+		return fmt.Errorf("spec.verdict.errorRateMax %q is not a valid float: %w", v.ErrorRateMax, err)
+	}
+	if f < 0 || f > 1 {
+		return fmt.Errorf("spec.verdict.errorRateMax %v out of range [0,1]", f)
 	}
 	return nil
 }

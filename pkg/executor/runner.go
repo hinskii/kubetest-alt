@@ -26,9 +26,9 @@ import "context"
 //
 // Contract:
 //   - Scrape MUST NOT return a non-nil error for scrape failures. Failure
-//     goes in ScrapeResult.ScrapeError. The run's verdict (Runner's Phase)
-//     is not affected — a passing k6 run whose logs failed to upload is
-//     still Phase=passed, with ScrapeError set so the UI can surface the
+//     goes in ScrapeResult.ScrapeError. The run's verdict is not affected —
+//     a passing tool run whose artifacts failed to upload is still
+//     Phase=passed, with ScrapeError set so the UI can surface the
 //     partial-artifact state.
 //   - Return non-nil error ONLY for programmer errors (nil uploader, empty
 //     bucket) that the caller should treat as a bug, not a runtime hiccup.
@@ -62,29 +62,7 @@ type ScrapeResult struct {
 	ScrapeError string
 }
 
-// Runner runs one instance of a testing tool inside the /entry wrapper.
-//
-// Contract:
-//   - Run MUST NOT return a non-nil error for test outcomes. The verdict
-//     (passed/failed/error/aborted) lives in the returned ExecutionResult.Phase;
-//     returning an error is reserved for INFRA-level failures the wrapper
-//     cannot classify (e.g. tool binary missing entirely). Everything else —
-//     non-zero exit codes, timeouts, threshold violations — belongs in the
-//     result.
-//   - Run MUST stream tool stdout to the writer the Runner was constructed
-//     with (line-buffered so the operator's log tail sees real-time output).
-//   - Run MUST honor ctx cancellation: on ctx.Done the tool process must be
-//     killed. exec.CommandContext handles this for straightforward cases.
-type Runner interface {
-	// Type identifies the executor kind (e.g. "k6"). Used only for logging
-	// and diagnostics — dispatch decisions live in the wrapper.
-	Type() string
-
-	// Validate is a pre-flight check on the request. Returns nil if the
-	// request is well-formed for this Runner. Non-nil error means the
-	// wrapper aborts before invoking the tool.
-	Validate(ctx context.Context, req ExecutionRequest) error
-
-	// Run executes the tool and returns the verdict.
-	Run(ctx context.Context, req ExecutionRequest) (ExecutionResult, error)
-}
+// (No Runner interface anymore — step 11 refactor collapsed the
+// Runner-per-tool model into a single generic /entry that runs
+// req.Command/Args verbatim. Verdict comes from exit code + optional
+// verdictFrom processors. See entry.go.)

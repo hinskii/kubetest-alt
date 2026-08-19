@@ -15,8 +15,8 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.type
-      name: Type
+    - jsonPath: .metadata.labels['kubetest\.io/tool']
+      name: Tool
       type: string
     - jsonPath: .status.latestRun.phase
       name: LastRun
@@ -46,7 +46,15 @@ spec:
           metadata:
             type: object
           spec:
-            description: TestSpec defines the desired state of a Test.
+            description: |-
+              TestSpec defines the desired state of a Test.
+
+              Workflows model (step 11 refactor): a Test is an image + command, not a
+              tool identity. There is no `spec.type` — tool identity, when it matters
+              for UI grouping, lives in the `kubetest.io/tool` label. The verdict is
+              derived from the process exit code by default; tools whose exit codes
+              lie (JMeter, some CI runners) opt into a declarative Verdict processor
+              (JUnit / JTL) — see spec.verdict below.
             properties:
               artifacts:
                 description: ArtifactSpec describes files to scrape after a run (globs
@@ -93,8 +101,9 @@ spec:
                 type: object
               container:
                 description: |-
-                  ContainerConfig captures per-step container overrides. Defaults defined at
-                  TestSpec.container merge with per-step overrides in later steps.
+                  Container carries image + command/args + env + resources. image is
+                  REQUIRED (webhook-enforced); at least one of command/args is REQUIRED
+                  so the wrapper knows what to invoke.
                 properties:
                   args:
                     items:
@@ -4757,20 +4766,33 @@ spec:
                 type: object
               timeout:
                 type: string
-              type:
+              verdict:
                 description: |-
-                  Type selects the executor wrapper image. The validating webhook enforces
-                  this enum in addition to the declarative marker so the message is
-                  consistent across api-server and webhook rejections.
-                enum:
-                - k6
-                - cypress
-                - newman
-                - locust
-                - jmeter
-                type: string
-            required:
-            - type
+                  Verdict overrides the default exit-code verdict rule. Unset (or From=
+                  exitCode) means "trust the process exit code" — passed on 0, failed
+                  on non-zero. From=junit or From=jtl runs the matching processor
+                  AFTER the tool exits and OVERRIDES the exit-code verdict in both
+                  directions (jmeter exit 0 + failing JTL → failed; flaky non-zero +
+                  clean JUnit → passed). See CLAUDE.md §11 + §15.2.
+                properties:
+                  errorRateMax:
+                    description: |-
+                      ErrorRateMax is the JTL error-rate threshold (fraction in [0,1]) —
+                      only meaningful when From=jtl. String rather than float so the CRD
+                      admits either "0" or "0.01" naturally without JSON-number gotchas
+                      (0.1 round-trip surprises, no way to say "unset"). Webhook parses
+                      this as a float in [0,1] and requires From=jtl.
+                    type: string
+                  from:
+                    default: exitCode
+                    description: From is the verdict source. Defaults to exitCode
+                      when unset.
+                    enum:
+                    - exitCode
+                    - junit
+                    - jtl
+                    type: string
+                type: object
             type: object
           status:
             description: TestStatus defines the observed state of a Test.

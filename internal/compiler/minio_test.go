@@ -27,10 +27,10 @@ import (
 // wrapper container is identical to pre-step-07 (no MINIO_* env, no envFrom
 // beyond the user-provided ones). Ensures step-07 is fully opt-in.
 func TestCompile_MinIODisabled_NoEnvOrEnvFromInjected(t *testing.T) {
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), defaultOpts())
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), defaultOpts())
 	require.NoError(t, err)
 
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 	for _, e := range main.Env {
 		assert.NotContains(t, e.Name, "MINIO_", "no MinIO env when disabled")
 	}
@@ -46,10 +46,10 @@ func TestCompile_MinIOEnabled_InjectsEndpointAndBucketEnv(t *testing.T) {
 		Bucket:     "my-artifacts",
 		SecretName: "minio-creds",
 	}
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), opts)
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), opts)
 	require.NoError(t, err)
 
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 	envByName := map[string]string{}
 	for _, e := range main.Env {
 		envByName[e.Name] = e.Value
@@ -67,9 +67,9 @@ func TestCompile_MinIOEnabled_UsesDefaultBucketWhenEmpty(t *testing.T) {
 		SecretName: "minio-creds",
 		// Bucket empty → MinIODefaultBucket
 	}
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), opts)
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), opts)
 	require.NoError(t, err)
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 	for _, e := range main.Env {
 		if e.Name == EnvMinIOBucket {
 			assert.Equal(t, MinIODefaultBucket, e.Value)
@@ -89,10 +89,10 @@ func TestCompile_MinIOEnabled_SecretRefInEnvFromNotEnv(t *testing.T) {
 		Bucket:     "my-artifacts",
 		SecretName: "my-secret",
 	}
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), opts)
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), opts)
 	require.NoError(t, err)
 
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 	// envFrom carries the secret ref.
 	require.Len(t, main.EnvFrom, 1)
 	require.NotNil(t, main.EnvFrom[0].SecretRef)
@@ -113,9 +113,9 @@ func TestCompile_MinIOEnabled_UseSSLTrue(t *testing.T) {
 		SecretName: "s",
 		UseSSL:     true,
 	}
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), opts)
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), opts)
 	require.NoError(t, err)
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 	found := false
 	for _, e := range main.Env {
 		if e.Name == EnvMinIOUseSSL {
@@ -133,9 +133,9 @@ func TestCompile_MinIOEnabled_UseSSLTrue(t *testing.T) {
 func TestCompile_MinIOEndpointSetButNoSecret(t *testing.T) {
 	opts := defaultOpts()
 	opts.MinIO = MinIOOptions{Endpoint: "minio.internal:9000", Bucket: "b"}
-	job, _, err := Compile(newValidTest("k6"), newValidTestRun("myrun", "sample-k6"), opts)
+	job, _, err := Compile(canonicalTest(), canonicalTestRun(), opts)
 	require.NoError(t, err)
-	_, main := getJobContainers(t, job)
+	main := getMainContainer(t, job)
 
 	hasEndpoint := false
 	for _, e := range main.Env {

@@ -22,16 +22,20 @@ import (
 )
 
 // TestSpec defines the desired state of a Test.
+//
+// Workflows model (step 11 refactor): a Test is an image + command, not a
+// tool identity. There is no `spec.type` — tool identity, when it matters
+// for UI grouping, lives in the `kubetest.io/tool` label. The verdict is
+// derived from the process exit code by default; tools whose exit codes
+// lie (JMeter, some CI runners) opt into a declarative Verdict processor
+// (JUnit / JTL) — see spec.verdict below.
 type TestSpec struct {
-	// Type selects the executor wrapper image. The validating webhook enforces
-	// this enum in addition to the declarative marker so the message is
-	// consistent across api-server and webhook rejections.
-	// +kubebuilder:validation:Enum=k6;cypress;newman;locust;jmeter
-	Type string `json:"type"`
-
 	// +optional
 	Content Content `json:"content,omitempty"`
 
+	// Container carries image + command/args + env + resources. image is
+	// REQUIRED (webhook-enforced); at least one of command/args is REQUIRED
+	// so the wrapper knows what to invoke.
 	// +optional
 	Container ContainerConfig `json:"container,omitempty"`
 
@@ -65,6 +69,34 @@ type TestSpec struct {
 	// +kubebuilder:validation:Enum=Allow;Forbid;Replace
 	// +optional
 	ConcurrencyPolicy string `json:"concurrencyPolicy,omitempty"`
+
+	// Verdict overrides the default exit-code verdict rule. Unset (or From=
+	// exitCode) means "trust the process exit code" — passed on 0, failed
+	// on non-zero. From=junit or From=jtl runs the matching processor
+	// AFTER the tool exits and OVERRIDES the exit-code verdict in both
+	// directions (jmeter exit 0 + failing JTL → failed; flaky non-zero +
+	// clean JUnit → passed). See CLAUDE.md §11 + §15.2.
+	// +optional
+	Verdict *VerdictSpec `json:"verdict,omitempty"`
+}
+
+// VerdictSpec is the declarative "verdict-from" processor selector.
+// Kept intentionally tiny — one enum, one string. Tool-specific knobs
+// (JMeter threads, k6 summary keys) belong in the Test's container.args
+// or in a TestTemplate, NOT here.
+type VerdictSpec struct {
+	// From is the verdict source. Defaults to exitCode when unset.
+	// +kubebuilder:validation:Enum=exitCode;junit;jtl
+	// +kubebuilder:default=exitCode
+	From string `json:"from,omitempty"`
+
+	// ErrorRateMax is the JTL error-rate threshold (fraction in [0,1]) —
+	// only meaningful when From=jtl. String rather than float so the CRD
+	// admits either "0" or "0.01" naturally without JSON-number gotchas
+	// (0.1 round-trip surprises, no way to say "unset"). Webhook parses
+	// this as a float in [0,1] and requires From=jtl.
+	// +optional
+	ErrorRateMax string `json:"errorRateMax,omitempty"`
 }
 
 // TestStatus defines the observed state of a Test.
@@ -83,7 +115,7 @@ type TestStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
+// +kubebuilder:printcolumn:name="Tool",type=string,JSONPath=`.metadata.labels['kubetest\.io/tool']`
 // +kubebuilder:printcolumn:name="LastRun",type=string,JSONPath=`.status.latestRun.phase`
 
 // Test is the definition of a runnable test. Immutable-in-spirit definition;
