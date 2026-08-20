@@ -376,6 +376,33 @@ func TestEntry_Verdict_JUnitNoReport_IsError(t *testing.T) {
 	assert.Contains(t, got.ErrorMessage, "verdictFrom=junit")
 }
 
+// TestEntry_Verdict_JUnitEmptyReport_IsError: end-to-end regression for
+// the session-A closing fix. A JUnit report that PARSES but reports 0
+// tests (typo in Cypress --spec pattern, empty suite from an early
+// bail-out) MUST surface as phase=error with a message that says "no
+// tests found in JUnit report". Before the fix this returned tc.Failed==0
+// → phase=passed, letting a typo ship as eternally-green CI.
+func TestEntry_Verdict_JUnitEmptyReport_IsError(t *testing.T) {
+	req := ExecutionRequest{
+		Args:           []string{"/bin/true"},
+		TimeoutSeconds: 30,
+		Verdict:        VerdictSpec{From: VerdictFromJUnit},
+	}
+	e := entryFor(t, req, 0, nil)
+	e.WorkingDir = t.TempDir()
+	// Simulate what junit.Scan returns for a tests==0 report: aggregate
+	// counts are zero AND the empty-report sentinel is returned.
+	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+		return TestCounts{}, errors.New("junit: no tests found in JUnit report")
+	}
+	require.NoError(t, e.Execute(context.Background()))
+	got := readResult(t, e.ResultDir)
+	assert.Equal(t, PhaseError, got.Phase,
+		"empty JUnit report MUST NOT ship as passed (session-A closing fix)")
+	assert.Contains(t, got.ErrorMessage, "no tests found in JUnit report",
+		"error message must name the failure mode so operators fix the pattern")
+}
+
 // TestEntry_Verdict_JUnitMalformed_IsErrorNotPanic: parser error must not
 // crash the wrapper.
 func TestEntry_Verdict_JUnitMalformed_IsErrorNotPanic(t *testing.T) {

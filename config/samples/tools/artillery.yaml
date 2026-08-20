@@ -1,0 +1,20 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-artillery
+  namespace: default
+spec:
+  use: [artillery]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    scenario:
+      type: string
+      default: "artillery/scenario.yml"
+    # "true" acknowledges the "your scenario contains the ensure plugin"
+    # contract from the template. See config/templates/artillery.yaml.
+    ensure:
+      type: string
+      default: "true"

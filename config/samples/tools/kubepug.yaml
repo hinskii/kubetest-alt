@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-kubepug
+  namespace: default
+spec:
+  use: [kubepug]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    inputFile:
+      type: string
+      default: "kubepug/manifests.yaml"

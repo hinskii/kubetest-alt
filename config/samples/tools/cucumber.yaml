@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-cucumber
+  namespace: default
+spec:
+  use: [cucumber]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    featuresDir:
+      type: string
+      default: "cucumber"

@@ -1,0 +1,61 @@
+# Artillery load-test template.
+#
+# Verdict: exit code (honest ONLY when the `ensure` PLUGIN is
+# configured in the scenario file). Without `ensure`, artillery run
+# always exits 0 regardless of failed HTTP responses or unmet SLAs.
+#
+# CATALOG POLICY: this template WOULD accept any scenario file, but
+# the operator can't enforce "the scenario has an ensure plugin block"
+# at admission time — that would require parsing scenario YAML. Instead
+# we make `ensure` a REQUIRED config param with NO default: consumers
+# must supply the scenario file that includes the ensure block, and
+# the template's docs (this comment + docs/onboarding-a-tool.md) makes
+# the requirement explicit. Sample under config/samples/tools/
+# artillery.yaml references a scenario that DOES contain the plugin.
+#
+# Modern Artillery 2.x wants the config block:
+#   plugins:
+#     ensure: {}
+#   ensure:
+#     thresholds:
+#       - http.response_time.p95: 500
+#
+# Legacy top-level `ensure` (without the plugins declaration) is
+# silently ignored in Artillery 2.x — verified empirically at step 15B
+# commit time.
+#
+# Smoke verified: pass=0 / fail=1 on artilleryio/artillery:2.0.34 (arm64)
+# — with the ensure plugin. Without the plugin: fail=0 too (LIES).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: artillery
+  labels:
+    kubetest.io/tool: artillery
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: artilleryio/artillery:2.0.34
+    command: ["artillery"]
+    args:
+      - "run"
+      - "/data/repo/{{ config.scenario }}"
+      - "--output"
+      - "/data/repo/results/artillery-report.json"
+  artifacts:
+    paths:
+      - "results/**/*.json"
+      - "results/**/*.html"
+  config:
+    scenario:
+      type: string
+      # Required — path to the scenario YAML.
+    # `ensure` is a template-level marker (required, no default) that
+    # forces consumers to acknowledge the "your scenario MUST contain
+    # the ensure plugin" contract by supplying a truthy value here.
+    # The value itself isn't consumed by artillery — the presence of
+    # the config key on the resolved Test is what proves the consumer
+    # opted in. Sample supplies "true".
+    ensure:
+      type: string
+      # Required. Set to "true" in the sample as an acknowledgement.

@@ -53,6 +53,41 @@ func TestScan_NoReportsSurfacesSentinel(t *testing.T) {
 	require.ErrorIs(t, err, ErrNoReportFound)
 }
 
+// TestScan_EmptyReportSurfacesEmptyReport is the session-A regression
+// guard: a JUnit report with tests==0 (typo'd Cypress --spec pattern,
+// empty suite from an early bail-out) MUST return ErrEmptyReport so the
+// wrapper flips phase=error. Prior to the session-A closing fix this
+// silently returned counts and let phase=passed ship — a "literówka w
+// spec pattern nie może dawać wiecznie zielonego testu".
+func TestScan_EmptyReportSurfacesEmptyReport(t *testing.T) {
+	dir := t.TempDir()
+	// A well-formed but empty JUnit — 0 tests, 0 failures, 0 skipped.
+	writeJUnit(t, filepath.Join(dir, "junit-empty.xml"), junitXML(0, 0, 0))
+
+	counts, err := Scan(dir, nil)
+	require.ErrorIs(t, err, ErrEmptyReport,
+		"empty report must surface ErrEmptyReport, not (counts, nil)")
+	assert.Zero(t, counts.Total, "sanity: aggregate really is zero")
+	assert.Contains(t, err.Error(), "no tests found in JUnit report",
+		"user-facing message drives the phase=error message text")
+}
+
+// TestScan_MixedEmptyPlusNonEmpty_IsNotEmpty: if ANY parseable JUnit file
+// has tests>0, the aggregate is non-zero and Scan returns success — an
+// empty companion report (some tools write both suite and driver XMLs)
+// doesn't poison the run.
+func TestScan_MixedEmptyPlusNonEmpty_IsNotEmpty(t *testing.T) {
+	dir := t.TempDir()
+	// Filenames must match DefaultGlobs for the scan to pick them up.
+	writeJUnit(t, filepath.Join(dir, "junit-empty.xml"), junitXML(0, 0, 0))
+	writeJUnit(t, filepath.Join(dir, "junit-real.xml"), junitXML(3, 1, 0))
+
+	counts, err := Scan(dir, nil)
+	require.NoError(t, err)
+	assert.Equal(t, 4, counts.Total)
+	assert.Equal(t, 1, counts.Failed)
+}
+
 // TestScan_IgnoresNonJUnitXML: an operator's misplaced XML doesn't blow
 // up the scan; it's silently skipped and the sentinel fires if nothing
 // else parses.
@@ -103,7 +138,10 @@ func writeJUnit(t *testing.T, path, body string) {
 
 // junitXML builds a minimal well-formed JUnit XML with the given counts.
 // The scraper's aggregate walks testsuite attributes so this is the
-// smallest thing that produces correct counts.
+// smallest thing that produces correct counts. `skip` is a parameter
+// so tests that exercise the skipped-counts path can drop non-zero
+// values later without touching the helper signature.
+// nolint:unparam
 func junitXML(pass, fail, skip int) string {
 	total := pass + fail + skip
 	var cases strings.Builder

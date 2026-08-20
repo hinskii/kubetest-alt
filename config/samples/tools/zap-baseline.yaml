@@ -1,0 +1,17 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-zap-baseline
+  namespace: default
+spec:
+  use: [zap-baseline]
+  config:
+    target:
+      type: string
+      default: "https://staging.example.com"
+    spiderMinutes:
+      type: integer
+      default: "1"
+    failOnWarn:
+      type: boolean
+      default: "true"

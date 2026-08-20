@@ -1,0 +1,68 @@
+#!/bin/sh
+# gatling-run: kubetest-alt Gatling wrapper that maps failed assertions
+# to non-zero exit code.
+#
+# Gatling 3.9.x's `gatling.sh` for LOCAL run mode returns exit=0 even
+# when assertions fail (only Gatling Enterprise's --wait flag maps
+# failures to exit). That defeats the "exit code honest" catalog rule
+# for our template, so this wrapper does the exit-code translation:
+#
+#   1. Run gatling.sh with the caller's args (verbatim).
+#   2. Locate the run's results directory. Caller passes -rf <dir>; we
+#      look inside for the latest sub-run.
+#   3. Parse js/assertions.json — any `"result": false` → exit 2.
+#      Missing report → exit 3 (looks like error, not passed).
+#      All assertions OK → exit 0.
+#
+# Wrapper does NOT synthesize assertions. If the simulation has NO
+# assertions, exit is whatever gatling.sh returned — the caller opted
+# out of the honest-exit protection by writing a simulation with no
+# assertion block.
+set -eu
+
+# Find -rf's value so we know where to look afterward. Also let the
+# gatling.sh invocation see EVERY arg the caller passed.
+results_dir=""
+prev=""
+for a in "$@"; do
+  case "$prev" in
+    -rf|--results-folder) results_dir="$a" ;;
+  esac
+  prev="$a"
+done
+if [ -z "$results_dir" ]; then
+  # Gatling defaults to ./results when -rf is unset. Match that.
+  results_dir="$(pwd)/results"
+fi
+
+gatling_exit=0
+"${GATLING_HOME}/bin/gatling.sh" "$@" || gatling_exit=$?
+
+# Locate the most recent sub-run under results_dir.
+run_dir="$(ls -1dt "$results_dir"/*/ 2>/dev/null | head -n 1 || true)"
+if [ -z "$run_dir" ]; then
+  # No run dir at all — treat as error unless gatling itself succeeded
+  # AND wrote nothing (edge case: --help through the wrapper).
+  if [ "$gatling_exit" -ne 0 ]; then
+    exit "$gatling_exit"
+  fi
+  exit 3
+fi
+
+assertions="${run_dir%/}/js/assertions.json"
+if [ ! -f "$assertions" ]; then
+  # Gatling ran but didn't write assertions — surface as error, not
+  # silently passed. This shouldn't happen with a normal simulation.
+  echo "gatling-run: assertions.json not found under $run_dir" >&2
+  exit 3
+fi
+
+# Grep-based check: any `"result": false` line means a failed assertion.
+# Awk fallback for whitespace variance in the JSON writer.
+if grep -qE '"result"[[:space:]]*:[[:space:]]*false' "$assertions"; then
+  echo "gatling-run: one or more assertions failed (see $assertions)" >&2
+  exit 2
+fi
+
+# Assertions all passed — trust the exit from gatling.sh (should be 0).
+exit "$gatling_exit"

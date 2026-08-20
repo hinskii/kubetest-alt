@@ -1,0 +1,33 @@
+# Gradle JVM test runner template.
+#
+# Verdict: exit code (honest). `gradle test` returns non-zero on any
+# failing test — verified empirically on JUnit 5.
+#
+# Smoke verified: pass=0 / fail=1 on gradle:8.11-jdk21 (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: gradle
+  labels:
+    kubetest.io/tool: gradle
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: gradle:8.11-jdk21
+    command: ["gradle"]
+    args:
+      - "--no-daemon"
+      - "--quiet"
+      - "test"
+    workingDir: "/data/repo/{{ config.projectDir }}"
+  artifacts:
+    # gradle's Test task writes JUnit XML to build/test-results/test/
+    # by default; the doublestar glob matches that layout + the HTML
+    # report companion.
+    paths:
+      - "**/build/test-results/**/*.xml"
+      - "**/build/reports/tests/**/*"
+  config:
+    projectDir:
+      type: string
+      default: "."

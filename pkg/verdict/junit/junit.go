@@ -48,6 +48,18 @@ type TestCounts struct {
 // surfaces this as phase=error (never as silently passed).
 var ErrNoReportFound = errors.New("junit: no parseable report found")
 
+// ErrEmptyReport is returned by Scan when parseable JUnit files ARE present
+// but their aggregate test count is zero (empty testsuites, spec pattern
+// matched nothing, tool exited before collecting anything). Semantically
+// distinct from ErrNoReportFound (which means "no XML at all") because the
+// tool clearly ran and wrote a report — it just didn't run any tests.
+//
+// Message text is load-bearing: the /entry wrapper surfaces this verbatim
+// in ExecutionResult.ErrorMessage. Session A had a bug where an empty
+// Cypress report (typo in --spec pattern) reported passed; the fix must
+// surface loudly so a typo doesn't ship as eternally-green CI.
+var ErrEmptyReport = errors.New("junit: no tests found in JUnit report")
+
 // DefaultGlobs lists the standard JUnit reporter output locations across
 // the tools we care about. The wrapper scans workingDir with these unless
 // the caller passes explicit patterns. Doublestar syntax matches what the
@@ -118,6 +130,13 @@ func Scan(workingDir string, globs []string) (TestCounts, error) {
 			return TestCounts{}, fmt.Errorf("%w (last parse error: %v)", ErrNoReportFound, lastEr)
 		}
 		return TestCounts{}, ErrNoReportFound
+	}
+	// Files parsed but aggregate is zero — same "wrong-green would ship"
+	// hazard as no-report-found, distinct sentinel so the operator can tell
+	// the two apart in error messages. Session A regression: a typo in
+	// Cypress's --spec pattern produced an empty report AND phase=passed.
+	if agg.Total == 0 {
+		return agg, ErrEmptyReport
 	}
 	return agg, nil
 }

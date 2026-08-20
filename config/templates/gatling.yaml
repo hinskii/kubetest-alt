@@ -1,0 +1,55 @@
+# Gatling load test template.
+#
+# Uses a PLATFORM-BUILT image (executors/gatling/Dockerfile) — the ONLY
+# platform image beyond executors/content-fetcher/. Rationale:
+#   * No arm64-native community Gatling image existed at commit time.
+#   * `denvazh/gatling:latest` (session-A attempt) is Gatling 2.3.1
+#     linux/amd64-only and its assertion violations reported exit=0,
+#     failing the "verdict verified empirically" catalog rule.
+#   * Gatling 3.9.x's `gatling.sh` in LOCAL run mode returns exit=0
+#     even when assertions fail; only Gatling Enterprise's --wait maps
+#     failures to exit. We ship `gatling-run` in the same image — a
+#     small wrapper that reads `<results>/*/js/assertions.json` and
+#     exits non-zero on any failed assertion.
+#
+# Smoke verified: pass=0 / fail=2 on kubetest-alt-gatling:3.9.5 (arm64
+# native via JVM). The wrapper's exit-2 on failed assertion is what
+# makes the exit-code verdict correct here.
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: gatling
+  labels:
+    kubetest.io/tool: gatling
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    # Tag matches executors/gatling/Dockerfile's GATLING_VERSION build arg.
+    # Bump requires: rebuild the image, retest the fail smoke, update tag.
+    image: ghcr.io/hinskii/kubetest-alt/gatling:3.9.5
+    command: ["gatling-run"]
+    args:
+      - "-sf"
+      - "/data/repo/{{ config.simulationsFolder }}"
+      - "-rf"
+      - "/data/repo/results"
+      - "-s"
+      - "{{ config.simulation }}"
+      - "-rm"
+      - "local"
+  artifacts:
+    paths:
+      - "results/**/assertions.json"
+      - "results/**/global_stats.json"
+      - "results/**/stats.json"
+      - "results/**/simulation.log"
+      - "results/**/index.html"
+  config:
+    # Path to the Scala/Java simulations folder inside content-fetcher tree.
+    simulationsFolder:
+      type: string
+      default: "gatling/user-files/simulations"
+    # Fully-qualified simulation class (package.ClassName).
+    simulation:
+      type: string
+      # Required.

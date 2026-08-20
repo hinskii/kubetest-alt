@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-soapui
+  namespace: default
+spec:
+  use: [soapui]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    project:
+      type: string
+      default: "soapui/smoke-project.xml"

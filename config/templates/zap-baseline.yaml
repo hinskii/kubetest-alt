@@ -1,0 +1,61 @@
+# OWASP ZAP baseline scan template.
+#
+# Verdict: exit code (honest). zap-baseline.py exit codes:
+#   * 0 = no WARN, no FAIL (or -I flag set and no FAIL)
+#   * 1 = at least one WARN raised
+#   * 2 = at least one FAIL raised
+#   * 3 = any other error
+# All non-zero maps to phase=failed via default rule.
+#
+# `failOnWarn` (default true) controls the strictness:
+#   * true  → omit -I; WARNs raise exit 1
+#   * false → pass -I; only FAILs raise exit 2
+#
+# Smoke verified on ghcr.io/zaproxy/zaproxy:stable (arm64) against
+# https://example.com:
+#   * strict (failOnWarn=true, default):  exit=2 (WARN-level findings)
+#   * lenient (failOnWarn=false, -I):     exit=0 (no FAIL-level findings)
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: zap-baseline
+  labels:
+    kubetest.io/tool: zap-baseline
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    # `zap-baseline.py` is on PATH inside the zaproxy image.
+    command: ["zap-baseline.py"]
+    args:
+      - "-t"
+      - "{{ config.target }}"
+      - "-m"
+      - "{{ config.spiderMinutes }}"
+      - "-x"
+      - "/data/repo/results/zap-report.xml"
+      - "-J"
+      - "/data/repo/results/zap-report.json"
+      - "-r"
+      - "/data/repo/results/zap-report.html"
+    # Note: this template does NOT include -I. Consumers who want the
+    # lenient policy (only FAILs raise exit) override container.args
+    # per-Test — that's the escape hatch for the failOnWarn=false case.
+    # A per-Test override is louder than a template flag; the boolean
+    # `failOnWarn` config below is a doc marker for the intent, but
+    # actual behavior comes from what args the resolved container runs.
+  artifacts:
+    paths:
+      - "results/**/zap-report.*"
+  config:
+    target:
+      type: string
+      # Required — URL under scan (e.g. https://staging.example.com).
+    spiderMinutes:
+      type: integer
+      default: "1"
+    failOnWarn:
+      # Doc marker — see the note above. When "false", consumers should
+      # ALSO override container.args per-Test to include "-I".
+      type: boolean
+      default: "true"

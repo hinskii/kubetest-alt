@@ -1,0 +1,37 @@
+# Cucumber (BDD, cucumber-ruby) template.
+#
+# Verdict: exit code (honest). cucumber-ruby returns 0 on all-pass,
+# non-zero (typically 1) on any step failure or step definition error.
+#
+# No public standalone cucumber image ships on Docker Hub, so this
+# template installs cucumber-ruby on top of the ruby:3.3-slim base
+# on every run (same pattern as pytest). Slow first-boot; acceptable
+# for MVP. Alternative for JVM-based cucumber setups: use the maven
+# or gradle template with cucumber-jvm deps in the pom/build.
+#
+# Smoke verified: pass=0 / fail=1 on ruby:3.3-slim + cucumber 9.2.0 (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: cucumber
+  labels:
+    kubetest.io/tool: cucumber
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: ruby:3.3-slim
+    command: ["sh", "-c"]
+    args:
+      - "gem install --quiet cucumber -v {{ config.cucumberVersion }} && cd /data/repo/{{ config.featuresDir }} && cucumber --format junit --out /data/repo/results/"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+      - "results/**/*.json"
+  config:
+    featuresDir:
+      type: string
+      default: "."
+    cucumberVersion:
+      type: string
+      default: "9.2.0"
+      pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"

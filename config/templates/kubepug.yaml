@@ -1,0 +1,41 @@
+# kubepug — Kubernetes API deprecation scanner template.
+#
+# Verdict: exit code (honest ONLY when --error-on-deprecated /
+# --error-on-deleted flags are set — without them, kubepug always
+# returns exit 0 even when finding deprecated APIs).
+#
+# Template ALWAYS passes both flags. Consumers who want a "report but
+# don't fail" run override container.args per-Test.
+#
+# Smoke verified: pass=0 (current API) / fail=1 (policy/v1beta1 PDB) on
+# kubeshop/testkube-kubepug-executor:2.1.123 (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: kubepug
+  labels:
+    kubetest.io/tool: kubepug
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    # Testkube's kubepug executor image ships the kubepug binary at
+    # /.kubepug//kubepug (double-slash in the vendor path is
+    # intentional — that's where their entrypoint places it).
+    image: kubeshop/testkube-kubepug-executor:2.1.123
+    command: ["/.kubepug//kubepug"]
+    args:
+      - "--input-file"
+      - "/data/repo/{{ config.inputFile }}"
+      - "--error-on-deprecated"
+      - "--error-on-deleted"
+      - "--format"
+      - "json"
+      - "--filename"
+      - "/data/repo/results/kubepug-report.json"
+  artifacts:
+    paths:
+      - "results/**/kubepug-report.*"
+  config:
+    inputFile:
+      type: string
+      # Required — path to k8s YAML manifest(s) to scan.

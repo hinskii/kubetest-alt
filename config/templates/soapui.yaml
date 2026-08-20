@@ -1,0 +1,40 @@
+# SoapUI test-runner template.
+#
+# Verdict: exit code (honest). SoapUI's testrunner.sh returns exit 0
+# when all test cases pass, non-zero (typically 255 = -1) on any
+# failure. `-j` flag writes JUnit XML reports for count aggregation.
+#
+# Smoke verified: pass=0 / fail=255 on kubeshop/testkube-soapui-executor:
+# 2.1.123 (SoapUI 5.7.2, arm64 via JVM).
+#
+# We DO NOT pass the `-I` flag ("ignore errors") — that would silence
+# assertion failures, defeating the exit-code contract. Consumers who
+# want lenient runs opt out per-Test.
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: soapui
+  labels:
+    kubetest.io/tool: soapui
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    # kubeshop's soapui executor image bundles SoapUI 5.7.2 at
+    # /usr/local/SmartBear/SoapUI-5.7.2/bin/testrunner.sh. We use
+    # testrunner.sh directly (NOT their runner wrapper) so the wrapper
+    # sees SoapUI's real exit code.
+    image: kubeshop/testkube-soapui-executor:2.1.123
+    command: ["/usr/local/SmartBear/SoapUI-5.7.2/bin/testrunner.sh"]
+    args:
+      - "-j"    # emit JUnit XML alongside SoapUI's own log
+      - "-f"
+      - "/data/repo/results"
+      - "/data/repo/{{ config.project }}"
+  artifacts:
+    paths:
+      - "results/**/*.xml"
+      - "results/**/*.log"
+  config:
+    project:
+      type: string
+      # Required — path to the SoapUI project XML.

@@ -1,0 +1,32 @@
+# Maven JVM test runner template.
+#
+# Verdict: exit code (honest). `mvn test` returns non-zero when any
+# surefire-driven test fails.
+#
+# Smoke verified: pass=0 / fail=1 on maven:3.9-eclipse-temurin-21 (arm64).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestTemplate
+metadata:
+  name: maven
+  labels:
+    kubetest.io/tool: maven
+    app.kubernetes.io/name: kubetest-alt
+spec:
+  container:
+    image: maven:3.9-eclipse-temurin-21
+    command: ["mvn"]
+    args:
+      - "-B"    # batch mode — no color, no progress bars
+      - "-q"    # quiet — errors only
+      - "test"
+    workingDir: "/data/repo/{{ config.projectDir }}"
+  artifacts:
+    # Surefire writes TEST-*.xml under target/surefire-reports/;
+    # Failsafe (integration tests) uses target/failsafe-reports/.
+    paths:
+      - "**/target/surefire-reports/**/*.xml"
+      - "**/target/failsafe-reports/**/*.xml"
+  config:
+    projectDir:
+      type: string
+      default: "."

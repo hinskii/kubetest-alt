@@ -210,6 +210,24 @@ and the JUnit processor still reports counts — you only need a
 custom parser when a per-tool metric (k6's `p95_ms`, JMeter's
 `throughput`, etc.) is worth first-class UI treatment.
 
+## When NOT to write a template
+
+Some tools work better as raw Test manifests (or example-only docs)
+than as shared templates. Session B established three patterns:
+
+- **Too trivial** (curl) — args ARE the test; a template just adds
+  indirection. See `docs/examples/curl-raw-test.md`.
+- **Needs runtime not shipped yet** (selenium) — requires the
+  `spec.services{}` sidecar runtime, backlog. See
+  `docs/examples/selenium.md`.
+- **RBAC decisions per-Test** (chainsaw) — cluster-touching tools
+  where the ServiceAccount + RoleBinding shape depends on which
+  resources the specific suite exercises. See
+  `docs/examples/chainsaw.md`.
+
+If your candidate tool matches one of these shapes, add an example
+doc instead of a shared template.
+
 ## Anti-patterns
 
 - **`:latest` tags** — breaks reproducibility. Pin.

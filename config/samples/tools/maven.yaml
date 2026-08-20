@@ -1,0 +1,15 @@
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: sample-maven
+  namespace: default
+spec:
+  use: [maven]
+  content:
+    git:
+      uri: https://github.com/kubetest-alt/example-tests.git
+      revision: main
+  config:
+    projectDir:
+      type: string
+      default: "maven"
