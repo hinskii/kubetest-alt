@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 )
 
 // SourceCron is TestRun.spec.source on runs the scheduler creates.
@@ -212,10 +213,13 @@ func (s *Scheduler) evaluate(ctx context.Context, t *testsv1alpha1.Test, now tim
 		if apierrors.IsAlreadyExists(err) {
 			// Idempotency contract: another replica or a previous tick
 			// already created THIS scheduled instant's TestRun. Success.
+			// We DO NOT bump the fires counter here — this replica
+			// didn't actually create the run.
 			return nil
 		}
 		return fmt.Errorf("create TestRun %q: %w", run.Name, err)
 	}
+	metrics.SchedulerFiresTotal.Inc()
 	log.FromContext(ctx).V(1).Info("scheduler created TestRun",
 		"test", t.Name, "namespace", t.Namespace,
 		"run", run.Name, "scheduledAt", prev.UTC().Format(time.RFC3339))

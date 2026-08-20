@@ -94,6 +94,12 @@ type Server struct {
 
 	// Now is the wall-clock source. Overridable in tests. Default time.Now.
 	Now func() time.Time
+
+	// MetricsHandler is the Prometheus /metrics handler (typically
+	// promhttp.HandlerFor over the kubetest metrics registry). Nil in
+	// unit tests so the OpenAPI golden stays stable — cmd/apiserver
+	// wires it for production.
+	MetricsHandler http.Handler
 }
 
 // RunReader is the read-only surface of store.RunStore the apiserver needs.
@@ -145,6 +151,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	// Prometheus /metrics (step 14). Uses the same kubetest metrics as
+	// the operator via a dedicated registry — apiserver-side counters
+	// live on this scrape path. Handler is only mounted when
+	// MetricsHandler is wired by cmd/apiserver; unit tests omit it so
+	// the OpenAPI golden stays stable.
+	if s.MetricsHandler != nil {
+		mux.Handle("GET /metrics", s.MetricsHandler)
+	}
 
 	return mux
 }

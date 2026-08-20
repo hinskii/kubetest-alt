@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
 )
 
@@ -237,6 +238,10 @@ func (m *gateManager) appendOutcomeLocked(oc gateOutcome) {
 		// on every append.
 		m.outcomes = append([]gateOutcome{}, m.outcomes[len(m.outcomes)/2:]...)
 	}
+	// Bounded-label metric — Kind is one of the const strings declared
+	// in this file (fired / expired / skipped-concurrency / etc.).
+	// Never leaks per-trigger cardinality.
+	metrics.TriggerFiresTotal.WithLabelValues(oc.Kind).Inc()
 }
 
 func gateDelay(g *gate) int32 {

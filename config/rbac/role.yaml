@@ -39,6 +39,12 @@ rules:
   - get
   - list
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -81,6 +87,7 @@ rules:
   resources:
   - testruns/status
   - testtriggers/status
+  - webhooks/status
   verbs:
   - get
   - patch
@@ -89,6 +96,7 @@ rules:
   - tests.kubetest.io
   resources:
   - tests
+  - webhooks
   verbs:
   - get
   - list

@@ -46,7 +46,9 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
+	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
 )
 
 // TestRunReconciler owns the TestRun lifecycle: setup → snapshot + concurrency
@@ -98,6 +100,18 @@ type TestRunReconciler struct {
 	// evaluation. Nil is equivalent to "empty env" — no OS env leaks in.
 	// cmd/operator wires the operator-curated subset it wants to expose.
 	ResolverEnv map[string]string
+
+	// WebhookDispatcher fires outbound webhooks on terminal transitions
+	// (step 14). Nil disables the outbound webhook path — reconcile
+	// otherwise unchanged. Dispatcher.Enqueue is documented non-blocking,
+	// so calling it in-line from the reconciler is safe.
+	WebhookDispatcher *webhookdelivery.Dispatcher
+
+	// dispatchedRuns dedupes webhook fires per (namespace, name, phase).
+	// Populated on successful Enqueue; consulted on every reconcile-of-
+	// terminal to avoid re-firing when Job GC / status update triggers
+	// another reconcile pass. Same shape/rationale as persistedRuns.
+	dispatchedRuns sync.Map // types.NamespacedName+phase → struct{}
 
 	// FallbackRequeue is a safety-net requeue for lost Job/Pod events; the
 	// primary trigger is Owns(Job) + Watches(Pod). Default 30s.
@@ -209,10 +223,13 @@ func (r *TestRunReconciler) mapPodToTestRun(_ context.Context, obj client.Object
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=testruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=testruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=tests,verbs=get;list;watch
+// +kubebuilder:rbac:groups=tests.kubetest.io,resources=webhooks,verbs=get;list;watch
+// +kubebuilder:rbac:groups=tests.kubetest.io,resources=webhooks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get;list
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 // Reconcile drives a TestRun through its state machine. Idempotent by design:
@@ -518,6 +535,12 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 				if err := r.Status().Update(ctx, run); err != nil {
 					return ctrl.Result{}, err
 				}
+				// ActiveRuns++ on first queued→running transition. The
+				// matching decrement fires in transitionTerminal for
+				// runs that went through this path.
+				metrics.ActiveRuns.
+					WithLabelValues(metrics.NormalizeTool(run.Labels[compiler.LabelKubetestTool])).
+					Inc()
 			}
 		}
 		// Safety-net requeue in case we miss a Job/Pod event; the primary
@@ -545,6 +568,10 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 	// row reflects the same finishedAt/durationMs/message the CR shows.
 	// Error is logged, NOT returned — run history < run correctness.
 	r.persistFinished(ctx, run)
+	// Fire outbound webhooks (step 14). Enqueue is async and non-blocking
+	// — endpoint latency cannot delay this reconcile. Deduped per
+	// (run, phase) via dispatchedRuns.
+	r.dispatchWebhooks(ctx, run)
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(run.Name)
 	}
@@ -578,6 +605,61 @@ func (r *TestRunReconciler) persistFinished(ctx context.Context, run *testsv1alp
 	r.persistedRuns.Store(key, struct{}{})
 }
 
+// dispatchWebhooks lists Webhook CRs in the run's namespace, filters
+// by event, and Enqueues one Job per matching subscriber. Enqueue is
+// documented non-blocking. All errors are LOGGED, never returned —
+// webhook delivery MUST NOT delay or fail a reconcile (§14 async).
+//
+// Dedup: fires at most once per (run, phase). A subsequent reconcile
+// on the terminal CR (Job GC, status update ripple) sees the entry
+// and skips.
+func (r *TestRunReconciler) dispatchWebhooks(ctx context.Context, run *testsv1alpha1.TestRun) {
+	if r.WebhookDispatcher == nil || run == nil {
+		return
+	}
+	dedupKey := webhookDedupKey(run)
+	if _, done := r.dispatchedRuns.Load(dedupKey); done {
+		return
+	}
+	var hooks testsv1alpha1.WebhookList
+	if err := r.List(ctx, &hooks, client.InNamespace(run.Namespace)); err != nil {
+		log.FromContext(ctx).Error(err, "list Webhooks for delivery — skipping this cycle", "run", run.Name)
+		return
+	}
+	event := string(run.Status.Phase)
+	// Tool label propagates from resolved spec's labels via the compiler
+	// onto the Job/Pod; but the CR itself doesn't carry it. Best-effort
+	// lookup from run.Labels + resolvedSpec's implied tool for the
+	// payload. Empty string is fine — payload just doesn't include it.
+	tool := run.Labels[compiler.LabelKubetestTool]
+	payload := webhookdelivery.BuildPayload(event, run, tool, r.Now())
+	for i := range hooks.Items {
+		hook := &hooks.Items[i]
+		if !webhookdelivery.EventMatches(hook.Spec.Events, event) {
+			continue
+		}
+		r.WebhookDispatcher.Enqueue(webhookdelivery.Job{
+			Key: webhookdelivery.NamespacedKey{
+				Namespace: hook.Namespace,
+				Name:      hook.Name,
+			},
+			Spec:      *hook.Spec.DeepCopy(),
+			Namespace: hook.Namespace,
+			Payload:   payload,
+			QueuedAt:  r.Now().Time,
+		})
+	}
+	r.dispatchedRuns.Store(dedupKey, struct{}{})
+}
+
+// webhookDedupKey is (namespace/name#phase). Different phase for the
+// same run gets a distinct entry, which is what we want — a queued→
+// running→passed sequence fires three separate deliveries per
+// subscriber, dedup only against duplicate fires of the SAME phase.
+func webhookDedupKey(run *testsv1alpha1.TestRun) string {
+	return run.Namespace + "/" + run.Name + "#" + string(run.Status.Phase)
+}
+
 // deleteJobBackground deletes a Job with Background propagation so its pods
 // are garbage-collected too.
 //
@@ -599,7 +681,8 @@ func deleteJobBackground(ctx context.Context, c client.Client, job *batchv1.Job)
 
 // transitionTerminal sets Status.Phase to a terminal value plus timestamps
 // and message. Idempotent: if the phase is already the target terminal, no
-// write happens.
+// write happens. Emits Prometheus counters/histograms on the FIRST
+// transition to terminal (guarded by the "phase already terminal" no-op).
 func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1alpha1.TestRun,
 	phase testsv1alpha1.Phase, reason, message string) (ctrl.Result, error) {
 
@@ -608,6 +691,16 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 	}
 	if run.Status.Phase == phase {
 		return ctrl.Result{}, nil
+	}
+	// Metrics fire ONCE per run on the first terminal transition.
+	// If the run was Running before (StartedAt set) the ActiveRuns
+	// gauge decrements to match — otherwise it's a straight-to-error
+	// transition and the gauge was never incremented for this run.
+	tool := metrics.NormalizeTool(run.Labels[compiler.LabelKubetestTool])
+	source := metrics.NormalizeSource(run.Spec.Source)
+	metrics.RunsTotal.WithLabelValues(tool, string(phase), source).Inc()
+	if run.Status.StartedAt != nil && run.Status.Phase == testsv1alpha1.PhaseRunning {
+		metrics.ActiveRuns.WithLabelValues(tool).Dec()
 	}
 	run.Status.Phase = phase
 	if reason != "" && message != "" {
@@ -624,6 +717,12 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 	run.Status.FinishedAt = &now
 	if run.Status.StartedAt != nil && run.Status.FinishedAt != nil {
 		run.Status.DurationMs = run.Status.FinishedAt.Time.Sub(run.Status.StartedAt.Time).Milliseconds()
+		// Observe the run's wall-clock duration once per terminal
+		// transition (guarded by the "phase already terminal" no-op
+		// above so retries don't double-observe).
+		metrics.RunDurationSeconds.
+			WithLabelValues(tool).
+			Observe(float64(run.Status.DurationMs) / 1000.0)
 	}
 	if err := r.Status().Update(ctx, run); err != nil {
 		return ctrl.Result{}, err

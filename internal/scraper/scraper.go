@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
@@ -163,6 +164,9 @@ func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (exe
 		}
 		lastErr = s.Uploader.Put(ctx, s.Bucket, key, f, size, ct)
 		if lastErr == nil {
+			// Count only successful uploads — a failed Put doesn't move
+			// bytes to storage.
+			metrics.ScraperBytesTotal.Add(float64(size))
 			return executor.ArtifactRef{
 				Path:        m.RelPath,
 				Key:         key,

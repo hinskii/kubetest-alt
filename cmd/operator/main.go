@@ -20,8 +20,13 @@ import (
 	"context"
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	ctrltypes "k8s.io/apimachinery/pkg/types"
+	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -48,10 +53,14 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/logstream"
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
+
 	webhookv1alpha1 "github.com/hinskii/kubetest-alt/internal/webhook/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -75,6 +84,14 @@ func init() {
 
 	utilruntime.Must(testsv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
+
+	// Register kubetest metrics on controller-runtime's shared registry
+	// (backs /metrics on the manager's metrics endpoint). Doing this in
+	// init means every operator binary gets the same set — no risk of
+	// forgetting one at wire-up time.
+	for _, c := range metrics.All() {
+		ctrlmetrics.Registry.MustRegister(c)
+	}
 }
 
 // nolint:gocyclo
@@ -419,6 +436,18 @@ func main() {
 		}
 	}
 
+	// Step 14: outbound webhook dispatcher. Async pool with retry +
+	// secret-safe logs. Wired into the reconciler below via the
+	// WebhookDispatcher field; a nil dispatcher disables the outbound
+	// path entirely (unit tests / dev clusters). The SecretResolver
+	// pulls Secret-backed header values from the manager cache — same
+	// namespace as the Webhook CR.
+	webhookDispatcher := &webhookdelivery.Dispatcher{
+		Logger:  setupLog.WithName("webhook-dispatcher"),
+		Secrets: newSecretResolver(mgr.GetClient()),
+	}
+	webhookDispatcher.Start(context.Background())
+
 	if err := (&controller.TestRunReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
@@ -431,8 +460,9 @@ func main() {
 		// the operator does NOT project os.Environ() into `{{ env.* }}`
 		// (would leak operator-pod secrets). Populate via a future
 		// --resolver-env flag when a use case appears.
-		TemplateStore: &controller.ClientTemplateStore{Client: mgr.GetClient()},
-		ResolverEnv:   nil,
+		TemplateStore:     &controller.ClientTemplateStore{Client: mgr.GetClient()},
+		ResolverEnv:       nil,
+		WebhookDispatcher: webhookDispatcher, // step 14
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "TestRun")
 		os.Exit(1)
@@ -500,5 +530,29 @@ func main() {
 	}
 	if pgPool != nil {
 		pgPool.Close()
+	}
+}
+
+// newSecretResolver builds a webhookdelivery.SecretResolver backed by the
+// controller-runtime client cache. Reads go through the manager cache
+// (already watching Secrets via the reconciler's RBAC), so this is
+// effectively a hashmap lookup after initial sync — no per-delivery
+// API-server round-trip.
+//
+// Secret VALUES are returned to the caller (dispatcher) which then
+// redacts them from log output. The value NEVER lives outside the
+// dispatcher's request-building stack.
+func newSecretResolver(c ctrlclient.Client) webhookdelivery.SecretResolver {
+	return func(namespace, name, key string) (string, error) {
+		var s corev1.Secret
+		if err := c.Get(context.Background(),
+			ctrltypes.NamespacedName{Namespace: namespace, Name: name}, &s); err != nil {
+			return "", fmt.Errorf("get Secret %s/%s: %w", namespace, name, err)
+		}
+		v, ok := s.Data[key]
+		if !ok {
+			return "", fmt.Errorf("secret %s/%s has no key %q", namespace, name, key)
+		}
+		return string(v), nil
 	}
 }

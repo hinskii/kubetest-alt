@@ -27,6 +27,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -36,6 +38,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/apiserver"
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
@@ -169,6 +172,15 @@ func main() {
 	} else {
 		setupLog.Info("--postgres-dsn not set — /runs returns cluster-only entries")
 	}
+
+	// Prometheus registry + /metrics handler. Registered on a dedicated
+	// registry (not the default) so a rogue module can't leak metrics
+	// through this apiserver without going through metrics.All().
+	apiRegistry := prometheus.NewRegistry()
+	for _, c := range metrics.All() {
+		apiRegistry.MustRegister(c)
+	}
+	srv.MetricsHandler = promhttp.HandlerFor(apiRegistry, promhttp.HandlerOpts{})
 
 	httpSrv := &http.Server{
 		Addr:              listenAddr,

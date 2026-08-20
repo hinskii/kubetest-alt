@@ -7,8 +7,16 @@
 # Template ALWAYS passes both flags. Consumers who want a "report but
 # don't fail" run override container.args per-Test.
 #
+# Mini-15B closing: this template used to point at
+# kubeshop/testkube-kubepug-executor:2.1.123 — a testkube-vendored
+# image with their own wrapper (kubepug lived at /.kubepug//kubepug,
+# a vendor-specific layout). Coupling to another test platform's image
+# is a smell. kubepug is a single Go binary published as a GitHub
+# release tarball, so we bundle it ourselves on alpine — trivial
+# image (executors/kubepug/Dockerfile) with `kubepug` on PATH.
+#
 # Smoke verified: pass=0 (current API) / fail=1 (policy/v1beta1 PDB) on
-# kubeshop/testkube-kubepug-executor:2.1.123 (arm64).
+# kubetest-alt-kubepug:1.7.1 (arm64 native).
 apiVersion: tests.kubetest.io/v1alpha1
 kind: TestTemplate
 metadata:
@@ -18,11 +26,10 @@ metadata:
     app.kubernetes.io/name: kubetest-alt
 spec:
   container:
-    # Testkube's kubepug executor image ships the kubepug binary at
-    # /.kubepug//kubepug (double-slash in the vendor path is
-    # intentional — that's where their entrypoint places it).
-    image: kubeshop/testkube-kubepug-executor:2.1.123
-    command: ["/.kubepug//kubepug"]
+    # Platform-built (executors/kubepug/Dockerfile). Alpine + kubepug
+    # v1.7.1 binary on /usr/local/bin/kubepug (on PATH).
+    image: ghcr.io/hinskii/kubetest-alt/kubepug:1.7.1
+    command: ["kubepug"]
     args:
       - "--input-file"
       - "/data/repo/{{ config.inputFile }}"

@@ -146,7 +146,16 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # covering the cartesian product of "which template field set" × "which
 # Test field set" runs into diminishing returns. The 75 floor covers the
 # happy path + all merge branches at least once + every error class.
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75
+# internal/metrics is pure whitelisting + label mapping — the whole
+# package has one job (guard against high-cardinality drift). 95 floor
+# because dropping below signals a whole test row was removed, not a
+# random regression.
+#
+# internal/webhookdelivery holds the async delivery + retry state machine
+# + secret-safe log redaction. Floor 80 mirrors pkg/executor — every
+# error branch matters (endpoint 4xx vs 5xx vs timeout vs secret-missing
+# splits into distinct outcomes that ALL land on metrics + status).
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage

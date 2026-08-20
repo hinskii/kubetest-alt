@@ -59,6 +59,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -517,8 +518,12 @@ func (t *Tailer) flushPending(ctx context.Context) {
 	}
 	body := append([]byte(nil), t.pending.Bytes()...)
 	key := LogChunkKey(t.cfg.RunID, t.chunkSeq)
-	_ = t.cfg.Uploader.Put(ctx, t.cfg.Bucket, key, bytes.NewReader(body),
-		int64(len(body)), "text/plain")
+	if err := t.cfg.Uploader.Put(ctx, t.cfg.Bucket, key, bytes.NewReader(body),
+		int64(len(body)), "text/plain"); err == nil {
+		// Only count successful uploads — a failed Put doesn't move
+		// bytes to storage.
+		metrics.LogStreamBytesTotal.Add(float64(len(body)))
+	}
 	t.chunkSeq++
 	t.pending.Reset()
 }

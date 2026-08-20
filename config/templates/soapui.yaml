@@ -4,8 +4,16 @@
 # when all test cases pass, non-zero (typically 255 = -1) on any
 # failure. `-j` flag writes JUnit XML reports for count aggregation.
 #
-# Smoke verified: pass=0 / fail=255 on kubeshop/testkube-soapui-executor:
-# 2.1.123 (SoapUI 5.7.2, arm64 via JVM).
+# Mini-15B closing: this template used to point at
+# kubeshop/testkube-soapui-executor:2.1.123 — a testkube-vendored image.
+# Coupling the catalog to another test-execution platform's image is a
+# smell (their tag lifecycle, their support policy, their base image
+# decisions). We now bundle SoapUI OSS 5.7.2 (the last public release)
+# ourselves via executors/soapui/Dockerfile — same pattern as gatling.
+# testrunner.sh is on PATH and works verbatim.
+#
+# Smoke verified: pass=0 / fail=255 on kubetest-alt-soapui:5.7.2
+# (SoapUI 5.7.2, arm64 native via JVM).
 #
 # We DO NOT pass the `-I` flag ("ignore errors") — that would silence
 # assertion failures, defeating the exit-code contract. Consumers who
@@ -19,12 +27,11 @@ metadata:
     app.kubernetes.io/name: kubetest-alt
 spec:
   container:
-    # kubeshop's soapui executor image bundles SoapUI 5.7.2 at
-    # /usr/local/SmartBear/SoapUI-5.7.2/bin/testrunner.sh. We use
-    # testrunner.sh directly (NOT their runner wrapper) so the wrapper
-    # sees SoapUI's real exit code.
-    image: kubeshop/testkube-soapui-executor:2.1.123
-    command: ["/usr/local/SmartBear/SoapUI-5.7.2/bin/testrunner.sh"]
+    # Platform-built (executors/soapui/Dockerfile). Bundles SoapUI OSS
+    # 5.7.2 at /opt/soapui/bin/testrunner.sh; that path is on PATH via
+    # the image's PATH env, so we invoke it directly by name.
+    image: ghcr.io/hinskii/kubetest-alt/soapui:5.7.2
+    command: ["testrunner.sh"]
     args:
       - "-j"    # emit JUnit XML alongside SoapUI's own log
       - "-f"
