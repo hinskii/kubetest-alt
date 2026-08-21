@@ -191,7 +191,12 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 			},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
-					Path:    "script.js",
+					// `repo/` prefix matches the platform's git-mount convention
+					// (§CLAUDE Content§, /data/repo). k6/jmeter/gatling templates
+					// expand `{{ config.script }}` under /data/repo/ — inline
+					// content.files[] paths must land there too or the tool's
+					// argv points at a non-existent file.
+					Path:    "repo/script.js",
 					Content: "export default function() { /* pass */ }",
 				}},
 			},
@@ -252,7 +257,7 @@ func scenarioJMeterFailing(t *testing.T, ctx context.Context, c client.Client) {
 			Use:               []string{"jmeter"},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
-					Path:    "smoke.jmx",
+					Path:    "repo/smoke.jmx",
 					Content: plan,
 				}},
 			},
@@ -371,7 +376,7 @@ func scenarioCron(t *testing.T, ctx context.Context, c client.Client) {
 			},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
-					Path:    "s.js",
+					Path:    "repo/s.js",
 					Content: "export default function() {}",
 				}},
 			},
