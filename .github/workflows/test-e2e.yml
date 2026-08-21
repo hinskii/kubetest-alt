@@ -53,10 +53,26 @@ jobs:
           go test -race ./test/helm/...
 
       - name: Run e2e (5 scenarios + metrics scrape + zero-error logs)
+        # pipefail is on by default in GH Actions bash steps; still,
+        # be explicit — a silent short-circuit on the 1e1cff1 attempt
+        # (workflow reported success in 65s, which is impossible for
+        # a real kind + 3x docker build + helm install + 5 scenarios)
+        # is exactly what these checks now catch.
+        shell: bash
         run: |
+          set -euo pipefail
           ./test/e2e/run.sh 2>&1 | tee /tmp/e2e.log
+          # Assertion: all 5 SCENARIO_TIMING markers present in log.
+          # If Go tests skipped silently (SKIP_E2E leak, wrong build
+          # tag, test-file-vanish) this line fails the step.
+          got_markers=$(grep -cE "SCENARIO_TIMING scenario=" /tmp/e2e.log || echo 0)
+          echo "SCENARIO_TIMING markers observed: $got_markers"
+          if [ "$got_markers" -lt 5 ]; then
+            echo "::error::expected >=5 SCENARIO_TIMING markers in e2e log, saw $got_markers — scenarios did not run"
+            exit 1
+          fi
           # Emit collected phase timings for the plan's per-scenario table.
-          grep -E "^\[e2e\].*PHASE_TIMING|SCENARIO_TIMING" /tmp/e2e.log > /tmp/e2e-timings.txt || true
+          grep -E "PHASE_TIMING|SCENARIO_TIMING" /tmp/e2e.log > /tmp/e2e-timings.txt || true
           echo "== timings summary =="
           cat /tmp/e2e-timings.txt
 

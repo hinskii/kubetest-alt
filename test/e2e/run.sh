@@ -7,16 +7,20 @@
 # Called from make test-e2e AND from .github/workflows/test-e2e.yml.
 # Wall-clock budget from the plan: ≤15 min. If we go over on the CI
 # run we split PR-gate/nightly per plan (report the timings).
+#
+# Diagnostic mode: `set -x` on so every command echoes to stderr.
+# The 1e1cff1 CI run reported success in 65s (impossible for a real
+# kind + 3x docker build + helm install + 5 scenarios). We want the
+# artifact log to make the WHY unambiguous — silent short-circuits
+# are the failure mode we're guarding against.
 
-set -euo pipefail
+set -euxo pipefail
 
 KIND_CLUSTER="${KIND_CLUSTER:-kubetest-alt-e2e}"
 RELEASE_NS="kubetest-alt"
 CHART_DIR="charts/kubetest-alt"
 IMAGE_TAG="e2e-local"
 
-# All platform images the chart references. Built + `kind load`ed so
-# ImagePullPolicy=Never works inside the cluster.
 IMAGES=(
   "kubetest-alt/operator:${IMAGE_TAG}"
   "kubetest-alt/apiserver:${IMAGE_TAG}"
@@ -25,10 +29,9 @@ IMAGES=(
 
 log() { echo "[e2e] $(date +%H:%M:%S) $*" >&2; }
 
-# Timings recorded per phase for the report.
 declare -A PHASE_START
 phase_start() { PHASE_START["$1"]=$(date +%s); log "PHASE_START $1"; }
-phase_end()   {
+phase_end() {
   local phase="$1"
   local start="${PHASE_START[$phase]}"
   local now=$(date +%s)
@@ -37,25 +40,41 @@ phase_end()   {
 
 cleanup() {
   log "cleanup — deleting kind cluster $KIND_CLUSTER"
-  # port-forwards die with this process
   kind delete cluster --name "$KIND_CLUSTER" || true
-  # Kill any lingering port-forward we spawned
   jobs -p | xargs -r kill 2>/dev/null || true
 }
 trap cleanup EXIT
 
+# Pre-flight assertions — surface missing tooling with a loud message
+# rather than the runner's default cryptic "command not found".
+log "=== pre-flight ==="
+docker version --format 'server={{.Server.Version}} client={{.Client.Version}}'
+kind version
+helm version --short
+kubectl version --client
+go version
+
 phase_start "kind_create"
 if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER}\$"; then
-  kind create cluster --name "$KIND_CLUSTER" --wait 60s
+  kind create cluster --name "$KIND_CLUSTER" --wait 120s
 else
   log "kind cluster $KIND_CLUSTER already exists; reusing"
 fi
+kubectl cluster-info --context "kind-${KIND_CLUSTER}"
+kubectl get nodes
 phase_end "kind_create"
 
 phase_start "docker_build"
-docker build -f Dockerfile           -t "kubetest-alt/operator:${IMAGE_TAG}"        --build-arg TARGET_BIN=cmd/operator .
-docker build -f Dockerfile           -t "kubetest-alt/apiserver:${IMAGE_TAG}"       --build-arg TARGET_BIN=cmd/apiserver .
-docker build -f executors/content-fetcher/Dockerfile -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" executors/content-fetcher
+docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
+docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
+docker build -f executors/content-fetcher/Dockerfile \
+             -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" executors/content-fetcher
+# Assert each image landed — earlier runs mysteriously passed in 65s
+# which is impossible if the builds actually ran; a missing image at
+# this point should now shout, not silently proceed.
+for img in "${IMAGES[@]}"; do
+  docker image inspect "$img" >/dev/null || { log "IMAGE MISSING: $img"; exit 1; }
+done
 phase_end "docker_build"
 
 phase_start "kind_load"
@@ -75,28 +94,22 @@ helm upgrade --install kt "$CHART_DIR" \
   --set images.apiserver.tag="${IMAGE_TAG}" \
   --set images.contentFetcher.repository=kubetest-alt/content-fetcher \
   --set images.contentFetcher.tag="${IMAGE_TAG}" \
-  --wait --timeout=3m
-# Health check for both deployments
-kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=120s
-kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=120s
+  --set operator.metrics.bindAddress=":8080" \
+  --set operator.metrics.secure=false \
+  --wait --timeout=5m
+kubectl -n "$RELEASE_NS" get all
+kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=180s
+kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=180s
 phase_end "helm_install"
 
-# Port-forward for metrics + apiserver — background jobs die on trap.
 phase_start "portforward"
-# Operator metrics: --metrics-secure=true by default; scenarios only
-# need presence + a counter — hit the pod's :8443 via kubectl proxy
-# would need auth. Simpler for e2e: relax secure via values override
-# (already flagged) OR bind :8080 + insecure.
-# We flip metrics.secure=false for the e2e install via a small upgrade
-# so the scrape works without a TokenReview.
-helm upgrade kt "$CHART_DIR" --namespace "$RELEASE_NS" --reuse-values \
-  --set operator.metrics.bindAddress=":8080" \
-  --set operator.metrics.secure=false --wait --timeout=60s
-kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator --timeout=120s
-
 kubectl -n "$RELEASE_NS" port-forward svc/kt-kubetest-alt-apiserver 18080:8080 >/dev/null 2>&1 &
-kubectl -n "$RELEASE_NS" port-forward deploy/kt-kubetest-alt-operator  18081:8080 >/dev/null 2>&1 &
-sleep 3
+kubectl -n "$RELEASE_NS" port-forward deploy/kt-kubetest-alt-operator 18081:8080 >/dev/null 2>&1 &
+sleep 5
+# Sanity — did port-forwards actually attach? Curl each one, non-fatal
+# but visibly logged so scenario timeouts are diagnosable.
+curl -sSf "http://127.0.0.1:18080/healthz" || log "WARN apiserver /healthz not reachable via port-forward"
+curl -sSf "http://127.0.0.1:18081/metrics" || log "WARN operator /metrics not reachable via port-forward"
 phase_end "portforward"
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
@@ -105,7 +118,7 @@ export METRICS_APISERVER_URL="http://127.0.0.1:18080/metrics"
 export METRICS_OPERATOR_URL="http://127.0.0.1:18081/metrics"
 
 phase_start "go_test"
-go test -tags=e2e -count=1 -v -timeout=15m ./test/e2e/... 2>&1
+go test -tags=e2e -count=1 -v -timeout=15m ./test/e2e/...
 phase_end "go_test"
 
 log "all scenarios passed"
