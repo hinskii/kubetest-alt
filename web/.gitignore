@@ -1,0 +1,24 @@
+node_modules
+dist
+.vite
+coverage
+playwright-report
+test-results
+*.log
+.DS_Store
+# Belt+suspenders: tsconfig now has noEmit=true so tsc shouldn't drop
+# stray .js next to .tsx sources, but if a tool ever does, don't ship
+# them.
+src/**/*.js
+!src/**/*.config.js
+# Screenshots are shipped (they're the report artifact for step 18) —
+# only ignore ephemeral error-context dirs Playwright emits on failure
+# plus the -actual.png diff outputs when a snapshot regenerates.
+screenshots/screens-*/
+screenshots/.last-run.json
+screenshots/*-actual.png
+# playwright compiles .ts configs to sibling .js at test-run time.
+playwright.screens.config.js
+# vite also compiles vite.config.ts → vite.config.js on first run.
+vite.config.js
+tsconfig.tsbuildinfo

@@ -1,0 +1,50 @@
+{
+  "name": "kubetest-alt-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --host 127.0.0.1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint . && tsc --noEmit",
+    "gen:client": "openapi-typescript ../openapi/openapi.json -o src/api/generated.ts",
+    "check:client": "bash scripts/check-client-drift.sh",
+    "screenshots": "playwright test --config=playwright.screens.config.ts"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.66.0",
+    "clsx": "^2.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.1.5"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.1",
+    "@playwright/test": "^1.50.1",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "axe-core": "^4.10.2",
+    "eslint": "^9.19.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.18",
+    "globals": "^15.14.0",
+    "jsdom": "^26.0.0",
+    "msw": "^2.7.0",
+    "openapi-typescript": "^7.5.2",
+    "tailwindcss": "^3.4.17",
+    "postcss": "^8.5.1",
+    "autoprefixer": "^10.4.20",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.22.0",
+    "vite": "^6.0.11",
+    "vitest": "^3.0.5"
+  }
+}

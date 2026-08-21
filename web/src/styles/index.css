@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: theme('colors.bone');
+  color: theme('colors.ink');
+  font-family: theme('fontFamily.mono');
+  font-size: theme('fontSize.base[0]');
+  line-height: theme('fontSize.base[1].lineHeight');
+  letter-spacing: theme('letterSpacing.normal');
+  font-feature-settings: 'ss01', 'zero'; /* dotted zero + slashed 0 */
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hairline rule used throughout — 1px, no shadow, no glow. */
+.hr {
+  border: 0;
+  border-top: 1px solid theme('colors.rule');
+}
+
+/* Focus: visible black outline, 2px, no offset. Loud enough to
+   find with keyboard, quiet enough not to jar mouse users. */
+:focus-visible {
+  outline: 2px solid theme('colors.ink');
+  outline-offset: 0;
+}
+
+/* Table hairlines: no border-radius, cells share edges. */
+table.dense {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+table.dense thead th {
+  text-align: left;
+  font-weight: 600;
+  letter-spacing: theme('letterSpacing.wide');
+  text-transform: uppercase;
+  font-size: theme('fontSize.xs[0]');
+  color: theme('colors.subtle');
+  padding: 8px 12px;
+  border-bottom: 1px solid theme('colors.rule');
+  background: theme('colors.bone');
+}
+table.dense tbody td {
+  padding: 8px 12px;
+  border-bottom: 1px solid theme('colors.rule');
+  vertical-align: top;
+}
+table.dense tbody tr:nth-child(even) {
+  background: theme('colors.band');
+}
+table.dense tbody tr:hover {
+  background: theme('colors.hover');
+}
+table.dense tbody tr[aria-disabled='true'] {
+  color: theme('colors.subtle');
+}
+
+/* KV grid used in detail views. Right-aligned mono labels + values. */
+.kv {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  column-gap: 24px;
+  row-gap: 10px;
+  font-size: theme('fontSize.sm[0]');
+}
+.kv > dt {
+  color: theme('colors.subtle');
+  text-align: right;
+  letter-spacing: theme('letterSpacing.wide');
+  text-transform: uppercase;
+  font-size: theme('fontSize.xs[0]');
+  padding-top: 2px;
+}
+.kv > dd {
+  margin: 0;
+  word-break: break-word;
+}
+
+/* Log stream: no border-radius, tight leading, ink on bone with a
+   1px rule top+bottom. */
+.logs {
+  background: theme('colors.bone');
+  color: theme('colors.ink');
+  font-size: theme('fontSize.sm[0]');
+  line-height: 1.35;
+  border-top: 1px solid theme('colors.rule');
+  border-bottom: 1px solid theme('colors.rule');
+  overflow: auto;
+  padding: 8px 12px;
+  height: 100%;
+  white-space: pre;
+  font-variant-ligatures: none;
+}
+.logs .live-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: theme('colors.run');
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logs .live-dot {
+    animation: none;
+  }
+}

@@ -1,0 +1,58 @@
+name: GUI
+
+# Own job for the web/ workspace — separate from `make test` (Go),
+# with its own node install and cache. Step 18: read-only foundation;
+# tests + drift gate + lint + typecheck.
+on:
+  push:
+    paths:
+      - 'web/**'
+      - 'openapi/openapi.json'
+      - '.github/workflows/gui.yml'
+  pull_request:
+    paths:
+      - 'web/**'
+      - 'openapi/openapi.json'
+      - '.github/workflows/gui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gui-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gui:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install (ci — reproducible from lockfile)
+        run: npm ci --no-audit --no-fund
+
+      - name: Client drift gate (openapi.json ↔ src/api/generated.ts)
+        run: npm run check:client
+
+      - name: Lint + typecheck
+        run: npm run lint
+
+      - name: Vitest
+        run: npm run test
+
+      - name: Production build (smoke — catches theme/config regressions)
+        run: npm run build

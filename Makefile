@@ -382,3 +382,7 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+.PHONY: gui-client-check
+gui-client-check: ## Regenerate the GUI api client and refuse to proceed on drift.
+	cd web && npm run check:client
