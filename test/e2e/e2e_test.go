@@ -53,9 +53,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -488,8 +488,13 @@ func assertNoErrorLogs(t *testing.T) {
 
 func ensureNamespace(t *testing.T, ctx context.Context, c client.Client, name string) {
 	t.Helper()
-	ns := &corev1NamespaceLite{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+	// Real corev1.Namespace so the client-go scheme (already registered
+	// via clientgoscheme.AddToScheme) recognizes the GVK. An earlier
+	// hand-rolled `corev1NamespaceLite` struct failed with
+	// "no kind is registered for the type e2e.corev1NamespaceLite"
+	// because it isn't in any scheme — controller-runtime looks up the
+	// GVK by Go type, not by TypeMeta.
+	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 	err := c.Create(ctx, ns)
@@ -500,28 +505,10 @@ func ensureNamespace(t *testing.T, ctx context.Context, c client.Client, name st
 
 func deleteNamespace(t *testing.T, ctx context.Context, c client.Client, name string) {
 	t.Helper()
-	ns := &corev1NamespaceLite{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+	ns := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 	_ = c.Delete(ctx, ns)
-}
-
-// corev1NamespaceLite spares an import — we only need Create/Delete.
-type corev1NamespaceLite struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-}
-
-func (n *corev1NamespaceLite) DeepCopyObject() runtime.Object {
-	if n == nil {
-		return nil
-	}
-	out := &corev1NamespaceLite{
-		TypeMeta:   n.TypeMeta,
-		ObjectMeta: *n.ObjectMeta.DeepCopy(),
-	}
-	return out
 }
 
 // applyKustomize is a best-effort `kubectl apply -k <dir>`. Failure is
