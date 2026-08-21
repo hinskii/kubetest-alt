@@ -64,4 +64,32 @@ describe('TestsList', () => {
     const row2 = screen.getByText('k6-smoke').closest('tr')!
     expect(row2).toHaveAttribute('aria-disabled', 'false')
   })
+
+  it('composite Test row: TOOL is — (not "composite" — that is a metric label)', async () => {
+    renderWithProviders(<TestsList />)
+    await waitFor(() => screen.getByText('suite-nightly'))
+    const row = screen.getByText('suite-nightly').closest('tr')!
+    // TOOL column is the second td.
+    const toolCell = row.querySelectorAll('td')[1]!
+    expect(toolCell.textContent).toContain('—')
+    expect(toolCell.textContent).not.toContain('composite')
+    // But the SHAPE column DOES say composite.
+    const shapeCell = row.querySelectorAll('td')[3]!
+    expect(shapeCell.textContent?.trim().toLowerCase()).toBe('composite')
+  })
+
+  it('SHAPE column is binary: leaf | composite (no "template" third value)', async () => {
+    renderWithProviders(<TestsList />)
+    await waitFor(() => screen.getByText('jmeter-load'))
+    // jmeter-load uses spec.use[jmeter] — that's a template delivery,
+    // not a shape. Row's SHAPE cell must say "leaf", not "template".
+    const row = screen.getByText('jmeter-load').closest('tr')!
+    const shapeCell = row.querySelectorAll('td')[3]!
+    expect(shapeCell.textContent?.trim().toLowerCase()).toBe('leaf')
+    // Template delivery is signaled next to the tool cell instead.
+    const toolCell = row.querySelectorAll('td')[1]!
+    expect(
+      toolCell.querySelector('[aria-label="delivered by template"]'),
+    ).not.toBeNull()
+  })
 })

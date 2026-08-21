@@ -27,9 +27,18 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/api/tests/jmeter-load', (r) =>
     r.fulfill({ contentType: 'application/json', body: JSON.stringify(jmeterTest) }),
   )
-  await page.route('**/api/runs**', (r) =>
-    r.fulfill({ contentType: 'application/json', body: JSON.stringify(runsList) }),
-  )
+  await page.route('**/api/runs**', (r) => {
+    // Honor server-side filters so the recent-runs panel on a Test
+    // detail page shows only that Test's runs (matches the real
+    // apiserver behavior — otherwise the screenshot is a lie).
+    const url = new URL(r.request().url())
+    const test = url.searchParams.get('test')
+    const phase = url.searchParams.get('phase')
+    let out = runsList
+    if (test) out = out.filter((x) => x.testRef === test)
+    if (phase) out = out.filter((x) => x.phase === phase)
+    r.fulfill({ contentType: 'application/json', body: JSON.stringify(out) })
+  })
   await page.route('**/api/runs/r-3', (r) =>
     r.fulfill({ contentType: 'application/json', body: JSON.stringify(composite) }),
   )

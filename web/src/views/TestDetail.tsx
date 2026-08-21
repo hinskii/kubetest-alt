@@ -57,12 +57,10 @@ export default function TestDetail() {
   const t = q.data as unknown as TestObj
   const managedBy = t.metadata?.labels?.['app.kubernetes.io/managed-by']
   const tool = t.metadata?.labels?.['kubetest.io/tool'] ?? '—'
-  const shape =
-    (t.spec?.steps ?? []).length > 0
-      ? 'composite'
-      : (t.spec?.use ?? []).length > 0
-        ? 'template'
-        : 'leaf'
+  const composite = (t.spec?.steps ?? []).length > 0
+  const usesTemplate = (t.spec?.use ?? []).length > 0
+  const shape: 'leaf' | 'composite' = composite ? 'composite' : 'leaf'
+  const latest = t.status?.latestRun
   return (
     <>
       <PageHeader
@@ -72,8 +70,16 @@ export default function TestDetail() {
         meta={
           <>
             <ManagedByBadge value={managedBy} />
-            {t.status?.latestRun?.phase && (
-              <PhaseChip phase={t.status.latestRun.phase} />
+            {latest?.phase && (
+              // Header chip needs a label — a naked phase word top-
+              // right reads as "the app itself failed" instead of
+              // "the last run failed."
+              <span className="inline-flex items-baseline gap-2">
+                <span className="text-xs text-subtle tracking-wide uppercase">
+                  last run
+                </span>
+                <PhaseChip phase={latest.phase} />
+              </span>
             )}
           </>
         }
@@ -83,29 +89,43 @@ export default function TestDetail() {
           <dl className="kv">
             <dt>namespace</dt>
             <dd>{t.metadata?.namespace ?? '—'}</dd>
-            <dt>tool</dt>
-            <dd>{tool}</dd>
+            {/* Composite parents have no single tool identity — the
+                metric label ("composite") is not a UI value. Skip. */}
+            {!composite && (
+              <>
+                <dt>tool</dt>
+                <dd>{tool === 'composite' ? '—' : tool}</dd>
+              </>
+            )}
             <dt>shape</dt>
             <dd className="uppercase tracking-wide">{shape}</dd>
             <dt>concurrency</dt>
             <dd>{t.spec?.concurrencyPolicy ?? 'Allow'}</dd>
             <dt>schedule</dt>
             <dd>{t.spec?.schedule || '—'}</dd>
-            <dt>verdict</dt>
-            <dd>
-              {t.spec?.verdict?.from
-                ? `${t.spec.verdict.from}${
-                    t.spec.verdict.errorRateMax
-                      ? ` (errorRateMax=${t.spec.verdict.errorRateMax})`
-                      : ''
-                  }`
-                : 'exitCode'}
-            </dd>
+            {/* Verdict is a LEAF concept — the wrapper's exit-code +
+                optional junit/jtl override. Composite parents inherit
+                their verdict from step aggregation, so rendering
+                "verdict: exitCode" here misleads. Skip for composite. */}
+            {!composite && (
+              <>
+                <dt>verdict</dt>
+                <dd>
+                  {t.spec?.verdict?.from
+                    ? `${t.spec.verdict.from}${
+                        t.spec.verdict.errorRateMax
+                          ? ` (errorRateMax=${t.spec.verdict.errorRateMax})`
+                          : ''
+                      }`
+                    : 'exitCode'}
+                </dd>
+              </>
+            )}
           </dl>
 
-          {shape === 'composite' ? (
+          {composite ? (
             <CompositeSteps steps={t.spec?.steps ?? []} />
-          ) : shape === 'template' ? (
+          ) : usesTemplate ? (
             <TemplateSummary
               use={t.spec?.use ?? []}
               command={t.spec?.container?.command ?? []}
@@ -126,6 +146,12 @@ export default function TestDetail() {
           <div className="text-xs text-subtle tracking-wide uppercase mb-2">
             recent runs
           </div>
+          {composite && (
+            <p className="text-xs text-subtle mb-3">
+              only this composite's own runs appear here. child TestRuns
+              (spawned by each step) show up under their own Test's history.
+            </p>
+          )}
           {runs.isLoading && <Loading what="runs" />}
           {runs.isError && (
             <ErrorState
@@ -137,10 +163,14 @@ export default function TestDetail() {
             <EmptyState what="runs yet" hint="Trigger one from CLI or wait for the schedule." />
           )}
           {runs.isSuccess && (runs.data ?? []).length > 0 && (
-            <table className="dense text-sm">
+            <table
+              className="dense text-sm"
+              data-testid="recent-runs"
+              data-recent-runs-of={name}
+            >
               <tbody>
                 {runs.data!.map((r) => (
-                  <tr key={r.uid}>
+                  <tr key={r.uid} data-run-test-ref={r.testRef}>
                     <td>
                       <Link to={`/runs/${encodeURIComponent(r.uid)}`}>
                         <span className="font-mono">{r.name}</span>

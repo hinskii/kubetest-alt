@@ -60,4 +60,52 @@ describe('TestDetail', () => {
     expect(screen.getByText('config parameters')).toBeInTheDocument()
     expect(screen.getByText('plan')).toBeInTheDocument()
   })
+
+  it('composite Test: no VERDICT KV row (verdict is a leaf concept)', async () => {
+    renderWithProviders(<TestDetail />, {
+      path: '/tests/:name',
+      route: '/tests/suite-nightly',
+    })
+    await waitFor(() =>
+      expect(screen.getByText('composite steps')).toBeInTheDocument(),
+    )
+    // Composite parents inherit their verdict from step aggregation;
+    // rendering "verdict: exitCode" here misleads.
+    const kv = document.querySelector('dl.kv')!
+    expect(kv.textContent?.toLowerCase()).not.toContain('verdict')
+    // TOOL row also omitted for composite — same reason (composite is
+    // a metric label, not a UI value).
+    expect(kv.textContent?.toLowerCase()).not.toContain('tool')
+  })
+
+  it('leaf Test: DOES render the verdict KV row (default exitCode)', async () => {
+    renderWithProviders(<TestDetail />, {
+      path: '/tests/:name',
+      route: '/tests/k6-smoke',
+    })
+    await waitFor(() => expect(screen.getByText('container')).toBeInTheDocument())
+    const kv = document.querySelector('dl.kv')!
+    expect(kv.textContent?.toLowerCase()).toContain('verdict')
+  })
+
+  it('recent-runs panel filters to THIS test only', async () => {
+    renderWithProviders(<TestDetail />, {
+      path: '/tests/:name',
+      route: '/tests/suite-nightly',
+    })
+    // Wait for the recent-runs table to render, THEN inspect the rows.
+    await waitFor(() =>
+      expect(document.querySelector('[data-testid="recent-runs"]')).not.toBeNull(),
+    )
+    const table = document.querySelector('[data-testid="recent-runs"]')!
+    expect(table.getAttribute('data-recent-runs-of')).toBe('suite-nightly')
+    const rows = table.querySelectorAll('tr')
+    // Only suite-nightly runs — 1 in fixtures. Not the k6 or jmeter
+    // runs (those have testRef ≠ suite-nightly). This is the panel-
+    // filter regression the design review flagged.
+    expect(rows.length).toBe(1)
+    for (const r of rows) {
+      expect(r.getAttribute('data-run-test-ref')).toBe('suite-nightly')
+    }
+  })
 })

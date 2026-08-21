@@ -96,11 +96,18 @@ export default function TestsList() {
             <tbody>
               {rows.map((t) => {
                 const name = t.metadata?.name ?? '—'
-                const tool =
-                  t.metadata?.labels?.['kubetest.io/tool'] ?? '—'
+                const rawTool = t.metadata?.labels?.['kubetest.io/tool']
                 const managedBy =
                   t.metadata?.labels?.['app.kubernetes.io/managed-by']
                 const shape = shapeOf(t)
+                const usesTemplate = (t.spec?.use ?? []).length > 0
+                // Composite parents have no single tool identity — the
+                // "composite" value is a metric label, NOT a UI value.
+                // Render dash so the column doesn't lie about content.
+                const toolDisplay =
+                  shape === 'composite' || !rawTool || rawTool === 'composite'
+                    ? '—'
+                    : rawTool
                 const last = t.status?.latestRun
                 return (
                   <tr key={name} aria-disabled={managedBy === 'gitops'}>
@@ -109,7 +116,21 @@ export default function TestsList() {
                         {name}
                       </Link>
                     </td>
-                    <td>{tool}</td>
+                    <td>
+                      <span className="inline-flex items-center gap-2">
+                        {toolDisplay}
+                        {usesTemplate && (
+                          <span
+                            role="img"
+                            aria-label="delivered by template"
+                            title="delivered by template (spec.use)"
+                            className="text-xs text-subtle"
+                          >
+                            ↺
+                          </span>
+                        )}
+                      </span>
+                    </td>
                     <td>
                       <ManagedByBadge value={managedBy} />
                       {!managedBy && (
@@ -145,8 +166,11 @@ export default function TestsList() {
   )
 }
 
-function shapeOf(t: TestObj): string {
+// Shape is a binary categorization: composite (has spec.steps) vs
+// leaf (everything else). Templates are a DELIVERY mechanism — they
+// contribute container/args/verdict — not a third shape. The template
+// indicator surfaces next to the tool cell instead.
+function shapeOf(t: TestObj): 'leaf' | 'composite' {
   if ((t.spec?.steps ?? []).length > 0) return 'composite'
-  if ((t.spec?.use ?? []).length > 0) return 'template'
   return 'leaf'
 }

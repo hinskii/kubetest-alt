@@ -32,3 +32,27 @@ export function durationMs(ms?: number): string {
   const s = Math.round(secs % 60)
   return `${m}m${s.toString().padStart(2, '0')}s`
 }
+
+// durationShort trades precision for scannability. Used in the runs
+// list where the reader wants "roughly how long" at a glance, not
+// millisecond-precise wall-clock. Rules:
+//   < 1s → "0.Ns"                (Nms is noise at scale)
+//   < 10s → "N.Ns" (1 decimal)   (8.0s not 8.04s)
+//   < 60s → "Ns"                 (14s not 14.04s)
+//   < 60m → "NmSSs"              (1m30s)
+//   ≥ 60m → "NhMMm"              (1h30m)
+export function durationShort(ms?: number): string {
+  if (ms === undefined || ms === null) return '—'
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`
+  const secs = ms / 1000
+  if (secs < 10) return `${secs.toFixed(1)}s`
+  if (secs < 60) return `${Math.round(secs)}s`
+  if (secs < 3600) {
+    const m = Math.floor(secs / 60)
+    const s = Math.round(secs % 60)
+    return `${m}m${s.toString().padStart(2, '0')}s`
+  }
+  const h = Math.floor(secs / 3600)
+  const m = Math.floor((secs % 3600) / 60)
+  return `${h}h${m.toString().padStart(2, '0')}m`
+}

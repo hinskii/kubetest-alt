@@ -5,7 +5,8 @@ import { api } from '../api/client'
 import { PageHeader } from '../components/PageHeader'
 import { PhaseChip } from '../components/PhaseChip'
 import { EmptyState, ErrorState, Loading } from '../components/States'
-import { durationMs, relativeTime } from '../components/TimeCells'
+import { durationShort, relativeTime } from '../components/TimeCells'
+import { FilterSelect } from '../components/FilterSelect'
 
 // Runs list is the merged cluster+archive stream (apiserver merges +
 // sorts server-side). Filter drop-downs cover phase and source; text
@@ -66,43 +67,27 @@ export default function RunsList() {
         title="Runs"
         meta={
           <>
-            <label className="text-xs text-subtle tracking-wide uppercase flex items-center gap-2">
-              phase
-              <select
-                aria-label="filter by phase"
-                value={phase}
-                onChange={(e) => setPhase(e.target.value)}
-                className="border border-rule bg-white px-2 py-1 text-sm"
-              >
-                {PHASES.map((p) => (
-                  <option key={p} value={p}>
-                    {p || 'all'}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs text-subtle tracking-wide uppercase flex items-center gap-2">
-              source
-              <select
-                aria-label="filter by source"
-                value={source}
-                onChange={(e) => setSource(e.target.value)}
-                className="border border-rule bg-white px-2 py-1 text-sm"
-              >
-                {SOURCES.map((s) => (
-                  <option key={s} value={s}>
-                    {s || 'all'}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <FilterSelect
+              label="phase"
+              value={phase}
+              onChange={setPhase}
+              options={PHASES}
+              ariaLabel="filter by phase"
+            />
+            <FilterSelect
+              label="source"
+              value={source}
+              onChange={setSource}
+              options={SOURCES}
+              ariaLabel="filter by source"
+            />
             <input
               type="text"
               aria-label="filter runs by name"
               placeholder="filter by name or test…"
               value={nameFilter}
               onChange={(e) => setNameFilter(e.target.value)}
-              className="border border-rule px-2 py-1 text-sm bg-white w-64"
+              className="border border-rule px-2 py-1 text-sm bg-bone w-64 focus:outline-2 focus:outline focus:outline-ink"
             />
           </>
         }
@@ -129,6 +114,10 @@ export default function RunsList() {
         )}
         {q.isSuccess && rows.length > 0 && (
           <>
+            {/* origin (cluster|archive) is a server-side merge detail —
+                dropped from the surface. Users can still see it in the
+                run detail if they need to know whether the CR still
+                exists. */}
             <table className="dense">
               <thead>
                 <tr>
@@ -137,7 +126,6 @@ export default function RunsList() {
                   <th>phase</th>
                   <th>duration</th>
                   <th>source</th>
-                  <th>origin</th>
                   <th>started</th>
                 </tr>
               </thead>
@@ -157,12 +145,9 @@ export default function RunsList() {
                     <td>
                       <PhaseChip phase={r.phase} />
                     </td>
-                    <td>{durationMs(r.durationMs)}</td>
+                    <td>{durationShort(r.durationMs)}</td>
                     <td className="text-xs uppercase tracking-wide">
                       {r.source ?? '—'}
-                    </td>
-                    <td className="text-xs uppercase tracking-wide">
-                      {r.origin}
                     </td>
                     <td className="text-xs text-subtle">
                       {relativeTime(r.startedAt ?? r.queuedAt)}

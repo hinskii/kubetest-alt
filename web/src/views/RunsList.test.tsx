@@ -9,16 +9,31 @@ import RunsList from './RunsList'
 import { runsFixture } from '../test/fixtures'
 
 describe('RunsList', () => {
-  it('renders merged cluster + archive rows with origin badge', async () => {
+  it('renders merged cluster + archive rows in one flat table (no origin column)', async () => {
     renderWithProviders(<RunsList />)
     await waitFor(() =>
       expect(screen.getByText('k6-smoke-abc')).toBeInTheDocument(),
     )
     expect(screen.getByText('jmeter-load-def')).toBeInTheDocument()
     expect(screen.getByText('suite-nightly-xyz')).toBeInTheDocument()
-    // Origin column carries both "cluster" and "archive".
-    expect(screen.getAllByText(/cluster/i).length).toBeGreaterThan(0)
-    expect(screen.getAllByText(/archive/i).length).toBeGreaterThan(0)
+    // Origin (cluster|archive) is a server-side merge detail — MUST
+    // NOT appear as a column header. Users can still see it on the
+    // run-detail page if they need to.
+    const headers = Array.from(document.querySelectorAll('th')).map(
+      (h) => h.textContent?.trim().toLowerCase() ?? '',
+    )
+    expect(headers).not.toContain('origin')
+    expect(headers).toContain('name')
+    expect(headers).toContain('duration')
+  })
+
+  it('duration column uses the short scannable format (14s not 14.04s)', async () => {
+    renderWithProviders(<RunsList />)
+    await waitFor(() => screen.getByText('k6-smoke-abc'))
+    const row = screen.getByText('jmeter-load-def').closest('tr')!
+    // 14 035 ms → "14s" per durationShort rules.
+    const durationCell = row.querySelectorAll('td')[3]!
+    expect(durationCell.textContent?.trim()).toBe('14s')
   })
 
   it('phase filter narrows the visible rows', async () => {
