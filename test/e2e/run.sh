@@ -87,6 +87,92 @@ for img in "${IMAGES[@]}"; do
 done
 phase_end "kind_load"
 
+phase_start "minio_deploy"
+# The operator's ResultReader is a no-op without --minio-endpoint —
+# every run would then be classified MissingResult / phase=error.
+# Deploy a single-pod in-memory MinIO in the release namespace, then
+# mirror the creds Secret into the workload namespace so the wrapper's
+# envFrom picks them up. Bucket is created by a small Job that runs
+# `mc mb` once MinIO is Ready. No PVC — kind cluster is ephemeral.
+kubectl create namespace "$RELEASE_NS" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace kubetest-e2e --dry-run=client -o yaml | kubectl apply -f -
+
+# Creds Secret (release namespace = operator's; also mirrored into workload namespace below).
+kubectl -n "$RELEASE_NS" create secret generic minio-creds \
+  --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+  --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n kubetest-e2e create secret generic minio-creds \
+  --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+  --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# MinIO Deployment + Service.
+cat <<'EOF' | kubectl -n "$RELEASE_NS" apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: minio }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: minio } }
+  template:
+    metadata: { labels: { app: minio } }
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+          args: ["server", "/data", "--console-address=:9001"]
+          env:
+            - { name: MINIO_ROOT_USER, value: minioadmin }
+            - { name: MINIO_ROOT_PASSWORD, value: minioadmin }
+          ports:
+            - { containerPort: 9000, name: s3 }
+            - { containerPort: 9001, name: console }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            tcpSocket: { port: 9000 }
+            periodSeconds: 2
+            timeoutSeconds: 2
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata: { name: minio }
+spec:
+  selector: { app: minio }
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+EOF
+kubectl -n "$RELEASE_NS" rollout status deploy/minio --timeout=120s
+
+# Bucket-create Job — one-shot `mc mb`. Idempotent with `--ignore-existing`.
+cat <<'EOF' | kubectl -n "$RELEASE_NS" apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata: { name: minio-mkbucket }
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-04-03T17-07-56Z
+          command:
+            - sh
+            - -c
+            - |
+              set -eux
+              mc alias set local http://minio:9000 minioadmin minioadmin
+              mc mb --ignore-existing local/kubetest-artifacts
+              mc mb --ignore-existing local/kubetest-logs
+EOF
+kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket --timeout=120s
+phase_end "minio_deploy"
+
 phase_start "helm_install"
 helm upgrade --install kt "$CHART_DIR" \
   --namespace "$RELEASE_NS" --create-namespace \
@@ -100,10 +186,22 @@ helm upgrade --install kt "$CHART_DIR" \
   --set images.contentFetcher.tag="${IMAGE_TAG}" \
   --set operator.metrics.bindAddress=":8080" \
   --set operator.metrics.secure=false \
+  --set "minio.endpoint=minio.${RELEASE_NS}.svc:9000" \
+  --set minio.secretName=minio-creds \
+  --set minio.bucket=kubetest-artifacts \
+  --set "apiserver.extraArgs={--namespace=kubetest-e2e}" \
   --wait --timeout=5m
 kubectl -n "$RELEASE_NS" get all
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=180s
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=180s
+
+# Install TestTemplates in the workload namespace. Scenario 2 (jmeter)
+# uses `use: jmeter` — resolver looks up the template in the Test's own
+# namespace, so templates must live there. Direct -f apply of every YAML
+# under config/templates/ is simpler than a kustomize -k invocation
+# (kustomize's default LoadRestrictor forbade the samples' ../../ path
+# on the previous CI attempt).
+kubectl -n kubetest-e2e apply -f config/templates/
 phase_end "helm_install"
 
 phase_start "portforward"

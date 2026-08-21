@@ -181,7 +181,13 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 			ConcurrencyPolicy: "Allow",
 			Container: testsv1alpha1.ContainerConfig{
 				Image: "grafana/k6:1.4.0",
-				Args:  []string{"run", "/data/repo/script.js"},
+				// Command MUST be set — the /entry wrapper splits on the
+				// binary name in Command[0], and grafana/k6's ENTRYPOINT
+				// is k6 (which entry can't discover since /entry runs
+				// via the shared /kubetest-bin volume, not via the image
+				// ENTRYPOINT). Args alone would pass "run" as the binary.
+				Command: []string{"k6"},
+				Args:    []string{"run", "/data/repo/script.js"},
 			},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
