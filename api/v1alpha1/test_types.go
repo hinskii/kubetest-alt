@@ -90,6 +90,112 @@ type TestSpec struct {
 	// clean JUnit → passed). See CLAUDE.md §11 + §15.2.
 	// +optional
 	Verdict *VerdictSpec `json:"verdict,omitempty"`
+
+	// Steps turns this Test into a COMPOSITE — a scenario that runs other
+	// Tests in ordered steps. Mutually exclusive with the leaf shape:
+	// when Steps is non-empty, container/content/use/verdict/services/
+	// parallel MUST be empty (webhook-enforced). See CLAUDE.md §step-17.
+	//
+	// Each step's `execute.tests[]` names Tests in the same namespace;
+	// the controller spawns child TestRuns for them, aggregates per step,
+	// and sequences steps. Skip-on-fail: when a non-optional step fails,
+	// subsequent condition:passed steps are marked skipped in
+	// Status.Steps (StepResult.Phase="skipped") — the TestRun-level
+	// Phase enum stays unchanged.
+	// +optional
+	Steps []Step `json:"steps,omitempty"`
+}
+
+// Step is one entry in a composite Test's spec.steps[]. Semantics mirror
+// TestWorkflow's per-step subset the plan targets (execute-only — no
+// in-pod shell/run steps, no matrix/shards, no services, no
+// transfer/fetch; those are explicitly out of scope for step 17).
+type Step struct {
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// Condition gates whether this step runs based on prior-step outcome.
+	// "passed" (default) — run only if all prior non-optional steps passed;
+	// "always" — run regardless.
+	// +kubebuilder:validation:Enum=passed;always
+	// +optional
+	Condition string `json:"condition,omitempty"`
+
+	// Optional=true means a failure in this step is EXCLUDED from the
+	// parent's aggregate (the parent can still pass if every non-optional
+	// step passed). Optional does NOT skip the step — it still runs.
+	// +optional
+	Optional bool `json:"optional,omitempty"`
+
+	// Negative=true INVERTS this step's per-child pass/fail — a child
+	// that fails counts as passed for aggregation. Useful for
+	// "expected-to-fail" scenarios (canary detection, chaos smoke).
+	// +optional
+	Negative bool `json:"negative,omitempty"`
+
+	// Retry re-creates FAILED children of this step up to Count times
+	// (each retry gets an exec-index suffix -r{N}). Retry does not
+	// affect the child Test's own retry semantics — this is
+	// step-scoped retry only.
+	// +optional
+	Retry *RetryPolicy `json:"retry,omitempty"`
+
+	// Timeout is per-step wall-clock, measured from the first child
+	// creation. Expiry aborts still-running children (their Jobs get
+	// deleted) and the step aggregates to failed.
+	// +optional
+	Timeout *metav1.Duration `json:"timeout,omitempty"`
+
+	// Delay is a wait before the FIRST child of this step is created.
+	// Simpler than depending on prior-step wall-clock; useful when a
+	// prior step provisions state that has its own settle time.
+	// +optional
+	Delay *metav1.Duration `json:"delay,omitempty"`
+
+	// Execute is the only allowed step body in step 17 (mirrors CLAUDE.md
+	// out-of-scope note — no run/shell/service steps). Webhook enforces
+	// non-nil.
+	// +optional
+	Execute *StepExecute `json:"execute,omitempty"`
+}
+
+// StepExecute holds the "run these other Tests" body of a step.
+type StepExecute struct {
+	// Parallelism caps concurrent child TestRuns within THIS step.
+	// 0 (default) = unlimited within the step (i.e. every child runs
+	// concurrently). Non-zero clamps the fan-out to N in-flight; the
+	// controller starts more as prior ones terminate.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Parallelism int32 `json:"parallelism,omitempty"`
+
+	// Tests is the list of Test references (by name, same namespace)
+	// this step executes. At least one is required (webhook).
+	// +optional
+	Tests []StepExecuteTest `json:"tests,omitempty"`
+}
+
+// StepExecuteTest is one Test reference in a step's execute.tests[].
+type StepExecuteTest struct {
+	// Name of a Test in the same namespace.
+	// +required
+	Name string `json:"name"`
+
+	// Count creates N replicas of this reference (default 1). Each
+	// replica gets a distinct child TestRun; `{{ index }}` in Config
+	// values resolves to the 0-based replica index. `{{ count }}`
+	// resolves to Count itself.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Count int32 `json:"count,omitempty"`
+
+	// Config is a parameter overlay applied to the child Test's
+	// spec.config defaults. Values may reference `{{ index }}` /
+	// `{{ count }}` which the reconciler renders per replica. All
+	// other expression scopes (env, config) inherit from the child
+	// Test's own resolve pipeline (step 13).
+	// +optional
+	Config map[string]string `json:"config,omitempty"`
 }
 
 // VerdictSpec is the declarative "verdict-from" processor selector.

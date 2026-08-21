@@ -181,8 +181,8 @@ func TestRowFromRun_StepsRoundTrip(t *testing.T) {
 	stepStart := metav1.NewTime(fixedTime(t, "2026-08-18T10:00:10Z"))
 	stepEnd := metav1.NewTime(fixedTime(t, "2026-08-18T10:00:30Z"))
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{
-		"setup": {Phase: testsv1alpha1.PhasePassed, StartedAt: &stepStart, FinishedAt: &stepEnd},
-		"run":   {Phase: testsv1alpha1.PhasePassed},
+		"setup": {Phase: testsv1alpha1.StepPhasePassed, StartedAt: &stepStart, FinishedAt: &stepEnd},
+		"run":   {Phase: testsv1alpha1.StepPhasePassed},
 	}
 	row, err := RowFromRun(run, nil)
 	require.NoError(t, err)

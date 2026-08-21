@@ -319,6 +319,146 @@ func TestValidate_NilSpec(t *testing.T) {
 	require.Error(t, validateTestRun(nil))
 }
 
+// TestValidateTest_Composite_ShapeExclusivity is the step-17 sentinel:
+// a Test with spec.steps set MUST NOT ALSO carry any leaf-shape field.
+// Rejecting these at admission (not at reconcile) surfaces the shape
+// bug before a run is ever scheduled — which is what §7 "definitions
+// are the source of truth" needs from the webhook.
+func TestValidateTest_Composite_ShapeExclusivity(t *testing.T) {
+	compositeStep := testsv1alpha1.Step{
+		Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "child"}}},
+	}
+
+	cases := []struct {
+		name    string
+		mutate  func(s *testsv1alpha1.TestSpec)
+		wantSub string
+	}{
+		{
+			name: "container image forbidden alongside steps",
+			mutate: func(s *testsv1alpha1.TestSpec) {
+				s.Container.Image = "grafana/k6:2.2.0"
+				s.Container.Args = []string{"run", "x"}
+			},
+			wantSub: "spec.container",
+		},
+		{
+			name:    "use[] forbidden alongside steps",
+			mutate:  func(s *testsv1alpha1.TestSpec) { s.Use = []string{"template-x"} },
+			wantSub: "spec.use",
+		},
+		{
+			name: "content.files forbidden alongside steps",
+			mutate: func(s *testsv1alpha1.TestSpec) {
+				s.Content.Files = []testsv1alpha1.FileContent{{Path: "a", Content: "b"}}
+			},
+			wantSub: "spec.content",
+		},
+		{
+			name:    "verdict forbidden alongside steps",
+			mutate:  func(s *testsv1alpha1.TestSpec) { s.Verdict = &testsv1alpha1.VerdictSpec{From: "jtl"} },
+			wantSub: "spec.verdict",
+		},
+		{
+			name:    "services forbidden alongside steps",
+			mutate:  func(s *testsv1alpha1.TestSpec) { s.Services = map[string]testsv1alpha1.ServiceSpec{"db": {}} },
+			wantSub: "spec.services",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := testsv1alpha1.TestSpec{
+				ConcurrencyPolicy: "Allow",
+				Steps:             []testsv1alpha1.Step{compositeStep},
+			}
+			tc.mutate(&spec)
+			err := validateTest(&spec)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantSub)
+			assert.Contains(t, err.Error(), "steps")
+		})
+	}
+}
+
+// TestValidateTest_Composite_StepRules covers the per-step invariants
+// that only the webhook can catch (execute non-nil, ≥1 test, condition
+// enum, count≥1).
+func TestValidateTest_Composite_StepRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		step    testsv1alpha1.Step
+		wantSub string
+	}{
+		{
+			name:    "execute is required",
+			step:    testsv1alpha1.Step{Name: "smoke"},
+			wantSub: "execute is required",
+		},
+		{
+			name:    "execute.tests must have ≥1",
+			step:    testsv1alpha1.Step{Execute: &testsv1alpha1.StepExecute{Tests: nil}},
+			wantSub: "at least one",
+		},
+		{
+			name: "unknown condition rejected",
+			step: testsv1alpha1.Step{
+				Condition: "sometimes",
+				Execute:   &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "x"}}},
+			},
+			wantSub: "condition",
+		},
+		{
+			name: "empty ref name rejected",
+			step: testsv1alpha1.Step{
+				Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: ""}}},
+			},
+			wantSub: "name is required",
+		},
+		{
+			name: "negative parallelism rejected",
+			step: testsv1alpha1.Step{
+				Execute: &testsv1alpha1.StepExecute{
+					Parallelism: -1,
+					Tests:       []testsv1alpha1.StepExecuteTest{{Name: "x"}},
+				},
+			},
+			wantSub: "parallelism",
+		},
+		{
+			name: "retry.count < 1 rejected",
+			step: testsv1alpha1.Step{
+				Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "x"}}},
+				Retry:   &testsv1alpha1.RetryPolicy{Count: 0},
+			},
+			wantSub: "retry.count must be >= 1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := testsv1alpha1.TestSpec{
+				ConcurrencyPolicy: "Allow",
+				Steps:             []testsv1alpha1.Step{tc.step},
+			}
+			err := validateTest(&spec)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.wantSub)
+		})
+	}
+}
+
+// TestValidateTest_Composite_HappyPath: a minimal, valid composite passes.
+func TestValidateTest_Composite_HappyPath(t *testing.T) {
+	spec := testsv1alpha1.TestSpec{
+		ConcurrencyPolicy: "Allow",
+		Steps: []testsv1alpha1.Step{
+			{Name: "smoke", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "smoke-test", Count: 2}}}},
+			{Name: "load", Condition: "passed", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "load-test"}}}},
+			{Name: "cleanup", Condition: "always", Optional: true, Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "cleanup-test"}}}},
+		},
+	}
+	assert.NoError(t, validateTest(&spec))
+}
+
 func cloneStringMap(m map[string]string) map[string]string {
 	if m == nil {
 		return nil

@@ -36,6 +36,14 @@ const (
 	LabelManagedBy = "app.kubernetes.io/managed-by"
 	ManagedByValue = "kubetest-alt"
 
+	// Step 17: composite-parent bookkeeping on CHILD TestRuns. All three
+	// live under the reserved kubetest.io/ prefix so user labels can't
+	// collide with them. The reconciler uses LabelParentRun to enqueue
+	// the parent on any child-phase change (see mapChildRunToParent).
+	LabelParentRun = "kubetest.io/parent-run"
+	LabelStep      = "kubetest.io/step"
+	LabelExecIndex = "kubetest.io/exec-index"
+
 	// ReservedLabelPrefix marks the whole namespace the operator reserves for
 	// future labels. Any user label under this prefix is silently dropped.
 	ReservedLabelPrefix = "kubetest.io/"

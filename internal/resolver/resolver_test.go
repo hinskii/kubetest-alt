@@ -372,6 +372,14 @@ func TestValidateResolved_Table(t *testing.T) {
 		{"fail — missing command AND args", &testsv1alpha1.TestSpec{
 			Container: testsv1alpha1.ContainerConfig{Image: "x"},
 		}, true},
+		// Step 17: composite Tests carry Steps and NO container.
+		{"ok — composite has no image/command", &testsv1alpha1.TestSpec{
+			Steps: []testsv1alpha1.Step{{
+				Execute: &testsv1alpha1.StepExecute{
+					Tests: []testsv1alpha1.StepExecuteTest{{Name: "child"}},
+				},
+			}},
+		}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,6 +391,35 @@ func TestValidateResolved_Table(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestResolve_CarriesSteps_ThroughMerge (step 17): a composite Test's
+// spec.steps[] MUST survive the merge pipeline verbatim so the
+// reconciler reads the composite plan back from resolvedSpec. This
+// pins the mergeTestInto step-copy that the composite envtest also
+// exercises indirectly.
+func TestResolve_CarriesSteps_ThroughMerge(t *testing.T) {
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "comp", Namespace: "ns"},
+		Spec: testsv1alpha1.TestSpec{
+			Steps: []testsv1alpha1.Step{
+				{Name: "smoke", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "child-a", Count: 2}}}},
+				{Name: "load", Condition: "passed", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "child-b"}}}},
+			},
+		},
+	}
+	spec, err := Resolve(test, mkRun(), MapStore{}, Options{})
+	require.NoError(t, err)
+	require.Len(t, spec.Steps, 2)
+	assert.Equal(t, "smoke", spec.Steps[0].Name)
+	require.NotNil(t, spec.Steps[0].Execute)
+	require.Len(t, spec.Steps[0].Execute.Tests, 1)
+	assert.Equal(t, "child-a", spec.Steps[0].Execute.Tests[0].Name)
+	assert.Equal(t, int32(2), spec.Steps[0].Execute.Tests[0].Count)
+	assert.Equal(t, "passed", spec.Steps[1].Condition)
+	// Deep-copy: mutating the resolved output must NOT touch the input.
+	spec.Steps[0].Name = "mutated"
+	assert.Equal(t, "smoke", test.Spec.Steps[0].Name)
 }
 
 // TestResolve_TemplateVerdictContributes_TestOverrides: the step-15

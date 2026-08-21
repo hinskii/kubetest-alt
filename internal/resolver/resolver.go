@@ -192,6 +192,13 @@ func ValidateResolved(spec *testsv1alpha1.TestSpec) error {
 	if spec == nil {
 		return errors.New("nil resolved spec")
 	}
+	// Step 17: composite Tests carry spec.steps and NO container — they
+	// don't run a workload themselves, they orchestrate children. The
+	// webhook already enforces shape exclusivity, so a resolved spec
+	// with Steps set legitimately has no image/command.
+	if len(spec.Steps) > 0 {
+		return nil
+	}
 	if spec.Container.Image == "" {
 		return errors.New("resolved spec.container.image is empty (Test declares neither image nor a template supplying one)")
 	}
@@ -315,6 +322,16 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 	// TestRun.status.resolvedSpec re-serializes with the same shape.
 	if len(test.Use) > 0 {
 		dst.Use = append([]string(nil), test.Use...)
+	}
+	// Step 17: composite Tests carry spec.steps and MUST reach the
+	// resolved snapshot verbatim — the reconciler reads Steps from
+	// resolvedSpec to drive the composite path. Deep-copy (via
+	// DeepCopyInto) so later mutations to dst don't touch test.Spec.
+	if len(test.Steps) > 0 {
+		dst.Steps = make([]testsv1alpha1.Step, len(test.Steps))
+		for i := range test.Steps {
+			test.Steps[i].DeepCopyInto(&dst.Steps[i])
+		}
 	}
 }
 

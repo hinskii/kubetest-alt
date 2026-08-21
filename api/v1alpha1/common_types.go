@@ -239,9 +239,26 @@ type ParallelSpec struct {
 }
 
 // StepResult carries per-step timing and phase for TestRunStatus.steps.
+//
+// Step 17 note: composite runs also fill this map — the key convention
+// mirrors the composer's (`s{idx}` for the whole step aggregate,
+// `s{idx}/{test}[{i}]` per child reference). `Phase` may be "skipped"
+// here even though `Phase` never carries that value at the TestRun
+// level. That's a deliberate skip-on-fail marker (rationale in
+// internal/composer): skipped is a per-step property, not a run
+// property, so we keep the run-level enum stable across 17 steps
+// instead of growing a new value.
 type StepResult struct {
+	// Phase carries the step-level state. Its type is StepPhase (a
+	// SUPERSET of the run-level Phase enum with the added "skipped"
+	// value) — the two types are deliberately distinct so the CRD
+	// enum on TestRun.Status.Phase stays exactly what it was before
+	// step 17 (queued/running/paused/passed/failed/aborted/error).
+	// The "skipped" marker lives ONLY at the step level; composite
+	// aggregation folds skipped steps into ParentPhase's decision
+	// without them ever being written into the run-level Phase.
 	// +optional
-	Phase Phase `json:"phase,omitempty"`
+	Phase StepPhase `json:"phase,omitempty"`
 	// +optional
 	QueuedAt *metav1.Time `json:"queuedAt,omitempty"`
 	// +optional
@@ -249,6 +266,36 @@ type StepResult struct {
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
 }
+
+// StepPhase is the enum for StepResult.Phase. Kept as a separate type
+// so we can add "skipped" without widening the run-level Phase enum
+// on TestRun.status.phase (that field's CRD schema stays untouched
+// across step 17 per plan). Values mirror Phase 1:1 plus "skipped".
+// +kubebuilder:validation:Enum=queued;running;paused;passed;failed;aborted;error;skipped
+type StepPhase string
+
+// Step-level phase constants. StepPhaseFromPhase converts from the
+// run-level Phase so callers can propagate a child's phase into the
+// parent's StepResult without importing string literals everywhere.
+const (
+	StepPhaseQueued  StepPhase = "queued"
+	StepPhaseRunning StepPhase = "running"
+	StepPhasePaused  StepPhase = "paused"
+	StepPhasePassed  StepPhase = "passed"
+	StepPhaseFailed  StepPhase = "failed"
+	StepPhaseAborted StepPhase = "aborted"
+	StepPhaseError   StepPhase = "error"
+
+	// StepPhaseSkipped is the composite skip-on-fail marker — a step
+	// that never ran because a prior non-optional step failed. Only
+	// valid inside StepResult; NEVER written into TestRun.Status.Phase.
+	StepPhaseSkipped StepPhase = "skipped"
+)
+
+// StepPhaseFromPhase converts run-level Phase → StepPhase (same
+// underlying string). Kept as a helper so callers don't reach for
+// unchecked string casts.
+func StepPhaseFromPhase(p Phase) StepPhase { return StepPhase(p) }
 
 // RunReference points at the most recent TestRun for a Test.
 type RunReference struct {

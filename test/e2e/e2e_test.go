@@ -142,6 +142,16 @@ func TestE2E(t *testing.T) {
 		defer func() { t.Logf("SCENARIO_TIMING scenario=5 kind=cron duration=%s", time.Since(start)) }()
 		scenarioCron(t, ctx, c)
 	})
+	// Step 17: composite Test — smoke→load with skip-on-fail.
+	// Step 1 (smoke) fails via a jmeter plan targeting an .invalid TLD
+	// (verdictFrom:jtl override → failed). Step 2 (load) is condition:
+	// "passed" → gets marked SKIPPED in Status.Steps[s1] without
+	// TestRun.Phase ever taking a "skipped" value. Parent → failed.
+	t.Run("Scenario6_Composite_SkipOnFail", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=6 kind=composite duration=%s", time.Since(start)) }()
+		scenarioCompositeSkipOnFail(t, ctx, c)
+	})
 
 	// Post-scenario: /metrics from operator + apiserver. Asserts the
 	// step-14 counters got real events end-to-end.
@@ -415,6 +425,107 @@ func scenarioCron(t *testing.T, ctx context.Context, c client.Client) {
 		time.Sleep(3 * time.Second)
 	}
 	t.Fatal("no cron-sourced TestRun observed within 90s")
+}
+
+// scenarioCompositeSkipOnFail: a composite Test with two steps —
+// step 1 (smoke) is a jmeter run guaranteed to fail (bad DNS +
+// verdictFrom:jtl override), step 2 (load) is condition:passed. On
+// step 1 failure the parent should reach phase=failed AND step 2
+// must be marked skipped in Status.Steps["s1"] with StepPhase="skipped"
+// (the run-level Phase enum stays 7-valued; only the per-step marker
+// carries the extra state).
+func scenarioCompositeSkipOnFail(t *testing.T, ctx context.Context, c client.Client) {
+	// Reuse the same failing jmeter plan (DNS on .invalid). Kept inline
+	// so the scenario is self-contained.
+	plan := `<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree><TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="e2e-comp-smoke">
+    <boolProp name="TestPlan.functional_mode">false</boolProp>
+    <elementProp name="TestPlan.user_defined_variables" elementType="Arguments"/>
+  </TestPlan><hashTree><ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="G">
+    <intProp name="ThreadGroup.num_threads">1</intProp><intProp name="ThreadGroup.ramp_time">1</intProp>
+    <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+      <boolProp name="LoopController.continue_forever">false</boolProp><intProp name="LoopController.loops">1</intProp>
+    </elementProp></ThreadGroup><hashTree><HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Bogus">
+      <stringProp name="HTTPSampler.domain">no-such-host-e2e-99999.invalid</stringProp>
+      <stringProp name="HTTPSampler.protocol">http</stringProp><stringProp name="HTTPSampler.connect_timeout">2000</stringProp>
+    </HTTPSamplerProxy><hashTree/></hashTree></hashTree></hashTree>
+</jmeterTestPlan>`
+	// Step-1 leaf: guaranteed-fail jmeter (verdictFrom:jtl on the template).
+	smoke := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-comp-smoke",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "jmeter"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Use:               []string{"jmeter"},
+			Content:           testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/smoke.jmx", Content: plan}}},
+			Config:            map[string]testsv1alpha1.Parameter{"plan": {Type: "string", Default: "smoke.jmx"}},
+		},
+	}
+	require.NoError(t, c.Create(ctx, smoke))
+	// Step-2 leaf: k6 that would pass IF it ran (matching Scenario 1).
+	load := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-comp-load",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "k6"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image:   "grafana/k6:1.4.0",
+				Command: []string{"k6"},
+				Args:    []string{"run", "/data/repo/script.js"},
+			},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/script.js", Content: "export default function() { /* pass */ }"}}},
+		},
+	}
+	require.NoError(t, c.Create(ctx, load))
+
+	// Composite parent — smoke → load with skip-on-fail.
+	comp := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-comp",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "composite"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Steps: []testsv1alpha1.Step{
+				{Name: "smoke", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "e2e-comp-smoke"}}}},
+				{Name: "load", Condition: "passed", Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "e2e-comp-load"}}}},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, comp))
+
+	// Composite run — carry the tool label so RunsTotal{tool="composite"} lights up.
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-comp-run",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "composite"},
+		},
+		Spec: testsv1alpha1.TestRunSpec{TestRef: "e2e-comp", Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+
+	// 6 min budget: smoke (jmeter) alone takes ~15s in Scenario 2's
+	// isolated form; add compositor overhead + retry margin.
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhaseFailed, 6*time.Minute)
+	assert.Equal(t, testsv1alpha1.PhaseFailed, final.Status.Phase,
+		"composite parent must go to failed when non-optional step fails (skip-on-fail)")
+	// s1 (load) must be recorded as skipped — never ran.
+	require.Contains(t, final.Status.Steps, "s1",
+		"parent Status.Steps must contain s1 as the skip marker")
+	assert.Equal(t, testsv1alpha1.StepPhaseSkipped, final.Status.Steps["s1"].Phase,
+		"step 2 (load) must be marked skipped, NOT run, when step 1 (smoke) failed")
+	// TestRun.Phase MUST NOT be "skipped" — that's a per-step-only state.
+	assert.NotEqual(t, testsv1alpha1.Phase("skipped"), final.Status.Phase,
+		"TestRun.Phase enum stays 7-valued in step 17 — skipped lives ONLY in StepResult")
 }
 
 // -------------------- metrics + logs --------------------

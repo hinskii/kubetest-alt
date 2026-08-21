@@ -3355,15 +3355,31 @@ spec:
                 type: string
               steps:
                 additionalProperties:
-                  description: StepResult carries per-step timing and phase for TestRunStatus.steps.
+                  description: |-
+                    StepResult carries per-step timing and phase for TestRunStatus.steps.
+
+                    Step 17 note: composite runs also fill this map — the key convention
+                    mirrors the composer's (`s{idx}` for the whole step aggregate,
+                    `s{idx}/{test}[{i}]` per child reference). `Phase` may be "skipped"
+                    here even though `Phase` never carries that value at the TestRun
+                    level. That's a deliberate skip-on-fail marker (rationale in
+                    internal/composer): skipped is a per-step property, not a run
+                    property, so we keep the run-level enum stable across 17 steps
+                    instead of growing a new value.
                   properties:
                     finishedAt:
                       format: date-time
                       type: string
                     phase:
                       description: |-
-                        Phase mirrors Testkube's TestWorkflowStatus enum (verified in source),
-                        plus `error` for infra failures (OOMKill, ImagePullBackOff, missing result) — see CLAUDE.md §15.
+                        Phase carries the step-level state. Its type is StepPhase (a
+                        SUPERSET of the run-level Phase enum with the added "skipped"
+                        value) — the two types are deliberately distinct so the CRD
+                        enum on TestRun.Status.Phase stays exactly what it was before
+                        step 17 (queued/running/paused/passed/failed/aborted/error).
+                        The "skipped" marker lives ONLY at the step level; composite
+                        aggregation folds skipped steps into ParentPhase's decision
+                        without them ever being written into the run-level Phase.
                       enum:
                       - queued
                       - running
@@ -3372,6 +3388,7 @@ spec:
                       - failed
                       - aborted
                       - error
+                      - skipped
                       type: string
                     queuedAt:
                       format: date-time

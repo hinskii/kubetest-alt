@@ -146,6 +146,14 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if spec == nil {
 		return errors.New("spec is required")
 	}
+	// Step 17: shape branch. A Test is EITHER a leaf (image+command / use)
+	// OR a composite (steps[]) — never both. This mirrors CLAUDE.md's
+	// "one CRD, two shapes" note; the alternative (a separate Suite CRD)
+	// was skipped to keep GitOps + the reconciler surface small.
+	composite := len(spec.Steps) > 0
+	if composite {
+		return validateCompositeShape(spec)
+	}
 	// Step 13: relax image/command requirements when spec.use is set. A
 	// template may supply them; the TestRun controller re-validates
 	// post-resolution and surfaces failures with reason=ResolveFailed.
@@ -172,6 +180,76 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 		if _, err := cronParser.Parse(spec.Schedule); err != nil {
 			return fmt.Errorf("spec.schedule %q is not a valid cron expression: %w", spec.Schedule, err)
 		}
+	}
+	return nil
+}
+
+// validateCompositeShape covers a Test that carries spec.steps[]. Enforces
+// shape exclusivity vs the leaf shape AND the per-step invariants
+// (execute non-nil, ≥1 test, condition enum, count≥1) — none of which
+// are expressible via +kubebuilder markers alone.
+func validateCompositeShape(spec *testsv1alpha1.TestSpec) error {
+	// Exclusivity: none of the leaf-only fields may be set alongside steps.
+	if spec.Container.Image != "" || len(spec.Container.Command) > 0 || len(spec.Container.Args) > 0 {
+		return errors.New("spec.steps and spec.container are mutually exclusive")
+	}
+	if len(spec.Use) > 0 {
+		return errors.New("spec.steps and spec.use are mutually exclusive (composite composes children, not templates)")
+	}
+	if spec.Content.Git != nil || len(spec.Content.Files) > 0 || len(spec.Content.Tarball) > 0 {
+		return errors.New("spec.steps and spec.content are mutually exclusive (children carry their own content)")
+	}
+	if spec.Verdict != nil {
+		return errors.New("spec.steps and spec.verdict are mutually exclusive (composite verdict comes from step aggregation)")
+	}
+	if len(spec.Services) > 0 {
+		return errors.New("spec.steps and spec.services are mutually exclusive")
+	}
+	if spec.Parallel != nil {
+		return errors.New("spec.steps and spec.parallel are mutually exclusive")
+	}
+	// concurrencyPolicy on composite is fine — it applies to the parent run itself.
+	if _, ok := allowedConcurrencyPolicies[spec.ConcurrencyPolicy]; !ok {
+		return fmt.Errorf("spec.concurrencyPolicy %q is not one of [Allow Forbid Replace]", spec.ConcurrencyPolicy)
+	}
+	if spec.Schedule != "" {
+		if _, err := cronParser.Parse(spec.Schedule); err != nil {
+			return fmt.Errorf("spec.schedule %q is not a valid cron expression: %w", spec.Schedule, err)
+		}
+	}
+	// Per-step rules.
+	for i := range spec.Steps {
+		if err := validateStep(i, &spec.Steps[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateStep(idx int, s *testsv1alpha1.Step) error {
+	if s.Execute == nil {
+		return fmt.Errorf("spec.steps[%d].execute is required (step 17 supports execute-only steps)", idx)
+	}
+	if len(s.Execute.Tests) == 0 {
+		return fmt.Errorf("spec.steps[%d].execute.tests must have at least one entry", idx)
+	}
+	if s.Execute.Parallelism < 0 {
+		return fmt.Errorf("spec.steps[%d].execute.parallelism must be >= 0", idx)
+	}
+	if s.Condition != "" && s.Condition != "passed" && s.Condition != "always" {
+		return fmt.Errorf("spec.steps[%d].condition %q is not one of [passed always]", idx, s.Condition)
+	}
+	for j := range s.Execute.Tests {
+		t := &s.Execute.Tests[j]
+		if t.Name == "" {
+			return fmt.Errorf("spec.steps[%d].execute.tests[%d].name is required", idx, j)
+		}
+		if t.Count < 0 {
+			return fmt.Errorf("spec.steps[%d].execute.tests[%d].count must be >= 1 (0/unset means default 1)", idx, j)
+		}
+	}
+	if s.Retry != nil && s.Retry.Count < 1 {
+		return fmt.Errorf("spec.steps[%d].retry.count must be >= 1 when set", idx)
 	}
 	return nil
 }

@@ -68,6 +68,12 @@ var KnownTools = map[string]struct{}{
 	toolKubepug:     {},
 	// Raw-Test tools documented in docs/examples/.
 	toolCurl: {},
+	// Step 17: composite parent runs. A composite Test has no single
+	// tool identity — its label is `kubetest.io/tool=composite` (set
+	// by the user OR the reconciler when it detects spec.steps). This
+	// keeps runs_total{tool=composite} distinguishable from bare
+	// "other" (which is genuinely unknown, not "this is a scenario").
+	toolComposite: {},
 }
 
 // ToolOther is the sink value for unknown tool labels. Kept as a const
@@ -95,7 +101,14 @@ const (
 	toolCucumber    = "cucumber"
 	toolKubepug     = "kubepug"
 	toolCurl        = "curl"
+	toolComposite   = "composite"
 )
+
+// ToolComposite is the exported value for step-17 composite parents.
+// Kept as a package-level const so the reconciler labels children +
+// scrape assertions can reference the same string without hard-coding
+// the literal.
+const ToolComposite = "composite"
 
 // Source label constants.
 const (

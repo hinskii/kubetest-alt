@@ -199,6 +199,20 @@ func (r *TestRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			handler.EnqueueRequestsFromMapFunc(r.mapPodToTestRun),
 			builder.WithPredicates(hasRunIDLabelPredicate),
 		).
+		// Step 17: composite parent runs need to reconcile whenever a
+		// CHILD TestRun changes phase. Children carry ownerRef to the
+		// parent TestRun (set by ensureStepChildren). Owns(TestRun) is
+		// the standard controller-runtime pattern for this — for the
+		// primary type this happens to also be the owned type, but
+		// controller-runtime handles that fine (the OwnerReference
+		// filter separates child events from primary events, and the
+		// mapper enqueues the parent by name).
+		//
+		// Kept mapChildRunToParent + LabelParentRun / LabelStep /
+		// LabelExecIndex for GUI queries (`kubectl -l parent-run=X`)
+		// and for the reconciler's own listChildRuns — the label is
+		// a stable, human-readable index, ownerRef is the mechanism.
+		Owns(&testsv1alpha1.TestRun{}).
 		Named("testrun").
 		Complete(r)
 }
@@ -295,8 +309,33 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.setup(ctx, logger, &run)
 	}
 
+	// Step 17: composite runs have no Job — dispatch to the composite
+	// reconciler which owns child TestRuns and step aggregation.
+	// Detection is via the resolvedSpec snapshot (the source of truth
+	// for what this run WAS at setup time — §15.5 invariant), NOT the
+	// live Test spec (which may have been edited mid-run).
+	if isCompositeRun(&run) {
+		return r.reconcileComposite(ctx, logger, &run)
+	}
+
 	// From here we expect either an existing Job or a not-yet-created one.
 	return r.observeOrCreateJob(ctx, logger, &run)
+}
+
+// isCompositeRun decodes the resolvedSpec snapshot and reports whether
+// this run is a composite (spec.steps non-empty). Kept as a small
+// helper so composite detection is a single call site with a clear
+// name — the alternative (inlining a JSON-unmarshal every reconcile)
+// would obscure the branch.
+func isCompositeRun(run *testsv1alpha1.TestRun) bool {
+	if run.Status.ResolvedSpec == "" {
+		return false
+	}
+	var snap testsv1alpha1.TestSpec
+	if err := json.Unmarshal([]byte(run.Status.ResolvedSpec), &snap); err != nil {
+		return false
+	}
+	return len(snap.Steps) > 0
 }
 
 // setup handles the very first reconcile for a TestRun: resolve Test, validate
@@ -341,6 +380,20 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		}
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
 			reason, resolveErr.Error())
+	}
+
+	// Step 17: composite cycle detection at setup — resolves the whole
+	// execute graph ONCE using live Test specs, then fails fast if a
+	// cycle exists. The graph itself is not persisted anywhere; only
+	// this run's resolved spec (which already includes spec.steps) is
+	// snapshotted below. That upholds §15.5: editing a child Test
+	// mid-run does not change THIS run's step plan, but the child's
+	// resolvedSpec at its OWN setup time may differ (documented).
+	if len(resolvedSpec.Steps) > 0 {
+		if err := r.validateCompositeGraph(ctx, &test, resolvedSpec); err != nil {
+			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
+				ReasonResolveFailed, err.Error())
+		}
 	}
 
 	priors, err := r.listPriorRuns(ctx, run)
