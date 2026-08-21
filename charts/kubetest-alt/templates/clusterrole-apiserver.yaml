@@ -1,0 +1,42 @@
+{{/*
+API server ClusterRole. Narrower than the operator's — the API server
+only reads/writes CRs (backing GUI CRUD) and reads logs+artifacts from
+storage. It does NOT need Jobs / Pods write / Leases.
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-apiserver-role
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apiserver
+rules:
+  # Tests + TestRuns: GUI CRUD (create/patch/delete) with §7 managed-by
+  # enforcement done in the apiserver code.
+  - apiGroups: ["tests.kubetest.io"]
+    resources: ["tests", "testruns", "testtemplates", "testtriggers", "webhooks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Read-only on Pods for pod-log endpoint fallback (websocket handler
+  # tails via K8s API when apiserver has no MinIO wiring configured).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-apiserver-rolebinding
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apiserver
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubetest-alt.fullname" . }}-apiserver-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubetest-alt.apiserver.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

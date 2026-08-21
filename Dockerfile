@@ -1,31 +1,32 @@
-# Build the manager binary
+# Multi-purpose Go binary Dockerfile — one file used to build both the
+# operator and the apiserver. `--build-arg TARGET_BIN=cmd/operator`
+# selects which entrypoint to compile; the resulting distroless image
+# ships a single static binary at /entrypoint.
+#
+# Kept parameterized so a future new command (cmd/whatever) doesn't
+# need a new Dockerfile; step 16's kind e2e uses this file twice
+# (operator + apiserver) with different TARGET_BIN values.
 FROM golang:1.26 AS builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG TARGET_BIN=cmd/operator
 
 WORKDIR /workspace
-# Copy the Go Modules manifests
 COPY go.mod go.mod
 COPY go.sum go.sum
-# cache deps before building and copying source so that we don't need to re-download as much
-# and so that source changes don't invalidate our downloaded layer
 RUN go mod download
 
-# Copy the Go source (relies on .dockerignore to filter)
 COPY . .
 
-# Build
-# the GOARCH has no default value to allow the binary to be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager ./cmd/operator
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -a -o entrypoint ./${TARGET_BIN}
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
+# distroless/static:nonroot — no shell, no libc, non-root by default.
+# Every kubetest platform binary is CGO_ENABLED=0 static so this works
+# for both operator + apiserver.
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/entrypoint /entrypoint
 USER 65532:65532
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/entrypoint"]

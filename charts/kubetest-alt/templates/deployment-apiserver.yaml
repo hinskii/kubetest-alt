@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-apiserver
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apiserver
+spec:
+  replicas: {{ .Values.apiserver.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kubetest-alt.apiserver.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubetest-alt.apiserver.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kubetest-alt.apiserver.serviceAccountName" . }}
+      {{- with .Values.images.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: apiserver
+          image: {{ include "kubetest-alt.image" (dict "top" .Values.images "key" "apiserver" "ctx" .) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          args:
+            - --listen={{ printf ":%d" (int .Values.apiserver.service.port) }}
+            {{- if .Values.minio.endpoint }}
+            - --minio-endpoint={{ .Values.minio.endpoint }}
+            - --minio-bucket={{ .Values.minio.bucket }}
+            {{- if .Values.minio.useSSL }}
+            - --minio-use-ssl
+            {{- end }}
+            {{- end }}
+            {{- if .Values.postgresql.dsn }}
+            - --postgres-dsn={{ .Values.postgresql.dsn }}
+            {{- end }}
+            {{- range .Values.apiserver.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            {{- if .Values.minio.secretName }}
+            - name: MINIO_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.secretName }}
+                  key: AWS_ACCESS_KEY_ID
+                  optional: true
+            - name: MINIO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.minio.secretName }}
+                  key: AWS_SECRET_ACCESS_KEY
+                  optional: true
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.apiserver.service.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.apiserver.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-apiserver
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: apiserver
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.apiserver.service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "kubetest-alt.apiserver.selectorLabels" . | nindent 4 }}

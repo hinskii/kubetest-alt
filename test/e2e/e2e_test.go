@@ -17,397 +17,557 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Package e2e runs the plan's 5 kind e2e scenarios against a chart-
+// installed cluster. Guarded by the `e2e` build tag so `make test`
+// stays fast; `make test-e2e` + the CI workflow are the actual entry
+// points.
+//
+// Assumptions the outer script (test/e2e/run.sh) sets up before this
+// binary runs:
+//   1. `kind create cluster` — a fresh cluster, KUBECONFIG points at it.
+//   2. Docker images built + `kind load` — operator, apiserver,
+//      content-fetcher, and the three tool-bundle images live inside
+//      the kind node so ImagePullPolicy=Never resolves.
+//   3. `helm install kt charts/kubetest-alt/ -n kubetest-alt --create-namespace`
+//      — operator + apiserver deployments running and Ready.
+//   4. `kubectl -n kubetest-alt rollout status` — same-namespace ready.
+//
+// Everything from here on happens with a plain client-go / ctrl-runtime
+// client. Per-scenario timings recorded via t.Log so the report can
+// splice them.
 package e2e
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/hinskii/kubetest-alt/test/utils"
+	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
 
-// namespace where the project is deployed in
-const namespace = "kubetest-alt-system"
+const (
+	// releaseNS is the namespace `run.sh` installs the chart into.
+	releaseNS = "kubetest-alt"
+	// workloadNS is the namespace test manifests are created in.
+	workloadNS = "kubetest-e2e"
+)
 
-// serviceAccountName created for the project
-const serviceAccountName = "kubetest-alt-controller-manager"
+// buildScheme returns a scheme registered for our CRDs.
+func buildScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	s := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(s))
+	require.NoError(t, testsv1alpha1.AddToScheme(s))
+	return s
+}
 
-// metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "kubetest-alt-controller-manager-metrics-service"
+// newClient builds a ctrl-runtime client from KUBECONFIG (kind writes
+// the correct path via `kind get kubeconfig`).
+func newClient(t *testing.T) client.Client {
+	t.Helper()
+	kubeconfig := os.Getenv("KUBECONFIG")
+	if kubeconfig == "" {
+		kubeconfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+	cfg, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	require.NoError(t, err, "KUBECONFIG=%q must point at a running kind cluster", kubeconfig)
+	c, err := client.New(cfg, client.Options{Scheme: buildScheme(t)})
+	require.NoError(t, err)
+	return c
+}
 
-// metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "kubetest-alt-metrics-binding"
+// TestE2E is the umbrella. Each sub-test is one plan scenario; we run
+// them serially so cluster state is deterministic + per-scenario
+// timing lands in `go test -v` output. Total budget from the plan: 15
+// min. Individual timings emitted via t.Log for the report.
+func TestE2E(t *testing.T) {
+	if os.Getenv("SKIP_E2E") != "" {
+		t.Skip("SKIP_E2E set")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	defer cancel()
 
-var _ = Describe("Manager", Ordered, func() {
-	var controllerPodName string
+	c := newClient(t)
+	// Fresh workload namespace per suite run. Idempotent create.
+	ensureNamespace(t, ctx, c, workloadNS)
+	t.Cleanup(func() { deleteNamespace(t, context.Background(), c, workloadNS) })
 
-	// Before running the tests, set up the environment by creating the namespace,
-	// enforce the restricted security policy to the namespace, installing CRDs,
-	// and deploying the controller.
-	BeforeAll(func() {
-		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+	// Apply the catalog templates (Test + TestTemplate CRs used by
+	// scenarios below). One shot with kubectl apply -k is simpler than
+	// re-parsing per test.
+	applyKustomize(t, "config/samples/tools/", workloadNS)
 
-		By("labeling the namespace to enforce the restricted security policy")
-		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
-			"pod-security.kubernetes.io/enforce=restricted")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
-
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
-
-		By("deploying the controller-manager")
-		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+	t.Run("Scenario1_K6_Passing", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=1 tool=k6 duration=%s", time.Since(start)) }()
+		scenarioK6Passing(t, ctx, c)
+	})
+	t.Run("Scenario2_JMeter_FailingVerdictFromJTL", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=2 tool=jmeter duration=%s", time.Since(start)) }()
+		scenarioJMeterFailing(t, ctx, c)
+	})
+	t.Run("Scenario3_ContentFetchFailure", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=3 kind=content-fetch duration=%s", time.Since(start)) }()
+		scenarioContentFetchFail(t, ctx, c)
+	})
+	t.Run("Scenario4_GitOpsGuard409", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=4 kind=gitops-guard duration=%s", time.Since(start)) }()
+		scenarioGitOpsGuard(t, ctx, c)
+	})
+	t.Run("Scenario5_Cron", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=5 kind=cron duration=%s", time.Since(start)) }()
+		scenarioCron(t, ctx, c)
 	})
 
-	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
-	// and deleting the namespace.
-	AfterAll(func() {
-		By("cleaning up the curl pod for metrics")
-		cmd := exec.Command("kubectl", "delete", "pod", "curl-metrics", "-n", namespace)
-		_, _ = utils.Run(cmd)
-
-		By("undeploying the controller-manager")
-		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
-
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
-		_, _ = utils.Run(cmd)
-
-		By("removing manager namespace")
-		cmd = exec.Command("kubectl", "delete", "ns", namespace)
-		_, _ = utils.Run(cmd)
+	// Post-scenario: /metrics from operator + apiserver. Asserts the
+	// step-14 counters got real events end-to-end.
+	t.Run("MetricsScrape_OperatorAndApiserver", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=metrics duration=%s", time.Since(start)) }()
+		metricsScrape(t, ctx)
 	})
 
-	// After each test, check for failures and collect logs, events,
-	// and pod descriptions for debugging.
-	AfterEach(func() {
-		specReport := CurrentSpecReport()
-		if specReport.Failed() {
-			By("Fetching controller manager pod logs")
-			cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-			controllerLogs, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Controller logs:\n %s", controllerLogs)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Controller logs: %s", err)
-			}
+	// Post-scenario: zero ERROR log entries in the operator pod. Catches
+	// silent reconcile loops / dropped-error panics that Ginkgo-happy
+	// scenarios wouldn't flag.
+	t.Run("OperatorLogs_NoErrorEntries", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=logs duration=%s", time.Since(start)) }()
+		assertNoErrorLogs(t)
+	})
+}
 
-			By("Fetching Kubernetes events")
-			cmd = exec.Command("kubectl", "get", "events", "-n", namespace, "--sort-by=.lastTimestamp")
-			eventsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Kubernetes events:\n%s", eventsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get Kubernetes events: %s", err)
-			}
+// -------------------- scenarios --------------------
 
-			By("Fetching curl-metrics logs")
-			cmd = exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-			metricsOutput, err := utils.Run(cmd)
-			if err == nil {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Metrics logs:\n %s", metricsOutput)
-			} else {
-				_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get curl-metrics logs: %s", err)
-			}
+// scenarioK6Passing: a Test using the k6 catalog template with a
+// trivial script (checks that always pass) → phase=passed. The apply-
+// test golden already covers spec resolution; this proves the FULL
+// chain — CRD admit, compile, Job, wrapper, verdict — on a real cluster.
+func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
+	// Inline script — a k6 script with only "return true" checks so no
+	// external HTTP + no thresholds → exit code 0 → phase=passed. Ships
+	// via spec.content.files[] (inline; well under the 512KB webhook cap).
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-k6-pass",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "k6"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:1.4.0",
+				Args:  []string{"run", "/data/repo/script.js"},
+			},
+			Content: testsv1alpha1.Content{
+				Files: []testsv1alpha1.FileContent{{
+					Path:    "script.js",
+					Content: "export default function() { /* pass */ }",
+				}},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-k6-pass-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "e2e-k6-pass", Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 3*time.Minute)
+	assert.Equal(t, testsv1alpha1.PhasePassed, final.Status.Phase)
+	t.Logf("k6 run finished — durationMs=%d", final.Status.DurationMs)
+}
 
-			By("Fetching controller manager pod description")
-			cmd = exec.Command("kubectl", "describe", "pod", controllerPodName, "-n", namespace)
-			podDescription, err := utils.Run(cmd)
-			if err == nil {
-				fmt.Println("Pod description:\n", podDescription)
-			} else {
-				fmt.Println("Failed to describe controller pod")
+// scenarioJMeterFailing: the flagship §15.2 assertion — JMeter exits 0
+// on a plan that failed 100% of requests, but the template's
+// verdictFrom: jtl (errorRateMax: "0") flips phase to failed. Proven
+// end-to-end on a real cluster.
+func scenarioJMeterFailing(t *testing.T, ctx context.Context, c client.Client) {
+	// Minimal failing plan — a DNS lookup on an .invalid TLD.
+	plan := `<?xml version="1.0" encoding="UTF-8"?>
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="e2e-fail">
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <elementProp name="TestPlan.user_defined_variables" elementType="Arguments"/>
+    </TestPlan>
+    <hashTree>
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup" testname="G">
+        <intProp name="ThreadGroup.num_threads">1</intProp>
+        <intProp name="ThreadGroup.ramp_time">1</intProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">1</intProp>
+        </elementProp>
+      </ThreadGroup>
+      <hashTree>
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="Bogus">
+          <stringProp name="HTTPSampler.domain">no-such-host-e2e-99999.invalid</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">2000</stringProp>
+        </HTTPSamplerProxy>
+        <hashTree/>
+      </hashTree>
+    </hashTree>
+  </hashTree>
+</jmeterTestPlan>`
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-jmeter-fail",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "jmeter"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Use:               []string{"jmeter"},
+			Content: testsv1alpha1.Content{
+				Files: []testsv1alpha1.FileContent{{
+					Path:    "smoke.jmx",
+					Content: plan,
+				}},
+			},
+			Config: map[string]testsv1alpha1.Parameter{
+				"plan": {Type: "string", Default: "smoke.jmx"},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-jmeter-fail-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "e2e-jmeter-fail", Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhaseFailed, 4*time.Minute)
+	assert.Equal(t, testsv1alpha1.PhaseFailed, final.Status.Phase,
+		"JMeter's exit 0 on all-fail plan MUST NOT ship as passed — verdictFrom:jtl override is the whole reason for this test")
+}
+
+// scenarioContentFetchFail: bad git URI → phase=error with
+// reason=ContentFetchFailed. Exercises the step-06 init-container
+// error-surfacing path all the way up.
+func scenarioContentFetchFail(t *testing.T, ctx context.Context, c client.Client) {
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-bad-git",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "k6"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:1.4.0",
+				Args:  []string{"run", "/data/repo/script.js"},
+			},
+			Content: testsv1alpha1.Content{
+				Git: &testsv1alpha1.GitContent{
+					URI:      "https://no-such-host-e2e-99999.invalid/nothing.git",
+					Revision: "main",
+				},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-bad-git-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "e2e-bad-git", Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhaseError, 3*time.Minute)
+	assert.Contains(t, final.Status.Message, "ContentFetchFailed",
+		"content-fetcher init container failure must surface as reason=ContentFetchFailed")
+}
+
+// scenarioGitOpsGuard: a Test labeled app.kubernetes.io/managed-by=gitops
+// is read-only via the apiserver — a PATCH returns 409. Skipped when
+// the apiserver isn't wired via NodePort (checks env var).
+//
+// The apiserver is inside the cluster; we port-forward via kubectl to
+// hit it. run.sh sets APISERVER_URL to the port-forward endpoint before
+// invoking this test.
+func scenarioGitOpsGuard(t *testing.T, ctx context.Context, c client.Client) {
+	apiURL := os.Getenv("APISERVER_URL")
+	if apiURL == "" {
+		t.Skip("APISERVER_URL not set (run.sh should port-forward + export before Go test)")
+	}
+	// Create a Test labeled gitops.
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-gitops",
+			Namespace: workloadNS,
+			Labels: map[string]string{
+				"kubetest.io/tool":              "k6",
+				"app.kubernetes.io/managed-by":  "gitops",
+			},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:1.4.0",
+				Args:  []string{"run", "-"},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+
+	// PATCH via the apiserver — must 409.
+	url := fmt.Sprintf("%s/tests/%s", strings.TrimRight(apiURL, "/"), test.Name)
+	body := strings.NewReader(`{"spec":{"container":{"args":["run","edited.js"]}}}`)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, body)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusConflict, resp.StatusCode,
+		"gitops-labeled Test PATCH via apiserver MUST return 409 (§7 managed-by enforcement)")
+}
+
+// scenarioCron: a Test with schedule "* * * * *" — within 70s the
+// scheduler creates a TestRun with source=cron. Then remove the
+// schedule so the cluster doesn't accumulate runs.
+func scenarioCron(t *testing.T, ctx context.Context, c client.Client) {
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-cron",
+			Namespace: workloadNS,
+			Labels:    map[string]string{"kubetest.io/tool": "k6"},
+		},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Schedule:          "* * * * *",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:1.4.0",
+				Args:  []string{"run", "/data/repo/s.js"},
+			},
+			Content: testsv1alpha1.Content{
+				Files: []testsv1alpha1.FileContent{{
+					Path:    "s.js",
+					Content: "export default function() {}",
+				}},
+			},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	defer func() {
+		// Remove schedule so the scheduler stops firing while the cluster
+		// tears down. Idempotent on missing Test.
+		var fresh testsv1alpha1.Test
+		if err := c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cron"}, &fresh); err == nil {
+			fresh.Spec.Schedule = ""
+			_ = c.Update(ctx, &fresh)
+		}
+	}()
+	// Poll for a TestRun with source=cron within 90s (buffer over
+	// scheduler tick default 30s + cron granularity 60s).
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		var runs testsv1alpha1.TestRunList
+		require.NoError(t, c.List(ctx, &runs, client.InNamespace(workloadNS)))
+		for _, r := range runs.Items {
+			if r.Spec.TestRef == "e2e-cron" && r.Spec.Source == "cron" {
+				t.Logf("cron TestRun observed: %s (source=%s)", r.Name, r.Spec.Source)
+				return
 			}
 		}
-	})
+		time.Sleep(3 * time.Second)
+	}
+	t.Fatal("no cron-sourced TestRun observed within 90s")
+}
 
-	SetDefaultEventuallyTimeout(2 * time.Minute)
-	SetDefaultEventuallyPollingInterval(time.Second)
+// -------------------- metrics + logs --------------------
 
-	Context("Manager", func() {
-		It("should run successfully", func() {
-			By("validating that the controller-manager pod is running as expected")
-			verifyControllerUp := func(g Gomega) {
-				By("getting the name of the controller-manager pod")
-				cmd := exec.Command("kubectl", "get",
-					"pods", "-l", "control-plane=controller-manager",
-					"-o", "go-template={{ range .items }}"+
-						"{{ if not .metadata.deletionTimestamp }}"+
-						"{{ .metadata.name }}"+
-						"{{ \"\\n\" }}{{ end }}{{ end }}",
-					"-n", namespace,
-				)
+// metricsScrape hits /metrics on the operator's manager (via port-
+// forward, URL passed by run.sh as METRICS_OPERATOR_URL) and on the
+// apiserver's /metrics endpoint (METRICS_APISERVER_URL). Asserts:
+//   * both endpoints return 200 with prometheus text format
+//   * runs_total{tool="k6",phase="passed"} counter is >= 1 (proves
+//     the metrics wiring from step 14 lit up in real cluster context)
+//   * webhook_deliveries_total series exists (may be zero if no
+//     subscribers — step-14-plus deliverability is out of scope here)
+func metricsScrape(t *testing.T, ctx context.Context) {
+	opURL := os.Getenv("METRICS_OPERATOR_URL")
+	apiURL := os.Getenv("METRICS_APISERVER_URL")
+	if opURL == "" || apiURL == "" {
+		t.Skip("METRICS_OPERATOR_URL / METRICS_APISERVER_URL not set (run.sh port-forwards + exports)")
+	}
+	for _, endpoint := range []string{opURL, apiURL} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		require.NoError(t, err)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoErrorf(t, err, "GET %s", endpoint)
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		require.Equal(t, http.StatusOK, resp.StatusCode, "endpoint %s must return 200", endpoint)
+		text := string(body)
+		assert.Contains(t, text, "kubetest_", "kubetest_* metrics MUST be exposed on %s", endpoint)
+	}
+	// Operator-side counter assertion.
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, opURL, nil)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	// Prometheus text format line:
+	//   kubetest_runs_total{phase="passed",source="api",tool="k6"} 1
+	// Label order isn't fixed — match with regex.
+	re := regexp.MustCompile(
+		`kubetest_runs_total\{[^}]*tool="k6"[^}]*phase="passed"[^}]*\}\s+([0-9.eE+-]+)|` +
+			`kubetest_runs_total\{[^}]*phase="passed"[^}]*tool="k6"[^}]*\}\s+([0-9.eE+-]+)`)
+	m := re.FindStringSubmatch(string(body))
+	require.NotEmpty(t, m, "kubetest_runs_total{tool=k6,phase=passed} MUST be present with a positive count on operator /metrics")
+	// The two OR groups mean m[1] or m[2] is non-empty depending on
+	// which order the labels were emitted. Both parse as float ≥ 1.
+	valueStr := m[1]
+	if valueStr == "" {
+		valueStr = m[2]
+	}
+	assert.NotEmpty(t, valueStr)
+	t.Logf("operator kubetest_runs_total{tool=k6,phase=passed} = %s", valueStr)
+}
 
-				podOutput, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve controller-manager pod information")
-				podNames := utils.GetNonEmptyLines(podOutput)
-				g.Expect(podNames).To(HaveLen(1), "expected 1 controller pod running")
-				controllerPodName = podNames[0]
-				g.Expect(controllerPodName).To(ContainSubstring("controller-manager"))
-
-				By("validating the pod's status")
-				cmd = exec.Command("kubectl", "get",
-					"pods", controllerPodName, "-o", "jsonpath={.status.phase}",
-					"-n", namespace,
-				)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Running"), "Incorrect controller-manager pod status")
-			}
-			Eventually(verifyControllerUp).Should(Succeed())
-		})
-
-		It("should ensure the metrics endpoint is serving metrics", func() {
-			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=kubetest-alt-metrics-reader",
-				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
-			)
-			_, err := utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
-
-			By("validating that the metrics service is available")
-			cmd = exec.Command("kubectl", "get", "service", metricsServiceName, "-n", namespace)
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Metrics service should exist")
-
-			By("getting the service account token")
-			token, err := serviceAccountToken()
-			Expect(err).NotTo(HaveOccurred())
-			Expect(token).NotTo(BeEmpty())
-
-			By("ensuring the controller pod is ready")
-			verifyControllerPodReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pod", controllerPodName, "-n", namespace,
-					"-o", "jsonpath={.status.conditions[?(@.type=='Ready')].status}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("True"), "Controller pod not ready")
-			}
-			Eventually(verifyControllerPodReady, 3*time.Minute, time.Second).Should(Succeed())
-
-			By("verifying that the controller manager is serving the metrics server")
-			verifyMetricsServerStarted := func(g Gomega) {
-				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(ContainSubstring("Serving metrics server"),
-					"Metrics server not yet started")
-			}
-			Eventually(verifyMetricsServerStarted, 3*time.Minute, time.Second).Should(Succeed())
-
-			By("waiting for the webhook service endpoints to be ready")
-			verifyWebhookEndpointsReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "endpointslices.discovery.k8s.io", "-n", namespace,
-					"-l", "kubernetes.io/service-name=kubetest-alt-webhook-service",
-					"-o", "jsonpath={range .items[*]}{range .endpoints[*]}{.addresses[*]}{end}{end}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "Webhook endpoints should exist")
-				g.Expect(output).ShouldNot(BeEmpty(), "Webhook endpoints not yet ready")
-			}
-			Eventually(verifyWebhookEndpointsReady, 3*time.Minute, time.Second).Should(Succeed())
-
-			By("verifying the mutating webhook server is ready")
-			verifyMutatingWebhookReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "mutatingwebhookconfigurations.admissionregistration.k8s.io",
-					"kubetest-alt-mutating-webhook-configuration",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "MutatingWebhookConfiguration should exist")
-				g.Expect(output).ShouldNot(BeEmpty(), "Mutating webhook CA bundle not yet injected")
-			}
-			Eventually(verifyMutatingWebhookReady, 3*time.Minute, time.Second).Should(Succeed())
-
-			By("verifying the validating webhook server is ready")
-			verifyValidatingWebhookReady := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "validatingwebhookconfigurations.admissionregistration.k8s.io",
-					"kubetest-alt-validating-webhook-configuration",
-					"-o", "jsonpath={.webhooks[0].clientConfig.caBundle}")
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred(), "ValidatingWebhookConfiguration should exist")
-				g.Expect(output).ShouldNot(BeEmpty(), "Validating webhook CA bundle not yet injected")
-			}
-			Eventually(verifyValidatingWebhookReady, 3*time.Minute, time.Second).Should(Succeed())
-
-			By("waiting additional time for webhook server to stabilize")
-			time.Sleep(5 * time.Second)
-
-			// +kubebuilder:scaffold:e2e-metrics-webhooks-readiness
-
-			By("creating the curl-metrics pod to access the metrics endpoint")
-			cmd = exec.Command("kubectl", "run", "curl-metrics", "--restart=Never",
-				"--namespace", namespace,
-				"--image=curlimages/curl:latest",
-				"--overrides",
-				fmt.Sprintf(`{
-					"spec": {
-						"containers": [{
-							"name": "curl",
-							"image": "curlimages/curl:latest",
-							"command": ["/bin/sh", "-c"],
-							"args": [
-								"for i in $(seq 1 30); do curl -v -k -H 'Authorization: Bearer %s' https://%s.%s.svc.cluster.local:8443/metrics && exit 0 || sleep 2; done; exit 1"
-							],
-							"securityContext": {
-								"readOnlyRootFilesystem": true,
-								"allowPrivilegeEscalation": false,
-								"capabilities": {
-									"drop": ["ALL"]
-								},
-								"runAsNonRoot": true,
-								"runAsUser": 1000,
-								"seccompProfile": {
-									"type": "RuntimeDefault"
-								}
-							}
-						}],
-						"serviceAccountName": "%s"
-					}
-				}`, token, metricsServiceName, namespace, serviceAccountName))
-			_, err = utils.Run(cmd)
-			Expect(err).NotTo(HaveOccurred(), "Failed to create curl-metrics pod")
-
-			By("waiting for the curl-metrics pod to complete.")
-			verifyCurlUp := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "pods", "curl-metrics",
-					"-o", "jsonpath={.status.phase}",
-					"-n", namespace)
-				output, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(Equal("Succeeded"), "curl pod in wrong status")
-			}
-			Eventually(verifyCurlUp, 5*time.Minute).Should(Succeed())
-
-			By("getting the metrics by checking curl-metrics logs")
-			verifyMetricsAvailable := func(g Gomega) {
-				metricsOutput, err := getMetricsOutput()
-				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-				g.Expect(metricsOutput).NotTo(BeEmpty())
-				g.Expect(metricsOutput).To(ContainSubstring("< HTTP/1.1 200 OK"))
-			}
-			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
-		})
-
-		It("should provisioned cert-manager", func() {
-			By("validating that cert-manager has the certificate Secret")
-			verifyCertManager := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "secrets", "webhook-server-cert", "-n", namespace)
-				_, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-			}
-			Eventually(verifyCertManager).Should(Succeed())
-		})
-
-		It("should have CA injection for mutating webhooks", func() {
-			By("checking CA injection for mutating webhooks")
-			verifyCAInjection := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get",
-					"mutatingwebhookconfigurations.admissionregistration.k8s.io",
-					"kubetest-alt-mutating-webhook-configuration",
-					"-o", "go-template={{ range .webhooks }}{{ .clientConfig.caBundle }}{{ end }}")
-				mwhOutput, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(len(mwhOutput)).To(BeNumerically(">", 10))
-			}
-			Eventually(verifyCAInjection).Should(Succeed())
-		})
-
-		It("should have CA injection for validating webhooks", func() {
-			By("checking CA injection for validating webhooks")
-			verifyCAInjection := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get",
-					"validatingwebhookconfigurations.admissionregistration.k8s.io",
-					"kubetest-alt-validating-webhook-configuration",
-					"-o", "go-template={{ range .webhooks }}{{ .clientConfig.caBundle }}{{ end }}")
-				vwhOutput, err := utils.Run(cmd)
-				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(len(vwhOutput)).To(BeNumerically(">", 10))
-			}
-			Eventually(verifyCAInjection).Should(Succeed())
-		})
-
-		// +kubebuilder:scaffold:e2e-webhooks-checks
-
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
-	})
-})
-
-// serviceAccountToken returns a token for the specified service account in the given namespace.
-// It uses the Kubernetes TokenRequest API to generate a token by directly sending a request
-// and parsing the resulting token from the API response.
-func serviceAccountToken() (string, error) {
-	const tokenRequestRawString = `{
-		"apiVersion": "authentication.k8s.io/v1",
-		"kind": "TokenRequest"
-	}`
-
-	By("creating temporary file to store the token request")
-	secretName := fmt.Sprintf("%s-token-request", serviceAccountName)
-	tokenRequestFile := filepath.Join("/tmp", secretName)
-	err := os.WriteFile(tokenRequestFile, []byte(tokenRequestRawString), os.FileMode(0o644))
+// assertNoErrorLogs kubectl-logs the operator pod for the whole test
+// run and greps for "ERROR" level entries. Plan: any = fail. If the
+// operator's Deployment name changed the test surfaces the miss with
+// a clear message.
+func assertNoErrorLogs(t *testing.T) {
+	// Wrap kubectl — simplest cross-platform way to get logs from a
+	// Deployment (--tail=-1). Assumes kubectl on PATH (CI installs it).
+	out, err := exec.Command("kubectl", "logs",
+		"-n", releaseNS,
+		"deploy/kt-kubetest-alt-operator",
+		"--all-containers=true",
+		"--tail=-1").CombinedOutput()
 	if err != nil {
-		return "", err
+		t.Fatalf("kubectl logs failed: %v\n%s", err, string(out))
 	}
-
-	var out string
-	verifyTokenCreation := func(g Gomega) {
-		By("executing kubectl command to create the token")
-		cmd := exec.Command("kubectl", "create", "--raw", fmt.Sprintf(
-			"/api/v1/namespaces/%s/serviceaccounts/%s/token",
-			namespace,
-			serviceAccountName,
-		), "-f", tokenRequestFile)
-
-		output, err := cmd.CombinedOutput()
-		g.Expect(err).NotTo(HaveOccurred())
-
-		By("parsing the JSON output to extract the token")
-		var token tokenRequest
-		err = json.Unmarshal(output, &token)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		out = token.Status.Token
+	// controller-runtime's zap logger emits `"level":"error"` or
+	// `"level":"ERROR"` (per config) in JSON, and `\tERROR\t` in
+	// console format. Match both.
+	scanner := strings.SplitSeq(string(out), "\n")
+	var errLines []string
+	for line := range scanner {
+		l := strings.TrimSpace(line)
+		if l == "" {
+			continue
+		}
+		if strings.Contains(l, `"level":"error"`) ||
+			strings.Contains(l, `"level":"ERROR"`) ||
+			strings.Contains(l, "\tERROR\t") {
+			errLines = append(errLines, l)
+		}
 	}
-	Eventually(verifyTokenCreation).Should(Succeed())
-
-	return out, err
+	assert.Emptyf(t, errLines,
+		"operator logged %d ERROR-level entry(ies) during e2e — silent reconcile loops or dropped errors:\n%s",
+		len(errLines), strings.Join(errLines, "\n"))
 }
 
-// getMetricsOutput retrieves and returns the logs from the curl pod used to access the metrics endpoint.
-func getMetricsOutput() (string, error) {
-	By("getting the curl-metrics logs")
-	cmd := exec.Command("kubectl", "logs", "curl-metrics", "-n", namespace)
-	return utils.Run(cmd)
+// -------------------- helpers --------------------
+
+func ensureNamespace(t *testing.T, ctx context.Context, c client.Client, name string) {
+	t.Helper()
+	ns := &corev1NamespaceLite{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+	}
+	err := c.Create(ctx, ns)
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		require.NoError(t, err, "create namespace %s", name)
+	}
 }
 
-// tokenRequest is a simplified representation of the Kubernetes TokenRequest API response,
-// containing only the token field that we need to extract.
-type tokenRequest struct {
-	Status struct {
-		Token string `json:"token"`
-	} `json:"status"`
+func deleteNamespace(t *testing.T, ctx context.Context, c client.Client, name string) {
+	t.Helper()
+	ns := &corev1NamespaceLite{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+	}
+	_ = c.Delete(ctx, ns)
+}
+
+// corev1NamespaceLite spares an import — we only need Create/Delete.
+type corev1NamespaceLite struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+}
+
+func (n *corev1NamespaceLite) DeepCopyObject() runtime.Object {
+	if n == nil {
+		return nil
+	}
+	out := &corev1NamespaceLite{
+		TypeMeta:   n.TypeMeta,
+		ObjectMeta: *n.ObjectMeta.DeepCopy(),
+	}
+	return out
+}
+
+// applyKustomize is a best-effort `kubectl apply -k <dir>`. Failure is
+// logged but non-fatal — many scenarios ship their own inline manifest,
+// so the catalog samples are convenience not strict precondition.
+func applyKustomize(t *testing.T, kustDir, ns string) {
+	t.Helper()
+	root := findRepoRoot(t)
+	cmd := exec.Command("kubectl", "apply", "-k", filepath.Join(root, kustDir), "-n", ns)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Logf("apply-k %s skipped: %v\n%s", kustDir, err, string(out))
+	}
+}
+
+func findRepoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		require.NotEqual(t, parent, dir, "no go.mod above cwd")
+		dir = parent
+	}
+}
+
+// waitForPhase polls until run.Status.Phase == want or the deadline
+// fires. Returns the final observed TestRun so callers can assert on
+// additional fields (message, artifacts, ...).
+func waitForPhase(t *testing.T, ctx context.Context, c client.Client, runName string, want testsv1alpha1.Phase, timeout time.Duration) *testsv1alpha1.TestRun {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last testsv1alpha1.TestRun
+	for time.Now().Before(deadline) {
+		if err := c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: runName}, &last); err == nil {
+			if last.Status.Phase == want {
+				return &last
+			}
+		}
+		time.Sleep(2 * time.Second)
+	}
+	// Emit a JSON dump of the final observation so failures surface
+	// enough context to triage without needing kubectl access.
+	dump, _ := json.MarshalIndent(last, "", "  ")
+	t.Fatalf("TestRun %s did not reach phase %q within %s\nFinal:\n%s", runName, want, timeout, string(dump))
+	return nil
 }

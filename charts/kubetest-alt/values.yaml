@@ -1,0 +1,139 @@
+# Default values for kubetest-alt. Override with --set / -f.
+#
+# The chart ships as a self-contained install: one Deployment for the
+# operator (leader-elected), one Deployment + Service for the API
+# server, all CRDs, RBAC, webhook certs. Dev conveniences (MinIO,
+# Postgres) come in as subcharts turned OFF by default.
+
+# Image references. TAGS PIN TO CHART.appVersion by default so a
+# single chart bump moves every platform-built image atomically.
+# `registry` is prepended to every image (empty = docker hub / ghcr
+# paths as-is). Override per-image below when you need to.
+images:
+  # Common registry prefix. Left empty = images resolve to their
+  # published locations (ghcr.io/hinskii/...). Air-gapped clusters
+  # override to their mirror and every image follows.
+  registry: ""
+  pullPolicy: IfNotPresent
+  # imagePullSecrets applied to BOTH platform Deployments AND the
+  # per-run Pod (via values.pod.imagePullSecrets — merged with
+  # per-Test spec.pod.imagePullSecrets, no operator override).
+  pullSecrets: []
+  #  - name: my-registry-creds
+
+  operator:
+    # Overrides the "<registry>/hinskii/kubetest-alt/operator:<appVersion>"
+    # default with a specific ref. Bumping images.operator.tag alone
+    # (without bumping appVersion) is a stale-pin signal — the helm
+    # golden tests flag it, but nothing stops you.
+    repository: "ghcr.io/hinskii/kubetest-alt/operator"
+    tag: ""  # empty → chart.appVersion
+  apiserver:
+    repository: "ghcr.io/hinskii/kubetest-alt/apiserver"
+    tag: ""
+  # content-fetcher is what the operator's compiler references via
+  # --content-fetcher-image. Bundles /entry — see CLAUDE.md §11.
+  contentFetcher:
+    repository: "ghcr.io/hinskii/kubetest-alt/content-fetcher"
+    tag: ""
+  # Three platform-built tool images (CLAUDE.md §3 exception list).
+  # Pinned here so a chart install lands a coherent set — every tool
+  # template's default image tag is exactly this chart's release.
+  gatling:
+    repository: "ghcr.io/hinskii/kubetest-alt/gatling"
+    tag: "3.9.5"    # empirically pinned in step 15B; independent of appVersion
+  soapui:
+    repository: "ghcr.io/hinskii/kubetest-alt/soapui"
+    tag: "5.7.2"
+  kubepug:
+    repository: "ghcr.io/hinskii/kubetest-alt/kubepug"
+    tag: "1.7.1"
+
+# Leader election defaults ON — the plan mandates it for scheduler +
+# TestTrigger dispatcher paths so exactly one replica creates TestRuns.
+# Toggle only for single-replica dev clusters where the extra API
+# server load isn't worth the safety.
+leaderElection:
+  enabled: true
+
+# Webhook TLS. Two flavors:
+#   - certManager.enabled=false (DEFAULT): helm generates a self-signed
+#     Secret via genSelfSignedCert, plumbs caBundle into the Validating/
+#     MutatingWebhookConfiguration. This is the DEV DEFAULT so `kind e2e`
+#     doesn't need cert-manager installed — the e2e budget is 15 min
+#     and cert-manager alone adds 30-60s + moving parts.
+#   - certManager.enabled=true: emit a cert-manager Certificate + Issuer,
+#     let cert-manager rotate. Production shape.
+webhook:
+  service:
+    port: 443
+    targetPort: 9443
+  certManager:
+    enabled: false
+    # Values below only apply when certManager.enabled=true.
+    issuerRef:
+      # A self-signed cluster issuer is the simplest production
+      # fallback; production installs override to a Let's Encrypt /
+      # ACME issuer their platform team owns.
+      name: kubetest-alt-selfsigned
+      kind: ClusterIssuer
+
+operator:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # Extra flags appended to the operator's argv. Common overrides:
+  #   - --logs-enabled       enable pod-log streaming to MinIO
+  #   - --scheduler-tick-interval=15s
+  #   - --trigger-gate-eval-interval=500ms
+  extraArgs: []
+  # Prometheus /metrics on the manager's endpoint. Kept on HTTPS with
+  # controller-runtime's auth filter by default; disable secure to
+  # scrape from a Prometheus without ClusterRole for token review.
+  metrics:
+    bindAddress: ":8443"
+    secure: true
+
+apiserver:
+  replicas: 1
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  # Extra flags appended to the apiserver's argv (--namespace, etc.).
+  extraArgs: []
+
+# MinIO wiring. When endpoint is empty AND minio.enabled=false, the
+# operator runs in "no artifact scraping / no log streaming" mode —
+# fine for dev. The subchart (minio.enabled=true) points these back
+# at the in-cluster service.
+minio:
+  enabled: false
+  # These flow into --minio-endpoint / --minio-bucket / --minio-secret-name.
+  endpoint: ""
+  bucket: "kubetest-artifacts"
+  secretName: ""      # Secret in the run's namespace with S3 creds
+  useSSL: false
+
+# Postgres wiring. Empty DSN + disabled subchart = no run-history
+# persistence — the reconciler runs correct but archived-runs listing
+# in the API server returns cluster-only entries.
+postgresql:
+  enabled: false
+  dsn: ""
+
+# Optional NetworkPolicy. Defaults OFF. When enabled, denies ingress
+# except from the same namespace + Prometheus scraper (label-selected).
+networkPolicy:
+  enabled: false
+  prometheusNamespace: "monitoring"

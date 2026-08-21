@@ -1,0 +1,184 @@
+{{/*
+Operator ClusterRole.
+
+The rules block below MUST stay byte-identical to the `rules:` section
+of config/rbac/role.yaml (which controller-gen produces from
++kubebuilder:rbac markers). Drift = the chart granting more/less than
+the operator actually needs, which is a real bug (over-privileged or
+crash-on-startup).
+
+Enforcement lives in charts/kubetest-alt/testdata/rbac_parity_test.go:
+parse both files, compare rule sets, refuse drift.
+
+Update flow when adding a new rule:
+  1. Add / edit the +kubebuilder:rbac marker in internal/**
+  2. `make manifests`  (regenerates config/rbac/role.yaml)
+  3. Copy the new rules block below (or run the tiny helper the parity
+     test suggests in its failure message).
+*/}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-manager-role
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - testruns
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - testruns/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - testruns/status
+  - testtriggers/status
+  - webhooks/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - tests
+  - testtemplates
+  - webhooks
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - tests.kubetest.io
+  resources:
+  - testtriggers
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubetest-alt.fullname" . }}-manager-role
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubetest-alt.operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+---
+{{/* Leader-election Lease. controller-runtime hard-codes coordination.k8s.io/leases. */}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+rules:
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-leader-election
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "kubetest-alt.fullname" . }}-leader-election
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kubetest-alt.operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

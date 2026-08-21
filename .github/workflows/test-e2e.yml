@@ -4,16 +4,27 @@ on:
   push:
   pull_request:
 
-permissions: {}
+# Only least-privilege — the job reads code + pushes nothing. Cached
+# tokens NOT allowed to touch write-scoped APIs.
+permissions:
+  contents: read
+
+# One in-flight run per ref — the kind cluster is per-runner, but back-
+# to-back pushes shouldn't queue up 15-min jobs behind each other.
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-e2e:
-    permissions:
-      contents: read
-    name: Run on Ubuntu
+    name: Kind e2e (chart install + 5 scenarios + metrics scrape)
     runs-on: ubuntu-latest
+    # Total budget from plan step 16: 15 min. If a real run exceeds
+    # this budget, split PR-gate/nightly per the plan escape hatch
+    # noted in the report. `timeout-minutes` here is a hard kill.
+    timeout-minutes: 20
     steps:
-      - name: Clone the code
+      - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
@@ -22,17 +33,37 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
+          cache: true
 
-      - name: Install the latest version of kind
+      - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          kind version
 
-      - name: Verify kind installation
-        run: kind version
-
-      - name: Running Test e2e
+      - name: Install helm
         run: |
-          go mod tidy
-          make test-e2e
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm version --short
+
+      # Charts + helm-render tests run without kind — cheap gate that
+      # fails PRs before the expensive kind path even starts.
+      - name: Chart lint + RBAC parity + golden render
+        run: |
+          go test -race ./test/helm/...
+
+      - name: Run e2e (5 scenarios + metrics scrape + zero-error logs)
+        run: |
+          ./test/e2e/run.sh 2>&1 | tee /tmp/e2e.log
+          # Emit collected phase timings for the plan's per-scenario table.
+          grep -E "^\[e2e\].*PHASE_TIMING|SCENARIO_TIMING" /tmp/e2e.log > /tmp/e2e-timings.txt || true
+          echo "== timings summary =="
+          cat /tmp/e2e-timings.txt
+
+      - name: Upload e2e log artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-log
+          path: /tmp/e2e.log
+          retention-days: 7

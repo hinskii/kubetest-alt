@@ -96,6 +96,7 @@ rules:
   - tests.kubetest.io
   resources:
   - tests
+  - testtemplates
   - webhooks
   verbs:
   - get

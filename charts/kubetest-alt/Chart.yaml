@@ -1,0 +1,43 @@
+apiVersion: v2
+name: kubetest-alt
+description: |
+  In-house Kubernetes-native test execution platform. Installs the
+  operator, the thin API server, all CRDs (Test, TestRun, TestTemplate,
+  TestTrigger, Webhook), RBAC, and webhook TLS certificates. Optional
+  dev subcharts (MinIO, Postgres) for zero-dependency local runs.
+type: application
+
+# appVersion PINS every platform image tag by default: operator,
+# apiserver, content-fetcher, and the three platform-built tool
+# images (gatling, soapui, kubepug — see CLAUDE.md §3 exceptions).
+# Overriding one image on the values side without bumping appVersion
+# is allowed but flagged as a stale-pin anti-pattern.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.29.0-0"
+
+home: https://github.com/hinskii/kubetest-alt
+sources:
+  - https://github.com/hinskii/kubetest-alt
+
+# Deliberately no subchart dependencies. MinIO and Postgres are
+# operationally separate — production installs external instances and
+# passes endpoints via values. Dev/e2e installs the bitnami charts
+# (or spins up MinIO/Postgres via kubectl/helm separately) alongside
+# this chart. Keeping the chart self-contained means:
+#   * `helm template` works offline without `helm dependency build`
+#   * `helm install` doesn't pull the internet on every install
+#   * chart consumers can pick their own MinIO/Postgres provider
+#   * upgrade cadence stays independent from bitnami's release train
+# See docs/quickstart.md for the "install MinIO + Postgres separately"
+# recipe used by the kind e2e job.
+
+maintainers:
+  - name: kubetest-alt maintainers
+    url: https://github.com/hinskii/kubetest-alt
+
+annotations:
+  # Rendered as "artifact-hub"-style category on chart repos that
+  # respect it. Purely cosmetic.
+  category: DevelopmentTools

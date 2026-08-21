@@ -1,16 +1,56 @@
 # kubetest-alt
-// TODO(user): Add simple overview of use/purpose
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+In-house Kubernetes-native test execution platform. Operator +
+API server + CRDs (`Test`, `TestRun`, `TestTemplate`, `TestTrigger`,
+`Webhook`), a curated 15-template tool catalog (k6, cypress, jmeter,
+gatling, playwright, pytest, gradle, maven, ...), cron + Kubernetes
+event triggers, MinIO artifact + log storage, Postgres run history,
+outbound webhooks, and Prometheus metrics — packaged as a single Helm
+chart.
 
-## Getting Started
+Alternative to Testkube's OSS agent with the dashboard Testkube keeps
+behind their paid Control Plane. See [CLAUDE.md](CLAUDE.md) for the
+full architecture rationale.
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+## Quickstart
+
+Zero-to-first-run in 5 commands (kind + helm + kubectl on PATH):
+
+```sh
+# 1. Cluster
+kind create cluster --name kubetest-alt
+
+# 2. Chart install (uses the chart's helm-generated self-signed webhook
+#    certs; no cert-manager dependency for dev)
+helm install kt charts/kubetest-alt/ --namespace kubetest-alt --create-namespace --wait
+
+# 3. Apply the catalog (15 TestTemplates + one sample Test each)
+kubectl apply -k config/samples/tools/
+
+# 4. Fire a run — creates a TestRun against the sample-k6 Test
+kubectl create -f - <<EOF
+apiVersion: tests.kubetest.io/v1alpha1
+kind: TestRun
+metadata: { generateName: quickstart-, namespace: default }
+spec: { testRef: sample-k6, source: cli }
+EOF
+
+# 5. Watch it complete
+kubectl get testruns -w
+```
+
+Optional add-ons (each independent — install only what you use):
+
+- **MinIO** for artifacts + logs: `helm install minio oci://registry-1.docker.io/bitnamicharts/minio ...`
+- **Postgres** for run history: `helm install postgres oci://registry-1.docker.io/bitnamicharts/postgresql ...`
+
+Then rerun `helm upgrade kt charts/kubetest-alt/ -f your-values.yaml`.
+
+## Prerequisites
+- Go 1.26+
+- Docker 17.03+
+- kubectl 1.29+
+- Kubernetes 1.29+ cluster (kind, k3s, EKS, GKE, ...)
 
 ### To Deploy on the cluster
 **Build and push your image to the location specified by `IMG`:**

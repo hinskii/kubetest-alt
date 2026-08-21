@@ -27,6 +27,8 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 )
 
+// +kubebuilder:rbac:groups=tests.kubetest.io,resources=testtemplates,verbs=get;list;watch
+
 // ClientTemplateStore is the production TemplateStore backed by the
 // controller-runtime client (goes through the manager cache, so lookups
 // are O(1) after initial sync).

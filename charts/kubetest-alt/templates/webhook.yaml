@@ -1,0 +1,172 @@
+{{/*
+Webhook TLS + configurations. Consolidated into ONE template so the
+same CA bundle is used for both the Secret and every WebhookConfig's
+caBundle in a single helm render pass.
+
+Two flavors, chosen by values.webhook.certManager.enabled:
+
+  false (DEV DEFAULT): helm's genSelfSignedCert produces a fresh
+    (cert, key, ca) triple, stores tls.crt/tls.key/ca.crt in a Secret,
+    and inlines ca.crt into every clientConfig.caBundle. Kind e2e uses
+    this path — the plan's ~15 min budget can't afford a cert-manager
+    install. `lookup` on the existing Secret reuses the same bundle
+    across `helm upgrade` so certs stay stable unless the operator
+    explicitly rotates them (delete the Secret to force).
+
+  true: emits a cert-manager Certificate; ValidatingWebhookConfig +
+    MutatingWebhookConfig get the cert-manager.io/inject-ca-from
+    annotation so cert-manager rotates + re-injects. No inline
+    caBundle (cert-manager stomps it).
+
+Regardless of flavor, the Secret name is stable: <fullname>-webhook-tls.
+The operator's Deployment mounts it verbatim.
+*/}}
+
+{{- $svc := printf "%s-webhook" (include "kubetest-alt.fullname" .) -}}
+{{- $secretName := printf "%s-webhook-tls" (include "kubetest-alt.fullname" .) -}}
+{{- $svcFQDN := printf "%s.%s.svc" $svc .Release.Namespace -}}
+{{- $svcFQDNCluster := printf "%s.cluster.local" $svcFQDN -}}
+
+{{/* Compute (cert, key, ca) ONCE — reuse existing Secret if present. */}}
+{{- $existing := (lookup "v1" "Secret" .Release.Namespace $secretName) -}}
+{{- $cert := "" -}}
+{{- $key := "" -}}
+{{- $caPEM := "" -}}
+{{- if and (not .Values.webhook.certManager.enabled) $existing $existing.data -}}
+{{- $cert = index $existing.data "tls.crt" | b64dec -}}
+{{- $key = index $existing.data "tls.key" | b64dec -}}
+{{- $caPEM = index $existing.data "ca.crt" | b64dec -}}
+{{- else if not .Values.webhook.certManager.enabled -}}
+{{- $ca := genCA (printf "%s-ca" (include "kubetest-alt.fullname" .)) 3650 -}}
+{{- $signed := genSignedCert $svcFQDN nil (list $svcFQDN $svcFQDNCluster) 3650 $ca -}}
+{{- $cert = $signed.Cert -}}
+{{- $key = $signed.Key -}}
+{{- $caPEM = $ca.Cert -}}
+{{- end -}}
+
+{{- if .Values.webhook.certManager.enabled }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-webhook
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+spec:
+  secretName: {{ $secretName }}
+  dnsNames:
+    - {{ $svcFQDN }}
+    - {{ $svcFQDNCluster }}
+  issuerRef:
+    name: {{ .Values.webhook.certManager.issuerRef.name }}
+    kind: {{ .Values.webhook.certManager.issuerRef.kind }}
+{{- else }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $cert | b64enc }}
+  tls.key: {{ $key | b64enc }}
+  ca.crt:  {{ $caPEM | b64enc }}
+{{- end }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-validating
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "kubetest-alt.fullname" . }}-webhook
+  {{- end }}
+webhooks:
+  - name: vtest-v1alpha1.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-tests-kubetest-io-v1alpha1-test
+        port: {{ .Values.webhook.service.port }}
+      {{- if not .Values.webhook.certManager.enabled }}
+      caBundle: {{ $caPEM | b64enc }}
+      {{- end }}
+    rules:
+      - apiGroups: ["tests.kubetest.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["tests"]
+  - name: vtestrun-v1alpha1.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate-tests-kubetest-io-v1alpha1-testrun
+        port: {{ .Values.webhook.service.port }}
+      {{- if not .Values.webhook.certManager.enabled }}
+      caBundle: {{ $caPEM | b64enc }}
+      {{- end }}
+    rules:
+      - apiGroups: ["tests.kubetest.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["testruns"]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ include "kubetest-alt.fullname" . }}-mutating
+  labels:
+    {{- include "kubetest-alt.labels" . | nindent 4 }}
+  {{- if .Values.webhook.certManager.enabled }}
+  annotations:
+    cert-manager.io/inject-ca-from: {{ .Release.Namespace }}/{{ include "kubetest-alt.fullname" . }}-webhook
+  {{- end }}
+webhooks:
+  - name: mtest-v1alpha1.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-tests-kubetest-io-v1alpha1-test
+        port: {{ .Values.webhook.service.port }}
+      {{- if not .Values.webhook.certManager.enabled }}
+      caBundle: {{ $caPEM | b64enc }}
+      {{- end }}
+    rules:
+      - apiGroups: ["tests.kubetest.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["tests"]
+  - name: mtestrun-v1alpha1.kb.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: Fail
+    clientConfig:
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /mutate-tests-kubetest-io-v1alpha1-testrun
+        port: {{ .Values.webhook.service.port }}
+      {{- if not .Values.webhook.certManager.enabled }}
+      caBundle: {{ $caPEM | b64enc }}
+      {{- end }}
+    rules:
+      - apiGroups: ["tests.kubetest.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["testruns"]
