@@ -82,9 +82,6 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
 			ReasonCompileError, fmt.Sprintf("composite resolvedSpec unmarshal: %v", err))
 	}
-	if run.Status.Steps == nil {
-		run.Status.Steps = map[string]testsv1alpha1.StepResult{}
-	}
 	// Promote to Running on first pass (matches leaf-run semantics).
 	if run.Status.Phase != testsv1alpha1.PhaseRunning {
 		run.Status.Phase = testsv1alpha1.PhaseRunning
@@ -97,6 +94,15 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 		}
 		// Fall through — we've written status; the informer will
 		// re-enqueue, but we can also continue processing now.
+	}
+	// Initialize Steps map AFTER any Status().Update above — that call
+	// replaces `run` with the server response, and an empty map round-
+	// trips as null JSON → nil Go map. Writing to a nil map panics with
+	// "assignment to entry in nil map". This guard is deliberately AFTER
+	// the promote-Update so a re-read from the API can't reintroduce nil
+	// under us on the second pass either.
+	if run.Status.Steps == nil {
+		run.Status.Steps = map[string]testsv1alpha1.StepResult{}
 	}
 
 	// Enumerate child TestRuns owned by this parent so we can group by step.
