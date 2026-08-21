@@ -46,6 +46,12 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	# Mirror generated CRDs into the chart's crds/ directory so Helm
+	# installs the same schema the operator was built against. Chart's
+	# crds/ is authoritative for Helm — a stale copy silently rejects
+	# new fields at admission (step-17 regression: composite spec.steps
+	# was rejected by the OLD schema shipped in the chart).
+	cp config/crd/bases/*.yaml charts/kubetest-alt/crds/
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
