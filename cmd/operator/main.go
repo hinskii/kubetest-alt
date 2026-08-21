@@ -450,6 +450,7 @@ func main() {
 
 	if err := (&controller.TestRunReconciler{
 		Client:       mgr.GetClient(),
+		APIReader:    mgr.GetAPIReader(), // orphan-detection cache-lag guard
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compilerOpts,
 		Results:      resultReader, // step 07: real MinIO reader when configured

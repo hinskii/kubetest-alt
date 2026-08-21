@@ -28,7 +28,12 @@ spec:
             - --listen={{ printf ":%d" (int .Values.apiserver.service.port) }}
             {{- if .Values.minio.endpoint }}
             - --minio-endpoint={{ .Values.minio.endpoint }}
-            - --minio-bucket={{ .Values.minio.bucket }}
+            # apiserver splits artifacts + logs buckets (operator uses one
+            # --minio-bucket; they diverged in step 07/08). We pass the
+            # same value into both to preserve chart simplicity — flip to
+            # a values.minio.logsBucket if the two ever need separation.
+            - --minio-artifacts-bucket={{ .Values.minio.bucket }}
+            - --minio-logs-bucket=kubetest-logs
             {{- if .Values.minio.useSSL }}
             - --minio-use-ssl
             {{- end }}

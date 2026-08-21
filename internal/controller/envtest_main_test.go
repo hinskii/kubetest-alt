@@ -346,6 +346,7 @@ func runTests(m *testing.M) (int, error) {
 	fakeRunStore = NewRecordingRunStore()
 	real := &TestRunReconciler{
 		Client:       mgr.GetClient(),
+		APIReader:    mgr.GetAPIReader(), // orphan-detection cache-lag guard
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compiler.Options{ContentFetcherImage: "test/content-fetcher:v0"},
 		Results:      fakeResults,

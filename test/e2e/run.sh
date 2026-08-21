@@ -174,7 +174,7 @@ kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket --time
 phase_end "minio_deploy"
 
 phase_start "helm_install"
-helm upgrade --install kt "$CHART_DIR" \
+if ! helm upgrade --install kt "$CHART_DIR" \
   --namespace "$RELEASE_NS" --create-namespace \
   --set images.registry="" \
   --set images.pullPolicy=Never \
@@ -190,7 +190,16 @@ helm upgrade --install kt "$CHART_DIR" \
   --set minio.secretName=minio-creds \
   --set minio.bucket=kubetest-artifacts \
   --set "apiserver.extraArgs={--namespace=kubetest-e2e}" \
-  --wait --timeout=5m
+  --wait --timeout=5m; then
+  log "::error::helm install failed — dumping cluster state for diagnosis"
+  kubectl -n "$RELEASE_NS" get pods,deploy,jobs -o wide || true
+  kubectl -n "$RELEASE_NS" describe pods || true
+  for pod in $(kubectl -n "$RELEASE_NS" get pods -o name 2>/dev/null); do
+    log "--- logs for $pod ---"
+    kubectl -n "$RELEASE_NS" logs "$pod" --all-containers=true --tail=200 || true
+  done
+  exit 1
+fi
 kubectl -n "$RELEASE_NS" get all
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=180s
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=180s

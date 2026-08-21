@@ -89,6 +89,15 @@ type TestRunReconciler struct {
 	// so we still get a retry — the RunStore's UID upsert keeps it idempotent).
 	RunStore RunStorePersister
 
+	// APIReader is a cache-bypassing client used ONLY to disambiguate the
+	// informer-lag race on orphan-job detection: after createJob() sets
+	// jobName in Status, the very next reconcile may see the Job as
+	// NotFound because the informer hasn't observed it yet. Direct API
+	// reads avoid classifying a healthy run as OrphanJobMissing. Nil is
+	// tolerated — cmd/operator wires it from mgr.GetAPIReader(); envtest
+	// wires it from a direct client. See observeOrCreateJob.
+	APIReader client.Reader
+
 	// TemplateStore resolves spec.use[] references to TestTemplate CRs.
 	// Nil disables template resolution (spec.use is treated as an error);
 	// production wires a client-backed store (see NewClientTemplateStore).
@@ -422,8 +431,25 @@ func (r *TestRunReconciler) observeOrCreateJob(ctx context.Context, logger inter
 
 	if apierrors.IsNotFound(err) {
 		if run.Status.JobName != "" {
-			// We've created (or observed) the Job before; now it's gone.
-			// §15.3 orphan detection.
+			// Cache-vs-live disambiguation: the informer may not have
+			// observed a just-created Job on the reconcile immediately
+			// after createJob wrote jobName to Status. Confirm the Job
+			// is genuinely gone via a cache-bypassing read before
+			// declaring OrphanJobMissing (§15.3). Under envtest load
+			// this race manifested as a false-positive orphan on the
+			// TestCatalog_ApplyAllTemplatesAndSamples run for one of
+			// the samples.
+			if r.APIReader != nil {
+				var live batchv1.Job
+				if lerr := r.APIReader.Get(ctx, jobKey, &live); lerr == nil {
+					// Job exists live — cache is stale, requeue and let
+					// the informer catch up.
+					return ctrl.Result{RequeueAfter: 500 * time.Millisecond}, nil
+				} else if !apierrors.IsNotFound(lerr) {
+					return ctrl.Result{}, lerr
+				}
+			}
+			// Genuinely gone.
 			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
 				ReasonOrphanJobMissing,
 				"Job was deleted before status persisted; run cannot continue")
