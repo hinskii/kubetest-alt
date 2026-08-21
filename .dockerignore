@@ -1,11 +1,26 @@
 # More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore everything by default and re-include only needed files
+# Ignore everything by default and re-include only what the platform
+# binaries need at build time. The default-deny + explicit-allow shape
+# is what keeps kubetest images small and reproducible.
+
 **
 
-# Re-include Go source files (but not *_test.go)
+# Go source files (but not *_test.go — tests never run inside the
+# runtime image).
 !**/*.go
 **/*_test.go
 
-# Re-include Go module files
+# Go module files
 !go.mod
 !go.sum
+
+# Files embedded via //go:embed. Every entry below MUST correspond to
+# an actual embed directive in cmd/** or internal/**. Adding a new
+# embed pattern → add its file glob here or the build fails inside
+# Docker with "pattern X: no matching files found". Regression from
+# step-16 CI: internal/store/migrations/*.sql was excluded → operator
+# build inside Dockerfile failed with the embed error, workflow red.
+#
+# Grep for //go:embed to keep this list honest:
+#   grep -rn "go:embed" internal/ pkg/ cmd/
+!**/*.sql
