@@ -466,7 +466,16 @@ func TestEntry_TimeoutReclassifiesAsError(t *testing.T) {
 	start := time.Now()
 	require.NoError(t, e.Execute(context.Background()))
 	elapsed := time.Since(start)
-	assert.Less(t, elapsed, 3*time.Second, "must exit around TimeoutSeconds")
+	// 8s budget (was 3s) — the assertion's intent is "wrapper exits
+	// due to timeout, not stuck 15 min later", so any bound well below
+	// the sleep 5s child + wrapper shutdown overhead is enough. Slower
+	// shared runners (GH Actions ubuntu-latest under load) can spend
+	// the full 5s waiting for the sh child's sleep to finish after
+	// TerminateProcess arrives — Go's exec.CommandContext SIGKILLs the
+	// direct child (sh) but the orphaned sleep runs to completion
+	// unless a process group is used. Bumping the budget avoids
+	// intermittent CI flakes without changing behavior.
+	assert.Less(t, elapsed, 8*time.Second, "must exit around TimeoutSeconds")
 	got := readResult(t, e.ResultDir)
 	assert.Equal(t, PhaseError, got.Phase)
 	assert.Contains(t, got.ErrorMessage, "timeout")

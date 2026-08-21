@@ -14,6 +14,7 @@ RUN go mod download
 
 COPY api/ ./api/
 COPY pkg/ ./pkg/
+COPY internal/ ./internal/
 COPY cmd/entry/ ./cmd/entry/
 
 # Same CGO_ENABLED=0 story as executors/k6/Dockerfile — Alpine is musl.

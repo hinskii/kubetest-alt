@@ -120,6 +120,13 @@ func (r *TestTriggerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return errors.New("TestTriggerReconciler.Mapper is required")
 	}
 	if r.Recorder == nil {
+		// GetEventRecorderFor is marked deprecated in controller-runtime
+		// v0.24 in favor of GetEventRecorder (new-generation events API),
+		// but migrating requires changing every .Eventf call site
+		// (regarding/related/action/note vs the old object/type/reason/
+		// message shape). Deferred to a step-14-style refactor; the old
+		// API still works and is not scheduled for removal in c-r 0.x.
+		//nolint:staticcheck // SA1019: intentional use of legacy events API — see comment above.
 		r.Recorder = mgr.GetEventRecorderFor("testtrigger-controller")
 	}
 	r.informers = newInformerManager(r.Dyn, r.Mapper)

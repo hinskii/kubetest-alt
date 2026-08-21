@@ -67,8 +67,12 @@ phase_end "kind_create"
 phase_start "docker_build"
 docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
 docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
+# Content-fetcher Dockerfile COPYs go.mod, go.sum, api/, pkg/, cmd/entry/
+# — all repo-root paths. Build context MUST be repo root; the previous
+# `executors/content-fetcher` context left every COPY failing with
+# "/api: not found".
 docker build -f executors/content-fetcher/Dockerfile \
-             -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" executors/content-fetcher
+             -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" .
 # Assert each image landed — earlier runs mysteriously passed in 65s
 # which is impossible if the builds actually ran; a missing image at
 # this point should now shout, not silently proceed.
