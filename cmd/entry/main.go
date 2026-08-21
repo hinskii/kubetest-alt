@@ -189,7 +189,9 @@ func findJTL(workingDir string) (string, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return "", fmt.Errorf("multiple JTL files found under %s (%v) — set the tool to write exactly one, or -l /data/repo/out.jtl", workingDir, matches)
+		return "", fmt.Errorf(
+			"multiple JTL files found under %s (%v) — set the tool to write exactly one, or -l /data/repo/out.jtl",
+			workingDir, matches)
 	}
 }
 
