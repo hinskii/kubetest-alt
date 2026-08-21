@@ -204,8 +204,16 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 	}
 	require.NoError(t, c.Create(ctx, test))
 	run := &testsv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{Name: "e2e-k6-pass-run", Namespace: workloadNS},
-		Spec:       testsv1alpha1.TestRunSpec{TestRef: "e2e-k6-pass", Source: "api"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "e2e-k6-pass-run",
+			Namespace: workloadNS,
+			// transitionTerminal reads the tool label from TestRun.Labels
+			// (NOT from the Test — the reconciler folds an empty label to
+			// tool="other" so the metrics scrape assertion for
+			// kubetest_runs_total{tool="k6"} would miss without this).
+			Labels: map[string]string{"kubetest.io/tool": "k6"},
+		},
+		Spec: testsv1alpha1.TestRunSpec{TestRef: "e2e-k6-pass", Source: "api"},
 	}
 	require.NoError(t, c.Create(ctx, run))
 	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 3*time.Minute)

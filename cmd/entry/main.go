@@ -37,10 +37,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/hinskii/kubetest-alt/internal/scraper"
@@ -120,10 +124,22 @@ func junitProcessorFromDir(workingDir string) (executor.TestCounts, error) {
 }
 
 // jtlProcessorFromDir wraps pkg/verdict/jtl.Load into the signature
-// Entry.JTLProcessor expects. JTL file location convention: workingDir/out.jtl.
-// Templates using JMeter set -l out.jtl in their args by convention.
+// Entry.JTLProcessor expects. Resolution order:
+//  1. <workingDir>/out.jtl — the "simple template" convention.
+//  2. <workingDir>/results/*.jtl (any single match) — the shipped
+//     jmeter template writes -l /data/repo/results/jmeter.jtl; a
+//     glob catches that + any other file name a user might pick
+//     (results/run1.jtl, results/loadtest.jtl, …).
+//  3. <workingDir>/**/*.jtl (any single match) — long tail.
+//
+// Multiple JTLs across (2)+(3) is an ambiguity error — the wrapper
+// can't guess which one is the primary verdict input.
 func jtlProcessorFromDir(workingDir string, threshold float64) (executor.JTLProcessorResult, error) {
-	agg, err := verdictjtl.Load(workingDir + "/out.jtl")
+	path, err := findJTL(workingDir)
+	if err != nil {
+		return executor.JTLProcessorResult{}, err
+	}
+	agg, err := verdictjtl.Load(path)
 	if err != nil {
 		return executor.JTLProcessorResult{}, err
 	}
@@ -135,6 +151,46 @@ func jtlProcessorFromDir(workingDir string, threshold float64) (executor.JTLProc
 		Threshold:     threshold,
 		Passed:        rate <= threshold,
 	}, nil
+}
+
+// findJTL resolves the JTL file the wrapper should read. Templates
+// differ on where they write it (`out.jtl` vs `results/<name>.jtl` vs
+// nested); this normalizes the lookup so both styles work without a
+// per-tool code path. Returns ErrNotFound if no *.jtl file exists,
+// or an "ambiguous" error if 2+ candidates are visible below workingDir
+// (the wrapper refuses to guess which one is the primary verdict input).
+func findJTL(workingDir string) (string, error) {
+	// Fast path 1: <workingDir>/out.jtl (legacy convention).
+	if _, err := os.Stat(filepath.Join(workingDir, "out.jtl")); err == nil {
+		return filepath.Join(workingDir, "out.jtl"), nil
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	// Walk workingDir for any *.jtl file (bounded by workingDir subtree).
+	var matches []string
+	walkErr := filepath.WalkDir(workingDir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // best-effort; skip unreadable subtrees
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(d.Name()), ".jtl") {
+			matches = append(matches, p)
+		}
+		return nil
+	})
+	if walkErr != nil {
+		return "", walkErr
+	}
+	switch len(matches) {
+	case 0:
+		return "", verdictjtl.ErrNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		return "", fmt.Errorf("multiple JTL files found under %s (%v) — set the tool to write exactly one, or -l /data/repo/out.jtl", workingDir, matches)
+	}
 }
 
 // newScraperFromEnv builds the wrapper-side artifact scraper (step 07) when
