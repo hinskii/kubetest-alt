@@ -634,16 +634,18 @@ template — mitigation lives in the catalog, NOT in Go runner code.
   real counts from `results.xml` and overrides the capped exit code.
   Regression-guarded in `TestClassify_ExitCodeCapAt255_CountsComeFromJUnit`
   (moved to catalog-side once step 15 lands).
-- **Locust:** exits 0 by default regardless of failures unless
-  `--exit-code-on-error` / `--check-fail-ratio` are set. Template MUST
-  either (a) add `--exit-code-on-error 1` to args, or (b) once we grow
-  a `csv` verdict processor, wire `spec.verdict.from: csv`. First
-  approach ships in step 15; second is future work if the flag path
-  proves inadequate.
-- **Missing `result.json`** (wrapper crash, OOM, SIGKILL): fallback
-  path = container exit code + pod
-  `containerStatuses[].lastState.terminated` → phase `error` with
-  reason. Never assume result.json exists.
+- **Locust:** exit code is honest since ~2.15 (verified 2.42.1): a
+  headless run with request failures exits 1, so the template uses the
+  default exit-code verdict and sets no `--exit-code-on-error` flag
+  (`config/templates/locust.yaml`). Stricter policies (failure ratio,
+  latency) go in the Test's args: `--check-fail-ratio`,
+  `--check-avg-response-time`.
+- **Missing `result.json`** (no object storage, upload failed): the
+  wrapper also writes a compact verdict to `/dev/termination-log`; the
+  operator reads it from `containerStatuses[].state.terminated.message`,
+  so passed/failed survive. With no verdict at all (wrapper crash, OOM,
+  SIGKILL) → phase `error` with the container's exit code and reason.
+  Never assume result.json exists.
 
 ### 15.3 Job/Pod lifecycle
 - **OOMKilled (137):** no result.json, no artifacts. Read `terminated.reason=OOMKilled` from pod status → phase `error` ("OOMKilled — raise spec.container.resources"), NOT `failed`. **Cypress-specific /dev/shm requirement** moved to the cypress TestTemplate (step 15): the template supplies a memory-backed emptyDir via `spec.pod.volumes`. The compiler no longer has a per-tool branch for this.
