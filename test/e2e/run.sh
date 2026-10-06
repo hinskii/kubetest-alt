@@ -336,7 +336,7 @@ EOF
   phase_end "catalog_target"
 
   phase_start "catalog_test"
-  CATALOG_TOOLS="$CATALOG_TOOLS" go test -tags=catalog -count=1 -v -timeout=60m \
+  CATALOG_TOOLS="$CATALOG_TOOLS" CATALOG_GIT_REVISION="${CATALOG_GIT_REVISION:-}" go test -tags=catalog -count=1 -v -timeout=60m \
     -parallel "$CATALOG_PARALLEL" ./test/catalog/...
   phase_end "catalog_test"
   log "catalog passed: $CATALOG_TOOLS"

@@ -103,14 +103,18 @@ jobs:
         env:
           E2E_SUITE: catalog
           CATALOG_TOOLS: ${{ matrix.tool }}
+          # Also run each tool's sample (git content) at this exact commit.
+          CATALOG_GIT_REVISION: ${{ github.sha }}
         run: |
           set -euo pipefail
           ./test/e2e/run.sh 2>&1 | tee /tmp/catalog.log
           # Guard against a silent skip: the tool's timing marker must exist.
-          grep -q "CATALOG_TIMING tool=${{ matrix.tool }} " /tmp/catalog.log || {
-            echo "::error::no CATALOG_TIMING marker for ${{ matrix.tool }} — the case did not run"
-            exit 1
-          }
+          for marker in "${{ matrix.tool }}" "${{ matrix.tool }}-git"; do
+            grep -q "CATALOG_TIMING tool=$marker " /tmp/catalog.log || {
+              echo "::error::no CATALOG_TIMING marker for $marker — the case did not run"
+              exit 1
+            }
+          done
 
       - name: Upload log
         if: always() && steps.want.outputs.run == 'true'

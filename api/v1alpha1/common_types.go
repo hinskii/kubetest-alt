@@ -106,6 +106,9 @@ type GitContent struct {
 	Revision string `json:"revision,omitempty"`
 	// +optional
 	Paths []string `json:"paths,omitempty"`
+	// MountPath is where the repository is checked out: relative to /data
+	// or absolute inside it. Defaults to /data/repo, where catalog
+	// templates look for files.
 	// +optional
 	MountPath string `json:"mountPath,omitempty"`
 	// +kubebuilder:validation:Enum=basic;header;ssh

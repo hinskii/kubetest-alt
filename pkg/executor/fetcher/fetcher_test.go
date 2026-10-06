@@ -161,3 +161,48 @@ func TestShareWithAnyUID_DoesNotFollowSymlinksOut(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "target outside the volume untouched")
 }
+
+// Git content used to be checked out into the data dir itself (/data);
+// templates read /data/repo/<path>, so every git-backed Test ran its tool
+// on missing files. Default must be <data>/repo; mountPath overrides it.
+func TestFetch_GitLandsInRepoByDefault(t *testing.T) {
+	gitAvailable(t)
+	src := makeLocalRepo(t, map[string]string{"k6/script.js": "export default function () {}"})
+	f := NewFetcher()
+	f.Stdout, f.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
+
+	data := t.TempDir()
+	require.NoError(t, f.Fetch(context.Background(), Content{Git: &GitContent{URI: "file://" + src, Revision: "main"}}, data))
+	assert.FileExists(t, filepath.Join(data, "repo", "k6", "script.js"))
+	assert.NoFileExists(t, filepath.Join(data, "k6", "script.js"), "nothing at the data-dir root")
+
+	custom := t.TempDir()
+	require.NoError(t, f.Fetch(context.Background(),
+		Content{Git: &GitContent{URI: "file://" + src, Revision: "main", MountPath: "src/app"}}, custom))
+	assert.FileExists(t, filepath.Join(custom, "src", "app", "k6", "script.js"))
+}
+
+func TestGitMountDir(t *testing.T) {
+	cases := []struct {
+		mount, want string
+		err         bool
+	}{
+		{"", "/data/repo", false},
+		{"repo", "/data/repo", false},
+		{"src/app", "/data/src/app", false},
+		{"/data/repo", "/data/repo", false},
+		{"/data", "/data", false},
+		{"../etc", "", true},
+		{"/etc", "", true},
+		{"repo/../../x", "", true},
+	}
+	for _, c := range cases {
+		got, err := gitMountDir("/data", c.mount)
+		if c.err {
+			assert.Error(t, err, c.mount)
+			continue
+		}
+		require.NoError(t, err, c.mount)
+		assert.Equal(t, c.want, got, c.mount)
+	}
+}

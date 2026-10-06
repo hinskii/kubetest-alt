@@ -43,6 +43,11 @@ type GitContent struct {
 	Revision string   `json:"revision,omitempty"`
 	Paths    []string `json:"paths,omitempty"` // sparse-checkout paths
 
+	// MountPath is where the repository is checked out: relative to the
+	// data dir, or absolute inside it. Empty → DefaultGitMount ("repo",
+	// i.e. /data/repo — where every catalog template looks).
+	MountPath string `json:"mountPath,omitempty"`
+
 	// AuthType selects the credential flow: "basic" / "header" / "ssh".
 	// Empty means "public repo, no auth".
 	AuthType string `json:"authType,omitempty"`

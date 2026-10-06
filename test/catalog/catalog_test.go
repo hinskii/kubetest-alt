@@ -100,6 +100,54 @@ func TestCatalog(t *testing.T) {
 			t.Parallel()
 			runCase(t, c, tool)
 		})
+		// The same project once more, fetched from git exactly as the
+		// sample in config/samples/tools does — the path every real user
+		// takes. CATALOG_GIT_REVISION pins the commit under test (CI sets
+		// it to github.sha); without it the git variant is skipped.
+		if rev := os.Getenv("CATALOG_GIT_REVISION"); rev != "" {
+			t.Run(tool+"-git", func(t *testing.T) {
+				t.Parallel()
+				runSample(t, c, tool, rev)
+			})
+		}
+	}
+}
+
+// runSample runs config/samples/tools/<tool>.yaml (git content, sample
+// parameter defaults) and asserts the same expectations as the inline case.
+func runSample(t *testing.T, c client.Client, tool, rev string) {
+	start := time.Now()
+	defer func() {
+		t.Logf("CATALOG_TIMING tool=%s-git duration=%s", tool, time.Since(start).Round(time.Second))
+	}()
+	cs := loadCase(t, tool)
+	b, err := os.ReadFile(filepath.Join("..", "..", "config", "samples", "tools", tool+".yaml"))
+	require.NoError(t, err)
+	var test testsv1alpha1.Test
+	require.NoError(t, yaml.Unmarshal(b, &test))
+	require.NotNil(t, test.Spec.Content.Git, "%s sample must use git content", tool)
+	test.Name = "catalog-git-" + tool
+	test.Namespace = namespace
+	test.Spec.Content.Git.Revision = rev
+
+	ctx := context.Background()
+	_ = c.Delete(ctx, &test)
+	require.NoError(t, c.Create(ctx, &test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: test.Name + "-", Namespace: namespace},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: test.Name, Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	timeout := defaultTimeout
+	if cs.Timeout != "" {
+		timeout, err = time.ParseDuration(cs.Timeout)
+		require.NoError(t, err)
+	}
+	final := waitTerminal(t, ctx, c, run.Name, timeout)
+	t.Logf("%s (git): phase=%s message=%q testCounts=%+v artifacts=%d",
+		tool, final.Status.Phase, final.Status.Message, final.Status.TestCounts, len(final.Status.ArtifactRefs))
+	if !assertCase(t, tool, cs.Expect, final) {
+		dumpLogs(t, final)
 	}
 }
 

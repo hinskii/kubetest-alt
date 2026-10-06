@@ -813,6 +813,10 @@ spec:
                         - ssh
                         type: string
                       mountPath:
+                        description: |-
+                          MountPath is where the repository is checked out: relative to /data
+                          or absolute inside it. Defaults to /data/repo, where catalog
+                          templates look for files.
                         type: string
                       paths:
                         items:

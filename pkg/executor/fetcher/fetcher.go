@@ -18,9 +18,12 @@ package fetcher
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // Fetcher orchestrates the three fetch modes: git → files → tarballs.
@@ -87,7 +90,15 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 	}
 
 	if c.Git != nil {
-		if err := f.Git.clone(ctx, *c.Git, dstDir); err != nil {
+		repoDir, err := gitMountDir(dstDir, c.Git.MountPath)
+		if err != nil {
+			return err
+		}
+		// #nosec G301 -- same shared-emptyDir rationale as dstDir above.
+		if err := os.MkdirAll(repoDir, 0o755); err != nil {
+			return err
+		}
+		if err := f.Git.clone(ctx, *c.Git, repoDir); err != nil {
 			return err
 		}
 	}
@@ -142,4 +153,29 @@ func shareWithAnyUID(dstDir string) error {
 			return root.Chmod(p, mode)
 		}
 	})
+}
+
+// DefaultGitMount is where a repository lands under the data dir when
+// content.git.mountPath is empty: /data/repo. Templates reference their
+// files as /data/repo/<path>.
+const DefaultGitMount = "repo"
+
+// gitMountDir resolves content.git.mountPath against the data dir. The
+// checkout used to go straight into the data dir (/data) — every template
+// then looked for files under /data/repo that weren't there, so any Test
+// fetching from git ran its tool on missing paths.
+func gitMountDir(dataDir, mountPath string) (string, error) {
+	if mountPath == "" {
+		mountPath = DefaultGitMount
+	}
+	target := mountPath
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(dataDir, target)
+	}
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(filepath.Clean(dataDir), target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("content.git.mountPath %q must be inside %s", mountPath, dataDir)
+	}
+	return target, nil
 }
