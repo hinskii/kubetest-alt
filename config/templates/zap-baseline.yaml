@@ -11,10 +11,10 @@
 #   * true  → omit -I; WARNs raise exit 1
 #   * false → pass -I; only FAILs raise exit 2
 #
-# Smoke verified on ghcr.io/zaproxy/zaproxy:stable (arm64) against
-# https://example.com:
-#   * strict (failOnWarn=true, default):  exit=2 (WARN-level findings)
-#   * lenient (failOnWarn=false, -I):     exit=0 (no FAIL-level findings)
+# Verified as shipped by the catalog e2e (test/catalog/cases/zap-baseline):
+# a bare HTTP server misses security headers → WARN → phase=failed, with
+# the XML/JSON/HTML reports scraped. (An earlier plain-docker smoke run
+# without the report options missed that they need /zap/wrk mounted.)
 apiVersion: tests.kubetest.io/v1alpha1
 kind: TestTemplate
 metadata:
@@ -24,7 +24,8 @@ metadata:
     app.kubernetes.io/name: kubetest-alt
 spec:
   container:
-    image: ghcr.io/zaproxy/zaproxy:stable
+    # Pinned (was :stable, which moves silently); 2.17.0 == stable on 2026-10-06.
+    image: ghcr.io/zaproxy/zaproxy:2.17.0
     # `zap-baseline.py` is on PATH inside the zaproxy image.
     command: ["zap-baseline.py"]
     args:
@@ -32,21 +33,37 @@ spec:
       - "{{ config.target }}"
       - "-m"
       - "{{ config.spiderMinutes }}"
+      # Relative to /zap/wrk — see the volumeMounts note below.
       - "-x"
-      - "/data/repo/results/zap-report.xml"
+      - "repo/results/zap-report.xml"
       - "-J"
-      - "/data/repo/results/zap-report.json"
+      - "repo/results/zap-report.json"
       - "-r"
-      - "/data/repo/results/zap-report.html"
+      - "repo/results/zap-report.html"
     # Note: this template does NOT include -I. Consumers who want the
     # lenient policy (only FAILs raise exit) override container.args
     # per-Test — that's the escape hatch for the failOnWarn=false case.
     # A per-Test override is louder than a template flag; the boolean
     # `failOnWarn` config below is a doc marker for the intent, but
     # actual behavior comes from what args the resolved container runs.
+    #
+    # zap-baseline.py refuses any report option unless /zap/wrk is a
+    # mounted directory ("A file based option has been specified but the
+    # directory '/zap/wrk' is not mounted" → usage, exit 3), and it writes
+    # reports to /zap/wrk/<name> even when <name> is absolute. So the pod's
+    # data volume (the one mounted at /data — named "data" by the
+    # compiler) is mounted at /zap/wrk too: /zap/wrk/repo/results/… IS
+    # /data/repo/results/…, where the scraper looks.
+    volumeMounts:
+      - name: data
+        mountPath: /zap/wrk
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/zap-report.*"
+      - "repo/results/**/zap-report.*"
   config:
     target:
       type: string

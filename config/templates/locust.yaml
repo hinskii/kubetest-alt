@@ -35,13 +35,22 @@ spec:
       - "/data/repo/{{ config.locustfile }}"
       - "--csv"
       - "/data/repo/results/locust"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     # Locust `--csv` writes locust_stats.csv, locust_failures.csv,
     # locust_history.csv, etc. under the prefix. Future perf-parser
     # (planned but not in scope) will ingest these.
     paths:
-      - "results/**/*.csv"
-      - "results/**/*.html"
+      - "repo/results/**/*.csv"
+      - "repo/results/**/*.html"
+  # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
+  # never affects the verdict.
+  metrics:
+    from: locustCsv
+    path: "repo/results/locust_stats.csv"
   config:
     locustfile:
       type: string

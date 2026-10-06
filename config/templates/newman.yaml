@@ -26,10 +26,14 @@ spec:
       - "cli,junit"
       - "--reporter-junit-export"
       - "/data/repo/results/junit.xml"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/*.xml"
-      - "results/**/*.json"
+      - "repo/results/**/*.xml"
+      - "repo/results/**/*.json"
   config:
     # Path to the Postman collection JSON inside the content-fetcher's
     # /data/repo working tree.

@@ -325,14 +325,6 @@ func TestScrape_ContentTypeInference(t *testing.T) {
 	assert.NotEmpty(t, byPath["c.bin"])
 }
 
-// TestScrape_PerfRegistryHasK6 asserts the step-07 registry has k6 wired.
-// step-11 adds cypress/newman/locust/jmeter.
-func TestPerfRegistry_K6Registered(t *testing.T) {
-	assert.NotNil(t, PerfParserFor("k6"), "k6 must be in the perf registry after step 07")
-	assert.Nil(t, PerfParserFor("cypress"), "cypress not wired until step 11")
-	assert.Contains(t, RegisteredPerfTypes(), "k6")
-}
-
 // TestScrape_ContextCancelledMidLoop: parent ctx fires between file uploads.
 // The scraper aborts cleanly, records "cancelled" in ScrapeError, but the
 // files uploaded before cancel remain in the fake.

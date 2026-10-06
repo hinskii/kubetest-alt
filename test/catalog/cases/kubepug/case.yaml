@@ -1,0 +1,5 @@
+config:
+  inputFile: kubepug/manifests.yaml
+expect:
+  phase: failed            # --error-on-deleted: CronJob/Ingress v1beta1 were removed
+  artifacts: ["repo/results/kubepug-report.json"]

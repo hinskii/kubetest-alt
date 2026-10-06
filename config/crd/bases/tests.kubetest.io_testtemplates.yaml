@@ -1209,6 +1209,32 @@ spec:
                       type: object
                     type: array
                 type: object
+              metrics:
+                description: |-
+                  Metrics, like Verdict, lets the catalog say once where a tool's
+                  report lands and how to read it. Test-side Metrics overrides.
+                properties:
+                  from:
+                    description: From is the report format.
+                    enum:
+                    - k6Summary
+                    - jtl
+                    - locustCsv
+                    - gatlingStats
+                    - artilleryJson
+                    type: string
+                  path:
+                    description: |-
+                      Path is a doublestar glob relative to the working directory. When it
+                      matches several files the lexicographically last wins (timestamped
+                      result directories → newest run).
+                    maxLength: 512
+                    minLength: 1
+                    type: string
+                required:
+                - from
+                - path
+                type: object
               parallel:
                 description: |-
                   ParallelSpec configures matrix/sharding for parallel execution. Detailed

@@ -151,7 +151,7 @@ func repoRoot(t *testing.T) string {
 
 // TestGrepGuard_NoOldK6Import: the pkg/executor/k6 subpackage is gone.
 // Any lingering import path referring to it means someone missed the
-// move to internal/scraper/perf/k6.
+// move (it lives in pkg/report now).
 func TestGrepGuard_NoOldK6Import(t *testing.T) {
 	root := repoRoot(t)
 	oldImport := "kubetest-alt/pkg/executor/k6"

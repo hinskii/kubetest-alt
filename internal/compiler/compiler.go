@@ -505,6 +505,9 @@ func buildRequestJSON(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun,
 			Compress: test.Spec.Artifacts.Compress,
 		}
 	}
+	if m := test.Spec.Metrics; m != nil {
+		req.Metrics = executor.MetricsSpec{From: m.From, Path: m.Path}
+	}
 	if v := test.Spec.Verdict; v != nil {
 		req.Verdict = executor.VerdictSpec{
 			From:         v.From,

@@ -1,0 +1,8 @@
+config:
+  scenario: artillery/scenario.yml
+  ensure: "true"
+expect:
+  phase: passed            # ensure only bounds p99; 404s are not artillery errors
+  metrics: {errors: 9, error_rate: 0.5, requests: 18}
+  metricsPresent: [rps, latency_avg_ms, latency_p95_ms]
+  artifacts: ["repo/results/artillery-report.json"]

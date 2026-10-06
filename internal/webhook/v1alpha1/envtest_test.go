@@ -221,6 +221,24 @@ func TestEnvtest_AbortIsOneWay(t *testing.T) {
 	assert.Contains(t, err.Error(), "spec.abort cannot be cleared")
 }
 
+// TestEnvtest_MetricsPathMustStayInWorkingDir is the sentinel for the
+// spec.metrics rule: ".." in a glob is not expressible in the CRD schema,
+// so this only passes with the validating webhook on the request path.
+func TestEnvtest_MetricsPathMustStayInWorkingDir(t *testing.T) {
+	ctx := context.Background()
+	obj := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "metrics-escape", Namespace: "default"},
+		Spec: testsv1alpha1.TestSpec{
+			Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Args: []string{"run", "s.js"}},
+			Metrics:   &testsv1alpha1.MetricsSpec{From: "k6Summary", Path: "../outside/summary.json"},
+		},
+	}
+	err := k8sClient.Create(ctx, obj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.metrics.path")
+	assert.Contains(t, err.Error(), "must not contain '..'")
+}
+
 // TestEnvtest_PodConfigAnnotationsPassThrough is the §8 regression guard at
 // the envtest layer: after a round-trip through defaulting + validating +
 // api-server storage, every user-supplied annotation/label must survive

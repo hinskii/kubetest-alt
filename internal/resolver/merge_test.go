@@ -373,3 +373,28 @@ func (e errStore) Get(_, _ string) (*testsv1alpha1.TestTemplate, error) {
 }
 
 func pInt32(v int32) *int32 { return &v }
+
+// spec.metrics merges exactly like spec.verdict: a template supplies it,
+// the Test overrides it.
+func TestMerge_MetricsFromTemplateTestWins(t *testing.T) {
+	tmpl := &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "k6", Namespace: "ns"},
+		Spec: testsv1alpha1.TestTemplateSpec{
+			Metrics: &testsv1alpha1.MetricsSpec{From: "k6Summary", Path: "results/summary.json"},
+		},
+	}
+	store := MapStore{"ns/k6": tmpl}
+
+	test := mkTestBase()
+	test.Spec.Use = []string{"k6"}
+	spec, _, err := MergeTemplates(test, store)
+	require.NoError(t, err)
+	require.NotNil(t, spec.Metrics)
+	assert.Equal(t, "results/summary.json", spec.Metrics.Path)
+
+	test.Spec.Metrics = &testsv1alpha1.MetricsSpec{From: "k6Summary", Path: "out/custom.json"}
+	spec, _, err = MergeTemplates(test, store)
+	require.NoError(t, err)
+	assert.Equal(t, "out/custom.json", spec.Metrics.Path)
+	assert.Equal(t, "results/summary.json", tmpl.Spec.Metrics.Path, "template not mutated")
+}

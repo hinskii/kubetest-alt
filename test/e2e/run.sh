@@ -16,6 +16,13 @@
 
 set -euxo pipefail
 
+# E2E_SUITE: e2e (default — platform scenarios), catalog (every catalog
+# template run for real, see test/catalog), or all.
+# CATALOG_TOOLS: comma-separated subset of test/catalog/cases (default all).
+E2E_SUITE="${E2E_SUITE:-e2e}"
+CATALOG_TOOLS="${CATALOG_TOOLS:-all}"
+CATALOG_PARALLEL="${CATALOG_PARALLEL:-4}"
+
 KIND_CLUSTER="${KIND_CLUSTER:-kubetest-alt-e2e}"
 RELEASE_NS="kubetest-alt"
 CHART_DIR="charts/kubetest-alt"
@@ -29,19 +36,25 @@ IMAGES=(
 
 log() { echo "[e2e] $(date +%H:%M:%S) $*" >&2; }
 
-declare -A PHASE_START
-phase_start() { PHASE_START["$1"]=$(date +%s); log "PHASE_START $1"; }
+# Plain variables instead of `declare -A` so the script also runs on
+# macOS's bash 3.2 for local development.
+phase_start() { printf -v "PHASE_START_$1" '%s' "$(date +%s)"; log "PHASE_START $1"; }
 phase_end() {
   local phase="$1"
-  local start="${PHASE_START[$phase]}"
+  local var="PHASE_START_$phase"
+  local start="${!var}"
   local now=$(date +%s)
   log "PHASE_TIMING phase=$phase duration_seconds=$((now - start))"
 }
 
 cleanup() {
+  jobs -p | xargs kill 2>/dev/null || true
+  if [ "${E2E_KEEP_CLUSTER:-}" = "1" ]; then
+    log "E2E_KEEP_CLUSTER=1 — leaving kind cluster $KIND_CLUSTER running"
+    return
+  fi
   log "cleanup — deleting kind cluster $KIND_CLUSTER"
   kind delete cluster --name "$KIND_CLUSTER" || true
-  jobs -p | xargs -r kill 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -221,6 +234,9 @@ if ! helm upgrade --install kt "$CHART_DIR" \
   exit 1
 fi
 kubectl -n "$RELEASE_NS" get all
+# Same image tag on every run: when a kept cluster is reused, helm sees no
+# change and the old pods would keep running the previous build.
+kubectl -n "$RELEASE_NS" rollout restart deploy/kt-kubetest-alt-operator deploy/kt-kubetest-alt-apiserver
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=180s
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=180s
 
@@ -248,8 +264,80 @@ export APISERVER_URL="http://127.0.0.1:18080"
 export METRICS_APISERVER_URL="http://127.0.0.1:18080/metrics"
 export METRICS_OPERATOR_URL="http://127.0.0.1:18081/metrics"
 
-phase_start "go_test"
-go test -tags=e2e -count=1 -v -timeout=15m ./test/e2e/...
-phase_end "go_test"
+if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
+  phase_start "go_test"
+  go test -tags=e2e -count=1 -v -timeout=15m ./test/e2e/...
+  phase_end "go_test"
+  log "all scenarios passed"
+fi
 
-log "all scenarios passed"
+if [ "$E2E_SUITE" = "catalog" ] || [ "$E2E_SUITE" = "all" ]; then
+  wants() { [ "$CATALOG_TOOLS" = "all" ] || [[ ",$CATALOG_TOOLS," == *",$1,"* ]]; }
+
+  phase_start "catalog_images"
+  # Platform-built tool images (CLAUDE.md §3 exceptions): build from this
+  # tree so the catalog run tests the current Dockerfiles, and load them
+  # under the exact names the templates reference.
+  for tool in gatling soapui kubepug; do
+    wants "$tool" || continue
+    img="$(grep -h 'image:' "config/templates/${tool}.yaml" | head -1 | awk '{print $2}')"
+    docker build -t "$img" "executors/${tool}"
+    kind load docker-image "$img" --name "$KIND_CLUSTER"
+  done
+  phase_end "catalog_images"
+
+  phase_start "catalog_target"
+  # Own namespace: the platform e2e deletes kubetest-e2e when it finishes.
+  CATALOG_NS=kubetest-catalog
+  kubectl create namespace "$CATALOG_NS" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$CATALOG_NS" create secret generic minio-creds \
+    --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+    --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+    --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n "$CATALOG_NS" apply -f config/templates/
+  # Target every case talks to: "/" → 200 with a small page, anything
+  # else → 404 (python http.server), so each tool sees passes AND failures.
+  cat <<'EOF' | kubectl -n "$CATALOG_NS" apply -f -
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: target-www }
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en"><head><title>kubetest target</title></head>
+    <body><h1>ok</h1></body></html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: target }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: target } }
+  template:
+    metadata: { labels: { app: target } }
+    spec:
+      containers:
+        - name: http
+          image: python:3.13-alpine
+          command: ["python", "-m", "http.server", "8000", "--directory", "/www"]
+          ports: [{ containerPort: 8000 }]
+          readinessProbe: { tcpSocket: { port: 8000 }, periodSeconds: 2 }
+          volumeMounts: [{ name: www, mountPath: /www }]
+      volumes: [{ name: www, configMap: { name: target-www } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: target }
+spec:
+  selector: { app: target }
+  ports: [{ port: 8000, targetPort: 8000 }]
+EOF
+  kubectl -n "$CATALOG_NS" rollout status deploy/target --timeout=120s
+  phase_end "catalog_target"
+
+  phase_start "catalog_test"
+  CATALOG_TOOLS="$CATALOG_TOOLS" go test -tags=catalog -count=1 -v -timeout=60m \
+    -parallel "$CATALOG_PARALLEL" ./test/catalog/...
+  phase_end "catalog_test"
+  log "catalog passed: $CATALOG_TOOLS"
+fi

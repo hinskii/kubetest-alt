@@ -1,0 +1,5 @@
+config: {}
+expect:
+  phase: failed            # one scenario fails on purpose
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["repo/results/*.xml"]

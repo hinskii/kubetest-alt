@@ -494,3 +494,22 @@ func TestValidateAbortTransition(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateMetrics(t *testing.T) {
+	ok := []string{"results/summary.json", "results/**/js/stats.json", "out/*.jtl"}
+	for _, p := range ok {
+		assert.NoError(t, validateMetrics(&testsv1alpha1.MetricsSpec{From: "k6Summary", Path: p}), p)
+	}
+	bad := map[string]string{
+		"/etc/passwd":          "relative",
+		"../escape.json":       "'..'",
+		"results/../../x.json": "'..'",
+		"results/[":            "valid glob",
+	}
+	for p, want := range bad {
+		err := validateMetrics(&testsv1alpha1.MetricsSpec{From: "k6Summary", Path: p})
+		require.Error(t, err, p)
+		assert.Contains(t, err.Error(), want, p)
+	}
+	assert.NoError(t, validateMetrics(nil))
+}

@@ -25,7 +25,14 @@ spec:
     # `cypress/included` sets ENTRYPOINT=cypress; override to run our
     # /entry-mediated invocation and pass args verbatim.
     command: ["cypress"]
-    args: ["run", "--project", "/data/repo/{{ config.projectDir }}", "--spec", "{{ config.spec }}"]
+    # --spec is resolved against the working directory (/data), not
+    # --project, so it is anchored to the project here.
+    args:
+      - "run"
+      - "--project"
+      - "/data/repo/{{ config.projectDir }}"
+      - "--spec"
+      - "/data/repo/{{ config.projectDir }}/{{ config.spec }}"
     volumeMounts:
       # Mount the shared-memory emptyDir declared in spec.pod.volumes.
       - name: dshm
@@ -39,14 +46,19 @@ spec:
           # suite; heavier suites (many parallel workers, large videos)
           # may bump via a per-Test override.
           sizeLimit: 2Gi
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     # cypress/included writes JUnit XML if the project's cypress.config.*
     # sets `reporter: junit`. The catalog assumes projects follow that
     # convention; templates DON'T mutate user config.
     paths:
-      - "results/**/*.xml"
-      - "cypress/screenshots/**/*"
-      - "cypress/videos/**/*"
+      - "repo/results/**/*.xml"
+      # Cypress writes these under <projectDir>/cypress/ inside the repo.
+      - "repo/**/cypress/screenshots/**/*"
+      - "repo/**/cypress/videos/**/*"
   config:
     # Cypress `--project` root — where cypress.config.js lives.
     projectDir:

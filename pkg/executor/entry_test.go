@@ -274,7 +274,7 @@ func TestEntry_Verdict_JUnitOverridesNonZeroExit(t *testing.T) {
 	}
 	e := entryFor(t, req, 1, nil)
 	e.WorkingDir = t.TempDir()
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{Total: 10, Passed: 10}, nil
 	}
 	require.NoError(t, e.Execute(context.Background()))
@@ -348,7 +348,7 @@ func TestEntry_Verdict_JUnitFailsOverridesExitZero(t *testing.T) {
 	}
 	e := entryFor(t, req, 0, nil)
 	e.WorkingDir = t.TempDir()
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{Total: 10, Passed: 7, Failed: 3}, nil
 	}
 	require.NoError(t, e.Execute(context.Background()))
@@ -367,7 +367,7 @@ func TestEntry_Verdict_JUnitNoReport_IsError(t *testing.T) {
 	}
 	e := entryFor(t, req, 0, nil)
 	e.WorkingDir = t.TempDir()
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{}, errors.New("no parseable JUnit report found")
 	}
 	require.NoError(t, e.Execute(context.Background()))
@@ -392,7 +392,7 @@ func TestEntry_Verdict_JUnitEmptyReport_IsError(t *testing.T) {
 	e.WorkingDir = t.TempDir()
 	// Simulate what junit.Scan returns for a tests==0 report: aggregate
 	// counts are zero AND the empty-report sentinel is returned.
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{}, errors.New("junit: no tests found in JUnit report")
 	}
 	require.NoError(t, e.Execute(context.Background()))
@@ -413,7 +413,7 @@ func TestEntry_Verdict_JUnitMalformed_IsErrorNotPanic(t *testing.T) {
 	}
 	e := entryFor(t, req, 0, nil)
 	e.WorkingDir = t.TempDir()
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{}, errors.New("XML syntax error")
 	}
 	require.NoError(t, e.Execute(context.Background()))

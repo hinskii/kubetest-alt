@@ -289,6 +289,9 @@ func mergeTemplateInto(dst *testsv1alpha1.TestSpec, tmpl *testsv1alpha1.TestTemp
 	// Verdict (step 15): templates carry the verdictFrom mitigation for
 	// tools whose exit code lies. Fill only where dst.Verdict is unset —
 	// Test-side Verdict wins via mergeTestInto below.
+	if tmpl.Metrics != nil && dst.Metrics == nil {
+		dst.Metrics = tmpl.Metrics.DeepCopy()
+	}
 	if tmpl.Verdict != nil && dst.Verdict == nil {
 		dst.Verdict = tmpl.Verdict.DeepCopy()
 	}
@@ -331,6 +334,9 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 	}
 	if test.ConcurrencyPolicy != "" {
 		dst.ConcurrencyPolicy = test.ConcurrencyPolicy
+	}
+	if test.Metrics != nil {
+		dst.Metrics = test.Metrics.DeepCopy()
 	}
 	if test.Verdict != nil {
 		dst.Verdict = test.Verdict.DeepCopy()

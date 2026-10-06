@@ -91,6 +91,13 @@ type TestSpec struct {
 	// +optional
 	Verdict *VerdictSpec `json:"verdict,omitempty"`
 
+	// Metrics names the tool's machine-readable report and its format;
+	// /entry parses it after the tool exits into status.metrics (shared
+	// vocabulary, docs/metrics.md). Never affects the verdict. JUnit test
+	// counts need no configuration — any scraped *.xml contributes.
+	// +optional
+	Metrics *MetricsSpec `json:"metrics,omitempty"`
+
 	// Steps turns this Test into a COMPOSITE — a scenario that runs other
 	// Tests in ordered steps. Mutually exclusive with the leaf shape:
 	// when Steps is non-empty, container/content/use/verdict/services/
@@ -196,6 +203,20 @@ type StepExecuteTest struct {
 	// Test's own resolve pipeline (step 13).
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
+}
+
+// MetricsSpec selects the report parser /entry runs after the tool exits.
+type MetricsSpec struct {
+	// From is the report format.
+	// +kubebuilder:validation:Enum=k6Summary;jtl;locustCsv;gatlingStats;artilleryJson
+	From string `json:"from"`
+
+	// Path is a doublestar glob relative to the working directory. When it
+	// matches several files the lexicographically last wins (timestamped
+	// result directories → newest run).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=512
+	Path string `json:"path"`
 }
 
 // VerdictSpec is the declarative "verdict-from" processor selector.

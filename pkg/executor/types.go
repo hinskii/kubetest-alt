@@ -49,6 +49,17 @@ type ExecutionRequest struct {
 	// From (or omitted Verdict) means "verdict from process exit code".
 	// See VerdictSpec + entry.go's post-tool processor pipeline.
 	Verdict VerdictSpec `json:"verdict,omitzero"`
+
+	// Metrics names the tool's report and its format (pkg/report). Parsed
+	// after the tool exits into ExecutionResult.Metrics; never changes the
+	// verdict.
+	Metrics MetricsSpec `json:"metrics,omitzero"`
+}
+
+// MetricsSpec mirrors api/v1alpha1.MetricsSpec on the wire.
+type MetricsSpec struct {
+	From string `json:"from,omitempty"`
+	Path string `json:"path,omitempty"`
 }
 
 // VerdictSpec mirrors testsv1alpha1.VerdictSpec on the wire. The wrapper
@@ -121,6 +132,10 @@ type ExecutionResult struct {
 	// tool run into a failing status. Callers can surface this separately
 	// in the UI ("run passed, artifacts not saved: <reason>").
 	ScrapeError string `json:"scrapeError,omitempty"`
+
+	// MetricsError says why spec.metrics produced nothing (report missing,
+	// unparseable). Like ScrapeError it never changes Phase.
+	MetricsError string `json:"metricsError,omitempty"`
 
 	// ToolExitCode is the raw exit code from the tool process. Preserved
 	// even when a verdictFrom processor OVERRIDES the phase — the trace

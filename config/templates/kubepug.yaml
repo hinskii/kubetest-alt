@@ -39,9 +39,13 @@ spec:
       - "json"
       - "--filename"
       - "/data/repo/results/kubepug-report.json"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/kubepug-report.*"
+      - "repo/results/**/kubepug-report.*"
   config:
     inputFile:
       type: string

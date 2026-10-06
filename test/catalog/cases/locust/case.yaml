@@ -1,0 +1,10 @@
+config:
+  host: http://target.kubetest-catalog.svc:8000
+  users: "2"
+  spawnRate: "2"
+  duration: 5s
+expect:
+  phase: failed            # Locust 2.x exits 1 when any request failed
+  metricsPresent: [requests, errors, error_rate, rps, latency_avg_ms, latency_p95_ms]
+  metricsRange: {error_rate: [0.3, 0.7]}
+  artifacts: ["repo/results/locust_stats.csv"]

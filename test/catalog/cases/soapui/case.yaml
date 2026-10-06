@@ -1,0 +1,6 @@
+config:
+  project: soapui/project.xml
+expect:
+  phase: failed            # the /missing test case asserts 200 and gets 404
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["repo/results/*.xml"]

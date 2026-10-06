@@ -19,6 +19,7 @@ package fetcher
 import (
 	"context"
 	"io"
+	"io/fs"
 	"os"
 )
 
@@ -100,5 +101,45 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 			return err
 		}
 	}
-	return nil
+	return shareWithAnyUID(dstDir)
+}
+
+// shareWithAnyUID makes the fetched tree writable by whatever user the
+// tool image runs as. The fetcher runs as root; vendor tool images often
+// don't (grafana/k6 is uid 12345), and with the fetcher's 0755 dirs such a
+// tool could not write its reports — k6 then silently skipped
+// --summary-export and artillery failed. dstDir is the pod's private
+// emptyDir, so "any user" means "any container of this one pod".
+// Directories become 0777; files gain read+write for all, keeping their
+// execute bits. Symlinks are left alone, and every chmod goes through an
+// os.Root scoped to dstDir, so a symlink planted by a tarball can never
+// redirect it outside the volume.
+func shareWithAnyUID(dstDir string) error {
+	root, err := os.OpenRoot(dstDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return fs.WalkDir(root.FS(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.Type()&fs.ModeSymlink != 0:
+			return nil
+		case d.IsDir():
+			// #nosec G302 -- pod-private emptyDir handed from root fetcher to non-root tool.
+			return root.Chmod(p, 0o777)
+		default:
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			mode := info.Mode().Perm() | 0o666
+			if info.Mode().Perm()&0o111 != 0 {
+				mode |= 0o111
+			}
+			return root.Chmod(p, mode)
+		}
+	})
 }

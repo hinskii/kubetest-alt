@@ -1,0 +1,19 @@
+{
+  "info": {
+    "name": "kubetest catalog",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{"key": "target", "value": "http://target.kubetest-catalog.svc:8000"}],
+  "item": [
+    {
+      "name": "root",
+      "request": {"method": "GET", "url": "{{target}}/"},
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('root is 200', () => pm.response.to.have.status(200));"]}}]
+    },
+    {
+      "name": "missing",
+      "request": {"method": "GET", "url": "{{target}}/missing"},
+      "event": [{"listen": "test", "script": {"exec": ["pm.test('missing is 200 (fails on purpose)', () => pm.response.to.have.status(200));"]}}]
+    }
+  ]
+}

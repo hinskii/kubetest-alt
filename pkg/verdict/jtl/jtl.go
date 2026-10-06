@@ -14,15 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package jtl parses JMeter Test Log CSV files. Two consumers:
-//   - /entry's verdict processor (step 11) — gates pass/fail on the
-//     error-rate threshold declared in Test.spec.verdict.errorRateMax.
-//   - scraper perf-ingest (step 07+) — extracts metrics into Postgres.
+// Package jtl parses JMeter Test Log CSV files for /entry's verdict
+// processor (step 11), which gates pass/fail on the error-rate threshold
+// declared in Test.spec.verdict.errorRateMax.
 //
-// Both consumers depend on the SAME header-driven parse, so the parser
-// lives in pkg/ where both can import it. The "verdict" umbrella
-// (pkg/verdict/) collects parsers that gate pass/fail; metrics-only
-// parsers live under internal/scraper/perf.
+// The "verdict" umbrella (pkg/verdict/) collects parsers that gate
+// pass/fail. Metrics (throughput, latency percentiles) come from
+// pkg/report, which never affects the verdict.
 package jtl
 
 import (

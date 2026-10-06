@@ -22,9 +22,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/bmatcuk/doublestar/v4"
+
+	"github.com/hinskii/kubetest-alt/pkg/report"
 )
 
 // Entry is the wrapper's main-loop logic, extracted from cmd/entry so it can
@@ -58,9 +66,11 @@ type Entry struct {
 	Stderr io.Writer
 
 	// JUnitProcessor is called when req.Verdict.From == "junit". Signature:
-	// (workingDir) → (aggregated counts, error). Injected so tests can
-	// swap a synthetic processor without seeding real XML files.
-	JUnitProcessor func(workingDir string) (TestCounts, error)
+	// (workingDir, globs) → (aggregated counts, error); globs are the
+	// Test's *.xml artifact paths (empty → the processor's defaults).
+	// Injected so tests can swap a synthetic processor without seeding
+	// real XML files.
+	JUnitProcessor func(workingDir string, globs []string) (TestCounts, error)
 
 	// JTLProcessor is called when req.Verdict.From == "jtl". Signature:
 	// (workingDir, errorRateMax) → (result-ready message, error). Injected
@@ -128,6 +138,11 @@ func (e *Entry) Execute(ctx context.Context) error {
 		return e.writeErrorResult("request has no command and no args — nothing to run")
 	}
 
+	// Make sure the directories the run declared it writes to exist —
+	// some tools silently skip (k6 --summary-export) or fail (artillery
+	// --output) on a missing parent directory.
+	e.prepareOutputDirs(req)
+
 	// Exec the tool verbatim.
 	result := e.runTool(ctx, req)
 
@@ -146,6 +161,10 @@ func (e *Entry) Execute(ctx context.Context) error {
 			result.ErrorMessage = "aborted by signal"
 		}
 	}
+
+	// Metrics from the tool's report (spec.metrics). After the verdict and
+	// before the scrape, so result.json carries them; never touches Phase.
+	e.parseMetrics(req, &result)
 
 	// Scrape (§15.3) — runs even on failure/abort paths so partial output
 	// survives. Never changes Phase; puts errors in ScrapeError.
@@ -199,7 +218,7 @@ func (e *Entry) runTool(ctx context.Context, req ExecutionRequest) ExecutionResu
 			wd = workingDir(req)
 		}
 		if from == VerdictFromJUnit {
-			return e.applyJUnitVerdict(wd, base)
+			return e.applyJUnitVerdict(wd, junitGlobs(req), base)
 		}
 		return e.applyJTLVerdict(wd, req.Verdict.ErrorRateMax, base)
 	}
@@ -248,7 +267,7 @@ func baseVerdict(exitCode int, runErr error) ExecutionResult {
 // The base run's ToolExitCode is PRESERVED on every path — even when the
 // verdict flips passed. Losing it would hide the "tests passed but
 // teardown crashed" class of near-passing failures.
-func (e *Entry) applyJUnitVerdict(workingDir string, base ExecutionResult) ExecutionResult {
+func (e *Entry) applyJUnitVerdict(workingDir string, globs []string, base ExecutionResult) ExecutionResult {
 	if e.JUnitProcessor == nil {
 		return ExecutionResult{
 			Phase:        PhaseError,
@@ -256,7 +275,7 @@ func (e *Entry) applyJUnitVerdict(workingDir string, base ExecutionResult) Execu
 			ToolExitCode: base.ToolExitCode,
 		}
 	}
-	counts, err := e.JUnitProcessor(workingDir)
+	counts, err := e.JUnitProcessor(workingDir, globs)
 	if err != nil {
 		return ExecutionResult{
 			Phase:        PhaseError,
@@ -323,9 +342,9 @@ func (e *Entry) applyJTLVerdict(workingDir, errorRateMaxStr string, base Executi
 		}
 	}
 	metrics := map[string]float64{
-		"samples_total":  float64(res.SamplesTotal),
-		"samples_failed": float64(res.SamplesFailed),
-		"error_rate":     res.ErrorRate,
+		report.Requests:  float64(res.SamplesTotal),
+		report.Errors:    float64(res.SamplesFailed),
+		report.ErrorRate: res.ErrorRate,
 	}
 	if !res.Passed {
 		return ExecutionResult{
@@ -420,9 +439,9 @@ func (e *Entry) writeErrorResult(msg string) error {
 	return nil
 }
 
-func loadRequest(path string) (ExecutionRequest, error) {
-	// #nosec G304 -- path is operator-controlled in prod; tests inject a temp path.
-	b, err := os.ReadFile(path)
+func loadRequest(reqPath string) (ExecutionRequest, error) {
+	// #nosec G304 -- reqPath is operator-controlled in prod; tests inject a temp path.
+	b, err := os.ReadFile(reqPath)
 	if err != nil {
 		return ExecutionRequest{}, err
 	}
@@ -491,4 +510,86 @@ func parseErrorRateMax(s string) (float64, error) {
 		return 0, fmt.Errorf("errorRateMax %f out of range [0,1]", f)
 	}
 	return f, nil
+}
+
+// parseMetrics runs the spec.metrics report parser and merges its output
+// into result.Metrics (report values win over the verdict processor's
+// coarser counts for the same keys). Failure is recorded in MetricsError
+// and on the wrapper log; the verdict is never changed.
+func (e *Entry) parseMetrics(req ExecutionRequest, result *ExecutionResult) {
+	if req.Metrics.From == "" {
+		return
+	}
+	wd := e.WorkingDir
+	if wd == "" {
+		wd = workingDir(req)
+	}
+	m, rel, err := report.ParseFile(req.Metrics.From, wd, req.Metrics.Path)
+	if err != nil {
+		result.MetricsError = fmt.Sprintf("metrics (%s, %s): %v", req.Metrics.From, req.Metrics.Path, err)
+		_, _ = fmt.Fprintln(e.Loader, result.MetricsError)
+		return
+	}
+	if result.Metrics == nil {
+		result.Metrics = make(map[string]float64, len(m))
+	}
+	maps.Copy(result.Metrics, m)
+	_, _ = fmt.Fprintf(e.Loader, "metrics: %d values from %s\n", len(m), rel)
+}
+
+// prepareOutputDirs creates the static directory prefix of every declared
+// output path (artifacts.paths globs, metrics.path) under the working
+// directory: "results/**/*.json" → results/, "repo/out/summary.json" →
+// repo/out/. Derived purely from the spec — no tool knowledge. Paths that
+// would leave the working directory are skipped (the webhook rejects them
+// anyway). Errors are logged, not fatal: the tool may still succeed.
+func (e *Entry) prepareOutputDirs(req ExecutionRequest) {
+	wd := e.WorkingDir
+	if wd == "" {
+		wd = workingDir(req)
+	}
+	patterns := append([]string{}, req.Artifacts.Paths...)
+	if req.Metrics.Path != "" {
+		patterns = append(patterns, req.Metrics.Path)
+	}
+	for _, p := range patterns {
+		dir := staticDir(p)
+		if dir == "" {
+			continue
+		}
+		// The tool runs as the wrapper's own user, so 0750 is enough.
+		if err := os.MkdirAll(filepath.Join(wd, dir), 0o750); err != nil {
+			_, _ = fmt.Fprintf(e.Loader, "prepare output dir %s: %v\n", dir, err)
+		}
+	}
+}
+
+// staticDir is the glob-free directory prefix of a relative pattern, or ""
+// when there is none or it would escape the working directory.
+func staticDir(pattern string) string {
+	if pattern == "" || filepath.IsAbs(pattern) {
+		return ""
+	}
+	base, _ := doublestar.SplitPattern(filepath.ToSlash(pattern))
+	base = path.Clean(base)
+	if base == "." || base == ".." || strings.HasPrefix(base, "../") {
+		return ""
+	}
+	return filepath.FromSlash(base)
+}
+
+// junitGlobs is what the JUnit verdict scans: the Test's own *.xml
+// artifact globs — the same files the scraper counts into testCounts —
+// so the verdict and the reported counts can't disagree. (They used to:
+// the verdict only knew fixed names like junit*.xml, so a Cypress report
+// named cypress-<hash>.xml was counted 2/1 yet judged "no report".)
+// Empty when the Test declares none; the processor then uses its defaults.
+func junitGlobs(req ExecutionRequest) []string {
+	var out []string
+	for _, p := range req.Artifacts.Paths {
+		if strings.HasSuffix(strings.ToLower(p), ".xml") {
+			out = append(out, p)
+		}
+	}
+	return out
 }

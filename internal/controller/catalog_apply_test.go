@@ -261,3 +261,51 @@ func readTest(path string) (*testsv1alpha1.Test, error) {
 	}
 	return &t, nil
 }
+
+// TestCatalog_LoadToolsDeclareMetrics: every load tool in the catalog must
+// tell /entry where its report is, or its runs have no metrics (which was
+// the case for all of them before spec.metrics existed).
+func TestCatalog_LoadToolsDeclareMetrics(t *testing.T) {
+	repoRoot, err := findRepoRoot()
+	require.NoError(t, err)
+	want := map[string]string{
+		"k6": "k6Summary", "jmeter": "jtl", "locust": "locustCsv",
+		"gatling": "gatlingStats", "artillery": "artilleryJson",
+	}
+	for name, from := range want {
+		tmpl, err := readTestTemplate(filepath.Join(repoRoot, "config", "templates", name+".yaml"))
+		require.NoError(t, err, name)
+		require.NotNil(t, tmpl.Spec.Metrics, "%s template must set spec.metrics", name)
+		assert.Equal(t, from, tmpl.Spec.Metrics.From, name)
+	}
+}
+
+// TestCatalog_OutputPathsMatchWorkingDir: artifact/metrics globs are
+// relative to the wrapper's working directory — /data unless the template
+// sets container.workingDir. Templates without one wrote to
+// /data/repo/results but globbed "results/**", so nothing was ever
+// scraped. Every such glob must start with repo/.
+func TestCatalog_OutputPathsMatchWorkingDir(t *testing.T) {
+	repoRoot, err := findRepoRoot()
+	require.NoError(t, err)
+	files, err := filepath.Glob(filepath.Join(repoRoot, "config", "templates", "*.yaml"))
+	require.NoError(t, err)
+	for _, f := range files {
+		tmpl, err := readTestTemplate(f)
+		require.NoError(t, err, f)
+		if tmpl.Spec.Container.WorkingDir != "" {
+			continue // globs are relative to the template's own workingDir
+		}
+		var globs []string
+		if tmpl.Spec.Artifacts != nil {
+			globs = append(globs, tmpl.Spec.Artifacts.Paths...)
+		}
+		if tmpl.Spec.Metrics != nil {
+			globs = append(globs, tmpl.Spec.Metrics.Path)
+		}
+		for _, g := range globs {
+			assert.True(t, strings.HasPrefix(g, "repo/") || strings.HasPrefix(g, "**/"),
+				"%s: %q is relative to /data — tools write under /data/repo", filepath.Base(f), g)
+		}
+	}
+}

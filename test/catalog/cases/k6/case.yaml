@@ -1,0 +1,7 @@
+config:
+  script: k6/script.js
+expect:
+  phase: passed            # no thresholds → exit 0 even with failed checks
+  metrics: {requests: 40, errors: 20, error_rate: 0.5, checks_passed: 20, checks_failed: 20}
+  metricsPresent: [rps, latency_avg_ms, latency_p95_ms]
+  artifacts: ["repo/results/summary.json"]

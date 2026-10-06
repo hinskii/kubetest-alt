@@ -32,11 +32,20 @@ spec:
       - "/data/repo/results/jmeter.jtl"
       - "-j"
       - "/data/repo/results/jmeter.log"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/*.jtl"
-      - "results/**/*.log"
-      - "results/**/*.xml"
+      - "repo/results/**/*.jtl"
+      - "repo/results/**/*.log"
+      - "repo/results/**/*.xml"
+  # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
+  # never affects the verdict.
+  metrics:
+    from: jtl
+    path: "repo/results/jmeter.jtl"
   config:
     # Path to the .jmx test plan inside the content-fetcher tree.
     plan:

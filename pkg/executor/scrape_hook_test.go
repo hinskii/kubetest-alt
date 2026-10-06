@@ -156,7 +156,7 @@ func TestScrape_JUnitVerdictCountsWinOverScraperCounts(t *testing.T) {
 		Loader:      &bytes.Buffer{},
 	}
 	e.WorkingDir = req.WorkingDir
-	e.JUnitProcessor = func(_ string) (TestCounts, error) {
+	e.JUnitProcessor = func(_ string, _ []string) (TestCounts, error) {
 		return TestCounts{Total: 10, Passed: 10}, nil
 	}
 	require.NoError(t, e.Execute(context.Background()))

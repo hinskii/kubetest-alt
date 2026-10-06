@@ -107,11 +107,10 @@ func runWrapper(ctx context.Context) int {
 }
 
 // junitProcessorFromDir wraps pkg/verdict/junit.Scan into the signature
-// Entry.JUnitProcessor expects. Uses DefaultGlobs — templates that need
-// custom glob patterns supply them via Args and the tool writes reports
-// wherever they end up (the default globs cover all common cases).
-func junitProcessorFromDir(workingDir string) (executor.TestCounts, error) {
-	counts, err := verdictjunit.Scan(workingDir, nil)
+// Entry.JUnitProcessor expects. globs are the Test's *.xml artifact paths;
+// empty falls back to junit.DefaultGlobs.
+func junitProcessorFromDir(workingDir string, globs []string) (executor.TestCounts, error) {
+	counts, err := verdictjunit.Scan(workingDir, globs)
 	if err != nil {
 		return executor.TestCounts{}, err
 	}

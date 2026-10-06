@@ -109,18 +109,26 @@ history. Minute grouping is dropped; composite Tests show parent + children.
   `--logs-enabled` (logs were never stored on default installs), e2e
   MinIO images moved to pinned Chainguard (upstream images removed).
 
-### 18c — Metrics for every catalog tool
-| tool       | source            | metrics |
-|------------|-------------------|---------|
-| k6         | `summary.json`    | avg/med/min/max/p90/p95/p99 ms, rps, http_failed_rate, iterations, data_sent/recv, checks |
-| jmeter     | JTL CSV           | samples, error_rate, avg/p90/p95/p99 ms, throughput |
-| locust     | `--csv` stats     | requests, failures, fail_ratio, avg/p95/p99 ms, rps |
-| gatling    | `stats.json`      | requests, ko, mean/p95/p99 ms, rps |
-| artillery  | JSON report       | requests, errors, p95/p99 ms, rps |
-| JUnit tools (cypress, playwright, pytest, maven, gradle, newman, cucumber, soapui) | JUnit XML | `testCounts` + `duration_s` |
-| zap-baseline, kubepug | exit code (+ report) | phase; findings count when parseable |
-
-Stable metric-key vocabulary in `docs/metrics.md`; the GUI renders by key.
+### 18c — Metrics for every catalog tool + catalog e2e ✅
+- `spec.metrics {from, path}` (Test + TestTemplate, merged like verdict):
+  /entry parses the tool's report after it exits into `status.metrics`
+  (`pkg/report`: k6Summary, jtl, locustCsv, gatlingStats, artilleryJson;
+  shared vocabulary in `docs/metrics.md`). Previously no run ever had
+  metrics — the wrapper never called a parser after step 11.
+- Parsers tested on real tool output (`hack/report-fixtures.sh`).
+- **Catalog e2e** (`test/catalog`, `.github/workflows/test-catalog.yml`):
+  all 12 templates without their own workingDir — artillery, cucumber,
+  cypress, gatling, jmeter, k6, kubepug, locust, newman, pytest, soapui,
+  zap-baseline — run for real on kind with in-repo projects; verdict,
+  JUnit counts, metrics and artifacts asserted per tool.
+- Bugs it found and fixed: artifact globs of 12 templates never matched
+  (wrong base dir); non-root tool images couldn't write into the fetched
+  repo; k6/artillery need their output dir to exist; cypress `--spec`
+  resolved against the wrong dir; zap needs `/zap/wrk` mounted; JUnit
+  verdict and JUnit counts used different file discovery; sample repo
+  referenced by `config/samples/tools` doesn't exist (follow-up).
+- Not yet in the catalog e2e: gradle, maven, playwright (they set
+  `workingDir` and need dependency downloads) — follow-up.
 
 ### 18d — Control Center skeleton
 - `pkg/apiclient`: typed Go client for the kubetest apiserver (direct URL

@@ -37,10 +37,14 @@ spec:
       - "-f"
       - "/data/repo/results"
       - "/data/repo/{{ config.project }}"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/*.xml"
-      - "results/**/*.log"
+      - "repo/results/**/*.xml"
+      - "repo/results/**/*.log"
   config:
     project:
       type: string

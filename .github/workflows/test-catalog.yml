@@ -1,0 +1,118 @@
+name: Catalog Tests
+
+# Runs every catalog TestTemplate for real on kind (test/catalog): one job
+# per tool, because the tool images (cypress, artillery, zap: several GB
+# each) don't fit on one runner together, and so a broken tool is named in
+# the job title. Triggered when anything a template run depends on
+# changes, nightly (upstream images move), and by hand.
+on:
+  push:
+    paths:
+      - "config/templates/**"
+      - "executors/**"
+      - "pkg/executor/**"
+      - "pkg/report/**"
+      - "pkg/verdict/**"
+      - "pkg/storage/**"
+      - "internal/scraper/**"
+      - "internal/compiler/**"
+      - "internal/controller/**"
+      - "test/catalog/**"
+      - "test/e2e/run.sh"
+      - ".github/workflows/test-catalog.yml"
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      tools:
+        description: "Comma-separated tools (blank = all)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tools:
+    name: Catalog ${{ matrix.tool }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        tool:
+          - artillery
+          - cucumber
+          - cypress
+          - gatling
+          - jmeter
+          - k6
+          - kubepug
+          - locust
+          - newman
+          - pytest
+          - soapui
+          - zap-baseline
+    steps:
+      - name: Skip tools not requested
+        id: want
+        shell: bash
+        run: |
+          want="${{ github.event.inputs.tools }}"
+          if [ -z "$want" ] || [[ ",$want," == *",${{ matrix.tool }},"* ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk space
+        if: steps.want.outputs.run == 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Checkout
+        if: steps.want.outputs.run == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        if: steps.want.outputs.run == 'true'
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install kind + helm
+        if: steps.want.outputs.run == 'true'
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Run ${{ matrix.tool }} on kind
+        if: steps.want.outputs.run == 'true'
+        shell: bash
+        env:
+          E2E_SUITE: catalog
+          CATALOG_TOOLS: ${{ matrix.tool }}
+        run: |
+          set -euo pipefail
+          ./test/e2e/run.sh 2>&1 | tee /tmp/catalog.log
+          # Guard against a silent skip: the tool's timing marker must exist.
+          grep -q "CATALOG_TIMING tool=${{ matrix.tool }} " /tmp/catalog.log || {
+            echo "::error::no CATALOG_TIMING marker for ${{ matrix.tool }} — the case did not run"
+            exit 1
+          }
+
+      - name: Upload log
+        if: always() && steps.want.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-${{ matrix.tool }}-log
+          path: /tmp/catalog.log
+          retention-days: 7

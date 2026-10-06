@@ -239,6 +239,7 @@ func TestCompile_RequestJSON_HasAllExpectedFields(t *testing.T) {
 	test := canonicalTest()
 	test.Spec.Timeout = &metav1.Duration{Duration: 5 * time.Minute}
 	test.Spec.Verdict = &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "0.02"}
+	test.Spec.Metrics = &testsv1alpha1.MetricsSpec{From: "jtl", Path: "repo/results/*.jtl"}
 	run := canonicalTestRun()
 
 	_, aux, err := Compile(test, run, defaultOpts())
@@ -256,6 +257,9 @@ func TestCompile_RequestJSON_HasAllExpectedFields(t *testing.T) {
 	// Workflows model: verdict block passed through.
 	assert.Equal(t, "jtl", req.Verdict.From)
 	assert.Equal(t, "0.02", req.Verdict.ErrorRateMax)
+
+	// spec.metrics passed through for the wrapper's report parser.
+	assert.Equal(t, executor.MetricsSpec{From: "jtl", Path: "repo/results/*.jtl"}, req.Metrics)
 }
 
 func TestCompile_RequestJSON_ValueFromEnvExcluded(t *testing.T) {

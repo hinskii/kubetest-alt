@@ -1,0 +1,7 @@
+config:
+  target: http://target.kubetest-catalog.svc:8000
+  spiderMinutes: "1"
+expect:
+  phase: failed            # a bare python server misses security headers → WARN
+  artifacts: ["repo/results/zap-report.*"]
+timeout: 15m

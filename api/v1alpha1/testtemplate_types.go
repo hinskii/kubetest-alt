@@ -59,6 +59,11 @@ type TestTemplateSpec struct {
 	// errorRateMax=0" in ONE place. Test-side Verdict overrides.
 	// +optional
 	Verdict *VerdictSpec `json:"verdict,omitempty"`
+
+	// Metrics, like Verdict, lets the catalog say once where a tool's
+	// report lands and how to read it. Test-side Metrics overrides.
+	// +optional
+	Metrics *MetricsSpec `json:"metrics,omitempty"`
 }
 
 // TestTemplateStatus is intentionally minimal — templates are pure definitions.

@@ -42,10 +42,19 @@ spec:
       - "/data/repo/{{ config.scenario }}"
       - "--output"
       - "/data/repo/results/artillery-report.json"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/*.json"
-      - "results/**/*.html"
+      - "repo/results/**/*.json"
+      - "repo/results/**/*.html"
+  # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
+  # never affects the verdict.
+  metrics:
+    from: artilleryJson
+    path: "repo/results/artillery-report.json"
   config:
     scenario:
       type: string

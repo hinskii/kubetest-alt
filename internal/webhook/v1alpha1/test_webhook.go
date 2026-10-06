@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
 	"strconv"
+	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -170,6 +171,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateVerdict(spec.Verdict); err != nil {
 		return err
 	}
+	if err := validateMetrics(spec.Metrics); err != nil {
+		return err
+	}
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
 	}
@@ -201,6 +205,9 @@ func validateCompositeShape(spec *testsv1alpha1.TestSpec) error {
 	}
 	if spec.Verdict != nil {
 		return errors.New("spec.steps and spec.verdict are mutually exclusive (composite verdict comes from step aggregation)")
+	}
+	if spec.Metrics != nil {
+		return errors.New("spec.steps and spec.metrics are mutually exclusive (each child reports its own metrics)")
 	}
 	if len(spec.Services) > 0 {
 		return errors.New("spec.steps and spec.services are mutually exclusive")
@@ -290,4 +297,27 @@ func inlineContentSize(files []testsv1alpha1.FileContent) int {
 		total += len(files[i].Content)
 	}
 	return total
+}
+
+// validateMetrics checks what the schema can't: spec.metrics.path must be a
+// valid doublestar glob that stays inside the working directory. The
+// wrapper also refuses to leave it (os.DirFS), but a bad path is a typo
+// the user should hear about at apply time, not as a run with no metrics.
+func validateMetrics(m *testsv1alpha1.MetricsSpec) error {
+	if m == nil {
+		return nil
+	}
+	p := m.Path
+	if strings.HasPrefix(p, "/") {
+		return fmt.Errorf("spec.metrics.path %q must be relative to the working directory", p)
+	}
+	for seg := range strings.SplitSeq(p, "/") {
+		if seg == ".." {
+			return fmt.Errorf("spec.metrics.path %q must not contain '..'", p)
+		}
+	}
+	if !doublestar.ValidatePattern(p) {
+		return fmt.Errorf("spec.metrics.path %q is not a valid glob pattern", p)
+	}
+	return nil
 }

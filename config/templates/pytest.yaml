@@ -25,9 +25,13 @@ spec:
     command: ["sh", "-c"]
     args:
       - "pip install --quiet pytest=={{ config.pytestVersion }} && cd /data/repo/{{ config.testsDir }} && pytest --junit-xml=/data/repo/results/junit.xml"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/*.xml"
+      - "repo/results/**/*.xml"
   config:
     testsDir:
       type: string

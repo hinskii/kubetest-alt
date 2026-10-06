@@ -19,15 +19,23 @@ spec:
     # `container.image` on their Test to bump.
     image: grafana/k6:1.4.0
     command: ["k6"]
-    args: ["run", "/data/repo/{{ config.script }}"]
+    # --summary-export feeds spec.metrics. k6 silently skips it when the
+    # directory is missing; the wrapper pre-creates repo/results/.
+    args: ["run", "--summary-export", "/data/repo/results/summary.json", "/data/repo/{{ config.script }}"]
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
-    # k6 writes a summary.json when --summary-export is passed (see
-    # config.summaryExport below). Users add --summary-export
-    # /data/repo/results/summary.json manually if they want to override
-    # the default JSON summary shape.
+    # Includes the summary.json written by --summary-export above.
     paths:
-      - "results/**/*.json"
-      - "results/**/*.xml"
+      - "repo/results/**/*.json"
+      - "repo/results/**/*.xml"
+  # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
+  # never affects the verdict.
+  metrics:
+    from: k6Summary
+    path: "repo/results/summary.json"
   config:
     script:
       type: string

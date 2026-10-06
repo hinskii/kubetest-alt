@@ -1,0 +1,6 @@
+config:
+  testsDir: pytest
+expect:
+  phase: failed            # one test fails on purpose
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["repo/results/*.xml"]

@@ -120,3 +120,44 @@ func TestFetch_MkdirDstOnDemand(t *testing.T) {
 	)
 	require.NoError(t, err)
 }
+
+// TestFetch_TreeWritableByAnyUID: the fetcher runs as root, the tool often
+// doesn't (grafana/k6 is uid 12345). Without this, a non-root tool can't
+// create repo/results/ or write its report — found by the kind e2e when
+// k6's --summary-export silently produced nothing.
+func TestFetch_TreeWritableByAnyUID(t *testing.T) {
+	dir := t.TempDir()
+	exec := int32(0o755)
+	f := NewFetcher()
+	f.Stdout, f.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	require.NoError(t, f.Fetch(context.Background(), Content{Files: []FileContent{
+		{Path: "repo/k6/script.js", Content: "export default function () {}"},
+		{Path: "repo/bin/run.sh", Content: "#!/bin/sh\n", Mode: &exec},
+	}}, dir))
+
+	for _, d := range []string{"repo", "repo/k6", "repo/bin"} {
+		info, err := os.Stat(filepath.Join(dir, d))
+		require.NoError(t, err)
+		assert.Equal(t, os.FileMode(0o777), info.Mode().Perm(), d)
+	}
+	script, err := os.Stat(filepath.Join(dir, "repo/k6/script.js"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o666), script.Mode().Perm()&0o666, "script readable+writable by all")
+	assert.Zero(t, script.Mode().Perm()&0o111, "no execute bit invented")
+	runSh, err := os.Stat(filepath.Join(dir, "repo/bin/run.sh"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o777), runSh.Mode().Perm(), "executables stay executable for all")
+}
+
+// A symlink inside the fetched tree (e.g. from a tarball) must not let
+// the permission pass chmod something outside the volume.
+func TestShareWithAnyUID_DoesNotFollowSymlinksOut(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	require.NoError(t, os.WriteFile(outside, []byte("x"), 0o600))
+	dir := t.TempDir()
+	require.NoError(t, os.Symlink(outside, filepath.Join(dir, "link")))
+	require.NoError(t, shareWithAnyUID(dir))
+	info, err := os.Stat(outside)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "target outside the volume untouched")
+}

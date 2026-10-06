@@ -1,0 +1,8 @@
+config:
+  simulation: FixtureSimulation
+expect:
+  phase: passed            # no Gatling assertions → nothing to fail
+  metrics: {requests: 20, errors: 10, error_rate: 0.5}
+  metricsPresent: [rps, latency_avg_ms, latency_p95_ms]
+  artifacts: ["repo/results/**/js/stats.json"]
+timeout: 15m

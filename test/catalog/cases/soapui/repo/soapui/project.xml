@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<con:soapui-project name="kubetest-catalog" resourceRoot="" soapui-version="5.7.2"
+    xmlns:con="http://eviware.com/soapui/config">
+  <con:settings/>
+  <con:testSuite name="catalog">
+    <con:settings/>
+    <con:runType>SEQUENTIAL</con:runType>
+    <con:testCase failOnError="false" failTestCaseOnErrors="true" keepSession="false" name="root is 200" searchProperties="true">
+      <con:settings/>
+      <con:testStep type="httprequest" name="GET root">
+        <con:settings/>
+        <con:config method="GET" xsi:type="con:HttpRequest" name="GET root"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+          <con:settings/>
+          <con:endpoint>http://target.kubetest-catalog.svc:8000/</con:endpoint>
+          <con:request/>
+          <con:assertion type="Valid HTTP Status Codes" name="status 200">
+            <con:configuration><codes>200</codes></con:configuration>
+          </con:assertion>
+          <con:credentials><con:authType>No Authorization</con:authType></con:credentials>
+          <con:jmsConfig JMSDeliveryMode="PERSISTENT"/>
+          <con:jmsPropertyConfig/>
+          <con:parameters/>
+        </con:config>
+      </con:testStep>
+      <con:properties/>
+    </con:testCase>
+    <con:testCase failOnError="false" failTestCaseOnErrors="true" keepSession="false" name="missing is 200 (fails on purpose)" searchProperties="true">
+      <con:settings/>
+      <con:testStep type="httprequest" name="GET missing">
+        <con:settings/>
+        <con:config method="GET" xsi:type="con:HttpRequest" name="GET missing"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+          <con:settings/>
+          <con:endpoint>http://target.kubetest-catalog.svc:8000/missing</con:endpoint>
+          <con:request/>
+          <con:assertion type="Valid HTTP Status Codes" name="status 200">
+            <con:configuration><codes>200</codes></con:configuration>
+          </con:assertion>
+          <con:credentials><con:authType>No Authorization</con:authType></con:credentials>
+          <con:jmsConfig JMSDeliveryMode="PERSISTENT"/>
+          <con:jmsPropertyConfig/>
+          <con:parameters/>
+        </con:config>
+      </con:testStep>
+      <con:properties/>
+    </con:testCase>
+    <con:properties/>
+  </con:testSuite>
+  <con:properties/>
+  <con:wssContainer/>
+  <con:oAuth2ProfileContainer/>
+</con:soapui-project>

@@ -1,0 +1,22 @@
+# APIs removed from Kubernetes: batch/v1beta1 CronJob (1.25) and
+# extensions/v1beta1 Ingress (1.22). (kubepug's database does not track
+# PodSecurityPolicy, so that one would pass silently.)
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: legacy-cron
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers: [{name: c, image: busybox}]
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: legacy-ingress
+spec:
+  backend: {serviceName: web, servicePort: 80}

@@ -1,0 +1,6 @@
+config:
+  collection: newman/collection.json
+expect:
+  phase: failed            # the /missing request asserts 200 and gets 404
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["repo/results/junit.xml"]

@@ -1,0 +1,7 @@
+config:
+  projectDir: cypress-app
+expect:
+  phase: failed            # one spec fails on purpose (junit verdict)
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["repo/results/*.xml", "repo/**/cypress/screenshots/**/*"]
+timeout: 15m

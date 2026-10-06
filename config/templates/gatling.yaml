@@ -37,13 +37,22 @@ spec:
       - "{{ config.simulation }}"
       - "-rm"
       - "local"
+  # Artifact/metrics paths are relative to the wrapper's working
+  # directory, /data (no container.workingDir set), and the tool writes
+  # under /data/repo/results — hence the repo/ prefix. The wrapper
+  # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "results/**/assertions.json"
-      - "results/**/global_stats.json"
-      - "results/**/stats.json"
-      - "results/**/simulation.log"
-      - "results/**/index.html"
+      - "repo/results/**/assertions.json"
+      - "repo/results/**/global_stats.json"
+      - "repo/results/**/stats.json"
+      - "repo/results/**/simulation.log"
+      - "repo/results/**/index.html"
+  # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
+  # never affects the verdict.
+  metrics:
+    from: gatlingStats
+    path: "repo/results/**/js/stats.json"
   config:
     # Path to the Scala/Java simulations folder inside content-fetcher tree.
     simulationsFolder:

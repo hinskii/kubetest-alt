@@ -198,8 +198,11 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 				// via the shared /kubetest-bin volume, not via the image
 				// ENTRYPOINT). Args alone would pass "run" as the binary.
 				Command: []string{"k6"},
-				Args:    []string{"run", "/data/repo/script.js"},
+				Args:    []string{"run", "--summary-export", "/data/repo/results/summary.json", "/data/repo/script.js"},
 			},
+			// No results/ dir in the content: the wrapper must create it,
+			// or k6 silently skips the export and status.metrics is empty.
+			Metrics: &testsv1alpha1.MetricsSpec{From: "k6Summary", Path: "repo/results/summary.json"},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
 					// `repo/` prefix matches the platform's git-mount convention
@@ -233,6 +236,11 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 3*time.Minute)
 	assert.Equal(t, testsv1alpha1.PhasePassed, final.Status.Phase)
 	t.Logf("k6 run finished — durationMs=%d", final.Status.DurationMs)
+
+	// Report → wrapper parse → result.json → operator → status.metrics.
+	// The script makes no HTTP requests, but k6 always reports iterations.
+	assert.Equal(t, "1", final.Status.Metrics["iterations"],
+		"k6 summary must be parsed into status.metrics (got %v)", final.Status.Metrics)
 
 	// The operator's tailer wrote this run's log chunks; the apiserver must
 	// read them back from the same bucket + keys. This is the end-to-end

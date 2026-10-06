@@ -161,7 +161,7 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # + secret-safe log redaction. Floor 80 mirrors pkg/executor — every
 # error branch matters (endpoint 4xx vs 5xx vs timeout vs secret-missing
 # splits into distinct outcomes that ALL land on metrics + status).
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80 pkg/report:90 pkg/storage:60
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
