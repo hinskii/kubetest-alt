@@ -172,7 +172,8 @@ func TestFetch_GitLandsInRepoByDefault(t *testing.T) {
 	f.Stdout, f.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
 
 	data := t.TempDir()
-	require.NoError(t, f.Fetch(context.Background(), Content{Git: &GitContent{URI: "file://" + src, Revision: "main"}}, data))
+	require.NoError(t, f.Fetch(context.Background(),
+		Content{Git: &GitContent{URI: "file://" + src, Revision: "main"}}, data))
 	assert.FileExists(t, filepath.Join(data, "repo", "k6", "script.js"))
 	assert.NoFileExists(t, filepath.Join(data, "k6", "script.js"), "nothing at the data-dir root")
 
