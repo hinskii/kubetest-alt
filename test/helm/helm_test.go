@@ -147,6 +147,14 @@ func TestHelmTemplate_StorageS3PostgresValues(t *testing.T) {
 	// Log streaming defaults ON with storage — it used to need a manual
 	// extraArg, so default installs never stored any run logs.
 	assert.Contains(t, got, "--logs-enabled")
+	// Retention runs with history (fixes.md #4: it never ran at all).
+	assert.Equal(t, 1, strings.Count(got, "--retention-days=30"), "operator only")
+}
+
+func TestHelmTemplate_RetentionNeedsPostgres(t *testing.T) {
+	assert.NotContains(t, helmTemplate(t), "--retention-days")
+	got := helmTemplate(t, "--set", "postgresql.dsn=postgres://x/y", "--set", "retention.days=90")
+	assert.Contains(t, got, "--retention-days=90")
 }
 
 // GCS: no Secret anywhere (Workload Identity), SA annotations rendered.

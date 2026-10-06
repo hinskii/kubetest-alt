@@ -102,6 +102,13 @@ operator:
     bindAddress: ":8443"
     secure: true
 
+# Retention (needs postgresql.dsn): finished runs — history rows, their
+# logs/artifacts/results in object storage — and audit entries older than
+# this are removed by the operator, hourly, a month at a time. 0 keeps
+# everything.
+retention:
+  days: 30
+
 apiserver:
   replicas: 1
   service:

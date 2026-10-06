@@ -49,6 +49,7 @@ spec:
             {{- end }}
             {{- if .Values.postgresql.dsn }}
             - --postgres-dsn={{ .Values.postgresql.dsn }}
+            - --retention-days={{ .Values.retention.days }}
             {{- end }}
             {{- range .Values.operator.extraArgs }}
             - {{ . | quote }}

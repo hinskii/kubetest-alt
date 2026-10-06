@@ -475,3 +475,35 @@ func TestIntegration_Audit(t *testing.T) {
 	require.Len(t, now, 1)
 	assert.WithinDuration(t, time.Now(), now[0].At, time.Minute)
 }
+
+// RunsIn + DropPartitions + PruneAudit: the store side of the retention job.
+func TestIntegration_RetentionQueries(t *testing.T) {
+	ctx := t.Context()
+	p := NewPostgres(harness.pool)
+	old := time.Date(2025, 3, 10, 12, 0, 0, 0, time.UTC)
+	part := PartitionForTime(old)
+	require.NoError(t, p.EnsurePartitions(ctx, []Partition{part}))
+
+	uid := "aaaaaaaa-0000-0000-0000-0000000000f1"
+	run := newRun(uid, "old-run", testsv1alpha1.PhasePassed, old)
+	require.NoError(t, p.SaveFinished(ctx, run))
+
+	refs, err := p.RunsIn(ctx, part)
+	require.NoError(t, err)
+	assert.Equal(t, []RunRef{{Namespace: "int-test", UID: uid}}, refs)
+
+	require.NoError(t, p.DropPartitions(ctx, []Partition{part}))
+	_, err = p.Get(ctx, uid)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	ns := "prune-" + time.Now().Format("150405.000000")
+	require.NoError(t, p.AppendAudit(ctx, AuditEntry{Action: "run.delete", Namespace: ns, At: old}))
+	require.NoError(t, p.AppendAudit(ctx, AuditEntry{Action: "run.create", Namespace: ns}))
+	n, err := p.PruneAudit(ctx, time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	assert.GreaterOrEqual(t, n, int64(1))
+	left, err := p.ListAudit(ctx, AuditFilter{Namespace: ns}, 0)
+	require.NoError(t, err)
+	require.Len(t, left, 1)
+	assert.Equal(t, "run.create", left[0].Action)
+}

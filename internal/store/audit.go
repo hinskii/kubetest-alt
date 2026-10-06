@@ -115,3 +115,12 @@ func (p *Postgres) ListAudit(ctx context.Context, f AuditFilter, limit int) ([]A
 	}
 	return out, rows.Err()
 }
+
+// PruneAudit deletes audit entries older than before (retention).
+func (p *Postgres) PruneAudit(ctx context.Context, before time.Time) (int64, error) {
+	tag, err := p.pool.Exec(ctx, `DELETE FROM audit_log WHERE at < $1`, before)
+	if err != nil {
+		return 0, fmt.Errorf("store: prune audit: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}

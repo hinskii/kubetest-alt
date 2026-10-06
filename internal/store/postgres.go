@@ -261,6 +261,33 @@ func (p *Postgres) DropPartitions(ctx context.Context, ps []Partition) error {
 	return nil
 }
 
+// RunRef locates a stored run's objects (pkg/storage.ForRun).
+type RunRef struct {
+	Namespace string
+	UID       string
+}
+
+// RunsIn returns the runs stored in partition part, so retention can
+// remove their objects before dropping the partition.
+func (p *Postgres) RunsIn(ctx context.Context, part Partition) ([]RunRef, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT namespace, uid::text FROM test_runs WHERE finished_at >= $1 AND finished_at < $2`,
+		part.Start, part.End)
+	if err != nil {
+		return nil, fmt.Errorf("store: runs in %s: %w", part.Name, err)
+	}
+	defer rows.Close()
+	var out []RunRef
+	for rows.Next() {
+		var r RunRef
+		if err := rows.Scan(&r.Namespace, &r.UID); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ExistingPartitions returns the test_runs child partitions currently
 // attached to the parent, sorted oldest-first. Reads pg_inherits +
 // pg_class + pg_get_expr to parse the FOR VALUES clause back into Start/End.

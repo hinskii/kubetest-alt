@@ -54,6 +54,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/logstream"
 	"github.com/hinskii/kubetest-alt/internal/metrics"
+	"github.com/hinskii/kubetest-alt/internal/retention"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
 	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
@@ -162,6 +163,13 @@ func main() {
 	flag.StringVar(&postgresDSN, "postgres-dsn", "",
 		"Postgres DSN for run-history + retention. Empty disables persistence. "+
 			"Or set via $POSTGRES_DSN.")
+
+	// Retention (§9, fixes.md #4): how long run history, its objects and
+	// the audit log are kept. Needs --postgres-dsn.
+	var retentionDays int
+	flag.IntVar(&retentionDays, "retention-days", 30,
+		"Days to keep finished runs (history rows, their logs/artifacts/results) and audit entries; "+
+			"removal is per month, so runs live up to a month longer. 0 keeps everything.")
 
 	// Step 12 tuning knobs. Defaults match the plan: cron tick every 30s,
 	// trigger gate evaluation every 1s. Both are safe to leave at defaults
@@ -326,7 +334,7 @@ func main() {
 				// first write of the new month.
 				partCtx, partCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				parts := store.PartitionsToCreate(time.Now().UTC(),
-					30*24*time.Hour, 32*24*time.Hour)
+					time.Duration(max(retentionDays, 1))*24*time.Hour, 32*24*time.Hour)
 				if err := pgStore.EnsurePartitions(partCtx, parts); err != nil {
 					setupLog.Error(err, "EnsurePartitions failed — run-history disabled")
 				} else {
@@ -444,6 +452,25 @@ func main() {
 	}); err != nil {
 		setupLog.Error(err, "Failed to add scheduler runnable")
 		os.Exit(1)
+	}
+
+	// Retention: leader-elected, hourly. Without object storage only the
+	// history rows go; objects then need a bucket lifecycle rule.
+	if pg, ok := runStore.(*store.Postgres); ok && retentionDays > 0 {
+		job := &retention.Job{
+			Store:     pg,
+			Bucket:    storageCfg.Bucket,
+			Retention: time.Duration(retentionDays) * 24 * time.Hour,
+			Log:       ctrl.Log.WithName("retention"),
+		}
+		if objectStore != nil {
+			job.Objects = objectStore
+		}
+		if err := mgr.Add(job); err != nil {
+			setupLog.Error(err, "Failed to add retention runnable")
+			os.Exit(1)
+		}
+		setupLog.Info("retention enabled", "days", retentionDays)
 	}
 
 	// Dynamic client + REST mapper feed the TestTrigger reconciler's

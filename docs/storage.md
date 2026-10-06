@@ -100,6 +100,21 @@ spec:
     serviceAccountName: kubetest-runner   # annotated for Workload Identity / IRSA
 ```
 
+## Retention
+
+With `postgresql.dsn` set, the operator removes finished runs older than
+`retention.days` (default 30) every hour: for each monthly history
+partition past the window it deletes every run's objects
+(`runs/<namespace>/<uid>/` — logs, artifacts, `result.json`), then drops the
+partition. Removal is per month, so a run lives up to a month longer than
+`retention.days`. If deleting objects fails, the partition is kept and the
+next pass retries — nothing is orphaned. Audit-log entries older than the
+window go too. `retention.days: 0` keeps everything.
+
+Without Postgres the operator has no list of runs to expire: give the
+bucket a lifecycle rule instead (S3 `Expiration` on prefix `runs/`, GCS
+`Delete` with `age` and `matchesPrefix: [runs/]`).
+
 ## Verification
 
 - `pkg/storage/backends_integration_test.go` runs one conformance suite
