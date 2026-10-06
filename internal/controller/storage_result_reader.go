@@ -38,9 +38,9 @@ type StorageResultReader struct {
 	Bucket     string
 }
 
-// NewStorageResultReader wires a Downloader (production: pkg/storage.MinIO)
+// NewStorageResultReader wires a Downloader (production: a pkg/storage.Backend)
 // with the operator's configured bucket. cmd/operator constructs one when
-// --minio-endpoint is set; otherwise the controller stays on NoResultReader.
+// --storage-type is set; otherwise the controller stays on NoResultReader.
 func NewStorageResultReader(d storage.Downloader, bucket string) *StorageResultReader {
 	return &StorageResultReader{Downloader: d, Bucket: bucket}
 }

@@ -11,7 +11,7 @@ Build an open-source-style in-house alternative to Testkube's OSS agent — but 
 - **Operator in Go** with kubebuilder/controller-runtime.
 - **Thin API server** for the GUI (read models + mutating actions that write CRs). GUI never holds private state that isn't reconstructable from cluster + Postgres run history.
 - **Postgres** for run history/results (NOT Mongo — see §9).
-- **MinIO/S3** for artifacts + logs.
+- **Object storage** for artifacts + logs: any S3-compatible store (AWS S3, MinIO, …) or GCS (native API, Workload Identity) — `storage.type: s3|gcs`, `pkg/storage`.
 - **Any containerized tool** — a Test is an image + command. Verdict = process exit code + a small set of declarative `verdictFrom` processors (JUnit, JTL) for tools whose exit codes lie. Curated `TestTemplate` catalog names the tools (`kubetest.io/tool` label); the operator itself is tool-agnostic.
 - Multi-namespace, GitOps-compatible, Istio-aware.
 - **No workload-level hacks for infra concerns.** The CRD exposes a fully generic pod annotations/labels passthrough (see §8) — the platform hardcodes NO specific annotations, and infra behavior (e.g. mesh) is never handled via in-wrapper hacks like quitquitquit.
@@ -210,7 +210,7 @@ spec:
 - TestTrigger with condition gating.
 - Built-in RPC cron scheduler (avoid CronJob-per-workflow sprawl).
 - Prometheus `/metrics` endpoint. **[SRC]** (`internal/app/api/metrics`, `promhttp.Handler()` at `/metrics`).
-- MinIO artifact + log storage with per-execution folders; JUnit auto-parse.
+- Object-storage (S3/GCS) artifact + log storage with per-execution folders; JUnit auto-parse.
 - kubectl plugin CLI architecture: client abstraction, `~/.testkube` contexts. **[SRC]**
 
 **Copy but simplify:**
@@ -268,8 +268,8 @@ Both ArgoCD and the GUI write the same CRs. Testkube's own answer (Control Plane
 > **Lesson → our retention:** Postgres from day 1. Build retention in from the start:
 > - Partition `test_runs` by created month; drop old partitions via a CronJob.
 > - Configurable `retentionDays` (default 30), per-namespace or global.
-> - Separate lifecycle for MinIO artifacts/logs: bucket lifecycle rules (expire objects after N days) keyed by execution-ID prefix.
-> - Store large logs/artifacts in MinIO, only pointers + summary + step results in Postgres. Never store big blobs in the DB.
+> - Separate lifecycle for artifacts/logs in object storage: bucket lifecycle rules (expire objects after N days) keyed by execution-ID prefix.
+> - Store large logs/artifacts in object storage, only pointers + summary + step results in Postgres. Never store big blobs in the DB.
 
 ---
 
@@ -446,7 +446,7 @@ type TestRunStatus struct {
     JobName      string                `json:"jobName,omitempty"`
     ResolvedSpec string                `json:"resolvedSpec,omitempty"` // snapshot of Test spec at start (JSON) — see §15
     Steps        map[string]StepResult `json:"steps,omitempty"`
-    LogsRef      string                `json:"logsRef,omitempty"`      // MinIO object key
+    LogsRef      string                `json:"logsRef,omitempty"`      // object-storage key
     ArtifactRefs []ArtifactRef         `json:"artifactRefs,omitempty"`
     Message      string                `json:"message,omitempty"`
     Conditions   []metav1.Condition    `json:"conditions,omitempty"`
@@ -531,7 +531,7 @@ Container contract otherwise unchanged: operator projects
 `request.json` at `/etc/kubetest/request.json`; content pre-mounted at
 `$KUBETEST_DATADIR` by the content-fetcher init; `/entry` streams stdout
 (operator tails via k8s API); on exit writes `result.json` to
-`$KUBETEST_RESULTDIR` and scrapes `artifacts.paths` → MinIO; SIGTERM
+`$KUBETEST_RESULTDIR` and scrapes `artifacts.paths` → object storage; SIGTERM
 flushes partial state.
 
 ### Per-tool exit-code notes (were here as a table — moved to §15.2 as catalog guidance)
@@ -548,8 +548,8 @@ for the curated template list.
 
 - **Init container** (`content-fetcher`): clones git (sparse), unpacks tarballs, writes inline files → shared `emptyDir` at `/data`. Analog of `testkube-executor-init`. **[SRC]**
 - **Main container**: the tool wrapper. Shares `/data`.
-- **Artifact scraping**: prefer a **post-step scrape in the wrapper** (glob → MinIO) for single-pod runs. For distributed runs (JMeter slaves) needing shared storage, use a `ReadWriteMany` PVC (NFS) — exactly Testkube's distributed-JMeter pattern. **[DOC]** Provide `--artifact-sidecar` mode (scraper as sidecar container) for tools that write continuously.
-- **Log streaming**: operator watches pod, tails logs via k8s client **from pod start** and flushes to MinIO continuously (kubelet log rotation — see §15), fans out to (a) websocket subscribers (live GUI) and (b) MinIO `runs/<namespace>/<runUID>/logs/` (one bucket for logs, artifacts and `result.json`; layout owned by `pkg/storage.RunKeys`). Keep a small ring-buffer in the API server for reconnects. (Testkube uses websockets for live UI logs + MinIO bucket `testkube-logs`; a NATS log-server exists but we don't need NATS — direct k8s tail + websocket is simpler.) **[SRC for buckets; INFER for exact TK protocol]**
+- **Artifact scraping**: prefer a **post-step scrape in the wrapper** (glob → object storage) for single-pod runs. For distributed runs (JMeter slaves) needing shared storage, use a `ReadWriteMany` PVC (NFS) — exactly Testkube's distributed-JMeter pattern. **[DOC]** Provide `--artifact-sidecar` mode (scraper as sidecar container) for tools that write continuously.
+- **Log streaming**: operator watches pod, tails logs via k8s client **from pod start** and flushes to object storage continuously (kubelet log rotation — see §15), fans out to (a) websocket subscribers (live GUI) and (b) `runs/<namespace>/<runUID>/logs/` in the bucket (one bucket for logs, artifacts and `result.json`; layout owned by `pkg/storage.RunKeys`). Keep a small ring-buffer in the API server for reconnects. (Testkube uses websockets for live UI logs + MinIO bucket `testkube-logs`; a NATS log-server exists but we don't need NATS — direct k8s tail + websocket is simpler.) **[SRC for buckets; INFER for exact TK protocol]**
 
 ---
 
@@ -572,8 +572,8 @@ kubetest-alt/
 │   │   └── testtrigger_controller.go # watches k8s events -> creates TestRun
 │   ├── compiler/                 # Test(+Template) -> k8s Job/Pod/ConfigMap/Secret
 │   ├── scheduler/                # built-in RPC cron (NOT CronJob-per-test)
-│   ├── logstream/                # k8s log tail -> websocket + MinIO flush
-│   ├── scraper/                  # glob artifacts -> MinIO; JUnit/perf parse
+│   ├── logstream/                # k8s log tail -> websocket + object-storage flush
+│   ├── scraper/                  # glob artifacts -> object storage; JUnit parse
 │   └── store/                    # Postgres run-history repo + retention
 ├── pkg/
 │   ├── executor/                 # Runner interface + ExecutionRequest/Result
@@ -581,7 +581,7 @@ kubetest-alt/
 │   └── apis/                     # generated clientset (for API server + CLI)
 ├── executors/                    # wrapper Dockerfiles: k6/ cypress/ newman/ locust/ jmeter/
 ├── config/                       # kustomize: crd/ rbac/ manager/ webhook/
-├── charts/kubetest-alt/          # Helm: operator, apiserver, GUI, minio, postgres subcharts
+├── charts/kubetest-alt/          # Helm: operator, apiserver (object storage + Postgres external)
 ├── web/                          # GUI (SPA) -> talks only to apiserver
 └── test/                         # e2e (envtest + kind)
 ```
@@ -591,7 +591,7 @@ kubetest-alt/
 ## 14. Build Order (staged)
 
 1. **CRDs + operator skeleton** (`Test`, `TestRun`) + `testrun_controller` that creates a single Job/Pod and writes status. Single k6 wrapper. envtest.
-2. **Content fetcher init container** (git/files/tarball) + **artifact scraper** (glob→MinIO) + **log streaming** (tail→websocket→MinIO). Postgres run store + retention.
+2. **Content fetcher init container** (git/files/tarball) + **artifact scraper** (glob→object storage) + **log streaming** (tail→websocket→object storage). Postgres run store + retention.
 3. **Thin API server + GUI**: list/detail Tests & TestRuns, live logs, artifact download, "Run" button (creates TestRun). `managed-by` label enforcement.
 4. **Remaining executors** (cypress/newman/locust/jmeter) + JUnit/perf auto-parse.
 5. **TestTrigger** controller (k8s-event + condition gating, ArgoCD sync-wave friendly) + **cron scheduler**.
@@ -652,12 +652,12 @@ template — mitigation lives in the catalog, NOT in Go runner code.
 - **ImagePullBackOff / scheduling failures:** pod never starts, deadline eventually fires. Surface as `error` ("infra: ImagePullBackOff <image>"), not a test failure — read pod events/conditions in the reconciler.
 
 ### 15.4 Logs
-- **Kubelet rotates container logs (default ~10MB)** — verbose k6/JMeter output overruns rotation and loses the beginning if logs are read post-mortem. Therefore: tail from pod start, flush to MinIO continuously (§12), never rely on end-of-run `GetLogs`.
+- **Kubelet rotates container logs (default ~10MB)** — verbose k6/JMeter output overruns rotation and loses the beginning if logs are read post-mortem. Therefore: tail from pod start, flush to object storage continuously (§12), never rely on end-of-run `GetLogs`.
 - **Watch disconnects:** API server drops watches ~every 5 min; reconnect with `resourceVersion`, on `410 Gone` re-list. Reconciler must be idempotent — duplicate events WILL arrive. (controller-runtime handles this; don't hand-roll raw watches in the API server either — use the shared cache.)
 
 ### 15.5 CRD / GitOps
 - **Snapshot the resolved Test spec into `TestRun.status.resolvedSpec` at start.** Otherwise, editing a Test mid-run makes historical results correspond to no recorded definition. GUI shows the snapshot for finished runs.
-- **Owner references:** Job → ownerRef → TestRun (cascade delete OK). **NO ownerRef Test → TestRun** — deleting a definition must not erase run history. Add a **finalizer on TestRun**: delete during `running` = kill Job + cleanup MinIO stream + then remove finalizer.
+- **Owner references:** Job → ownerRef → TestRun (cascade delete OK). **NO ownerRef Test → TestRun** — deleting a definition must not erase run history. Add a **finalizer on TestRun**: delete during `running` = kill Job + cleanup log stream + then remove finalizer.
 - **ArgoCD prune:** imperatively-created TestRuns inside an Argo-managed namespace show OutOfSync/get pruned. Exclude `TestRun` via Argo project `resource.exclusions` (or run executions in a dedicated namespace Argo doesn't own).
 
 ### 15.6 Scheduling & concurrency

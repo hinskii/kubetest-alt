@@ -57,7 +57,7 @@ type RunResult struct {
 var ErrResultNotFound = errors.New("result: not found")
 
 // ResultReader fetches the wrapper's terminal result for a given TestRun.
-// Interface exists so step 07 can drop in a MinIO/S3-backed implementation
+// Interface exists so step 07 can drop in a object-storage-backed implementation
 // without touching the reconciler.
 type ResultReader interface {
 	// Read takes the whole run so implementations derive storage keys from

@@ -786,7 +786,7 @@
             "description": "Log storage not configured."
           }
         },
-        "summary": "Stream logs over WebSocket. Live runs poll the MinIO chunk prefix every ~1s; archived runs stream all chunks then close. Binary WS frames = raw log bytes."
+        "summary": "Stream logs over WebSocket. Live runs poll object storage chunk prefix every ~1s; archived runs stream all chunks then close. Binary WS frames = raw log bytes."
       },
       "parameters": [
         {

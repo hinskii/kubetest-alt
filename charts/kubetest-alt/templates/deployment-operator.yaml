@@ -33,19 +33,17 @@ spec:
             - --health-probe-bind-address=:8081
             - --metrics-bind-address={{ .Values.operator.metrics.bindAddress }}
             - --metrics-secure={{ .Values.operator.metrics.secure }}
-            {{- if .Values.minio.endpoint }}
-            - --minio-endpoint={{ .Values.minio.endpoint }}
-            - --minio-bucket={{ .Values.minio.bucket }}
-            {{- if .Values.minio.secretName }}
-            - --minio-secret-name={{ .Values.minio.secretName }}
-            {{- end }}
-            {{- if .Values.minio.useSSL }}
-            - --minio-use-ssl
+            {{- include "kubetest-alt.storageArgs" . | nindent 12 }}
+            {{- if .Values.storage.type }}
+            {{- if and (eq .Values.storage.type "s3") .Values.storage.s3.secretName }}
+            # Same Secret name must exist in every namespace that runs tests:
+            # the wrapper gets it via envFrom.
+            - --storage-secret-name={{ .Values.storage.s3.secretName }}
             {{- end }}
             {{- if .Values.operator.logs.enabled }}
-            # Pod-log streaming to MinIO (§12/§15.4). The binary defaults it
-            # off because standalone installs may lack pods/log RBAC; this
-            # chart grants that RBAC, so it's on whenever MinIO is.
+            # Pod-log streaming to object storage (§12/§15.4). The binary
+            # defaults it off because standalone installs may lack pods/log
+            # RBAC; this chart grants that RBAC, so it's on with storage.
             - --logs-enabled
             {{- end }}
             {{- end }}
@@ -56,23 +54,9 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
-            {{- if .Values.minio.secretName }}
-            # Operator's OWN MinIO client credentials (for result.json
-            # download + log-stream upload). Wrapper uses the same Secret
-            # via envFrom on the wrapper container — see compiler.
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.minio.secretName }}
-                  key: AWS_ACCESS_KEY_ID
-                  optional: true
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.minio.secretName }}
-                  key: AWS_SECRET_ACCESS_KEY
-                  optional: true
-            {{- end }}
+            # Operator's own object-storage credentials (result.json reads,
+            # log uploads).
+            {{- include "kubetest-alt.storageEnv" . | nindent 12 }}
           ports:
             - name: metrics
               containerPort: 8443

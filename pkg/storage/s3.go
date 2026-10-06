@@ -29,31 +29,41 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// MinIO wraps a minio-go client as both Uploader and Downloader. Zero value
-// isn't usable — use NewMinIO.
-type MinIO struct {
+// S3 is the backend for any S3-compatible store (AWS S3, MinIO, Ceph,
+// R2, …) via minio-go. Zero value isn't usable — use NewS3.
+type S3 struct {
 	client *minio.Client
 }
 
-// NewMinIO builds a MinIO storage client from Config. Kept trivial so tests
-// covering error branches can skip this constructor entirely (tests use Fake
-// instead — minio-go's own network paths aren't retested here).
-func NewMinIO(cfg Config) (*MinIO, error) {
-	if cfg.Endpoint == "" {
-		return nil, errors.New("storage: MinIO endpoint is required")
+// NewS3 builds the S3 backend. Static keys when given; otherwise the AWS
+// credential chain (AWS_* env, IRSA web identity, instance metadata).
+// minio-go also recognises storage.googleapis.com, but the GCS backend is
+// the supported way to use Google Cloud Storage.
+func NewS3(cfg S3Config) (*S3, error) {
+	endpoint := cfg.Endpoint
+	if endpoint == "" {
+		endpoint = "s3.amazonaws.com"
 	}
-	client, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+	creds := credentials.NewChainCredentials([]credentials.Provider{
+		&credentials.EnvAWS{},
+		&credentials.IAM{},
+	})
+	if cfg.AccessKey != "" || cfg.SecretKey != "" {
+		creds = credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, "")
+	}
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  creds,
 		Secure: cfg.UseSSL,
+		Region: cfg.Region,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("storage: new minio client: %w", err)
+		return nil, fmt.Errorf("storage: new s3 client: %w", err)
 	}
-	return &MinIO{client: client}, nil
+	return &S3{client: client}, nil
 }
 
 // Put implements Uploader.
-func (m *MinIO) Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
+func (m *S3) Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error {
 	opts := minio.PutObjectOptions{ContentType: contentType}
 	if _, err := m.client.PutObject(ctx, bucket, key, r, size, opts); err != nil {
 		return fmt.Errorf("storage: put %s/%s: %w", bucket, key, err)
@@ -63,7 +73,7 @@ func (m *MinIO) Put(ctx context.Context, bucket, key string, r io.Reader, size i
 
 // Get implements Downloader. Translates minio-go's NoSuchKey → ErrNotFound
 // so callers can errors.Is-check without importing minio-go.
-func (m *MinIO) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+func (m *S3) Get(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
 	obj, err := m.client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("storage: get %s/%s: %w", bucket, key, err)
@@ -83,7 +93,7 @@ func (m *MinIO) Get(ctx context.Context, bucket, key string) (io.ReadCloser, err
 
 // List implements Lister. Streams ListObjects → sorted []string. Bounded by
 // the caller: pass a specific prefix (never "").
-func (m *MinIO) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+func (m *S3) List(ctx context.Context, bucket, prefix string) ([]string, error) {
 	if prefix == "" {
 		return nil, errors.New("storage: List requires a non-empty prefix")
 	}
@@ -103,7 +113,7 @@ func (m *MinIO) List(ctx context.Context, bucket, prefix string) ([]string, erro
 
 // PresignGetURL implements Presigner. Delegates to minio-go's
 // PresignedGetObject; the returned URL is opaque and self-contained.
-func (m *MinIO) PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
+func (m *S3) PresignGetURL(ctx context.Context, bucket, key string, expiry time.Duration) (string, error) {
 	if expiry <= 0 {
 		return "", errors.New("storage: PresignGetURL requires positive expiry")
 	}
@@ -117,11 +127,12 @@ func (m *MinIO) PresignGetURL(ctx context.Context, bucket, key string, expiry ti
 // RemovePrefix implements Remover. Pipes ListObjects → RemoveObjects; both
 // are streaming so a large prefix doesn't buffer entire object lists in
 // memory. Missing prefix is a no-op (ListObjects yields zero results).
-func (m *MinIO) RemovePrefix(ctx context.Context, bucket, prefix string) error {
+func (m *S3) RemovePrefix(ctx context.Context, bucket, prefix string) error {
 	if prefix == "" {
 		return errors.New("storage: RemovePrefix requires a non-empty prefix")
 	}
 	objectsCh := make(chan minio.ObjectInfo)
+	var listErr error // written by the lister goroutine before it closes objectsCh
 	go func() {
 		defer close(objectsCh)
 		for obj := range m.client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
@@ -129,11 +140,10 @@ func (m *MinIO) RemovePrefix(ctx context.Context, bucket, prefix string) error {
 			Recursive: true,
 		}) {
 			if obj.Err != nil {
-				// Surface the list error to the remover loop via a synthetic
-				// object with the error attached — RemoveObjects doesn't
-				// accept an error channel, so we send-and-drop and rely on
-				// the retry to converge.
-				continue
+				// Stop and report: a failed listing used to be skipped
+				// silently, so RemovePrefix "succeeded" with objects left.
+				listErr = fmt.Errorf("storage: list %s/%s: %w", bucket, prefix, obj.Err)
+				return
 			}
 			select {
 			case objectsCh <- obj:
@@ -147,6 +157,11 @@ func (m *MinIO) RemovePrefix(ctx context.Context, bucket, prefix string) error {
 		if rerr.Err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("storage: remove %s/%s: %w", bucket, rerr.ObjectName, rerr.Err)
 		}
+	}
+	// RemoveObjects drains objectsCh until it is closed, so listErr is set
+	// (if at all) before we get here.
+	if firstErr == nil {
+		firstErr = listErr
 	}
 	return firstErr
 }

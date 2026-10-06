@@ -88,9 +88,9 @@ func (s *Server) listRunArtifacts(w http.ResponseWriter, r *http.Request) {
 // getRunArtifact serves one artifact.
 //
 // Default: streams the bytes through the API server. Control Center runs
-// on a different cluster and cannot reach MinIO, so a presigned URL is
+// on a different cluster and cannot reach the object store, so a presigned URL is
 // useless to it. ?download=1 sets Content-Disposition: attachment.
-// ?presign=1: returns {url, expiresIn} for clients that can reach MinIO.
+// ?presign=1: returns {url, expiresIn} for clients that can reach the object store.
 //
 // The {path...} suffix becomes storage.RunKeys.Artifact(path) for the
 // resolved run (namespace + UID). Path traversal is rejected before any

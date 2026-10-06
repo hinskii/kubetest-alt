@@ -65,7 +65,7 @@ type TestRunReconciler struct {
 
 	// Results reads the wrapper's result.json for terminal Jobs. Defaults to
 	// NoResultReader (always ErrResultNotFound) — step 07 wires the real
-	// MinIO-backed implementation.
+	// object-storage-backed implementation.
 	Results ResultReader
 
 	// LogRegistry starts/stops per-run log tailers as pods transition to
@@ -673,7 +673,7 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 // running + Job gone" (which the orphan detector treats as an error).
 //
 // Also stops the log tailer BEFORE deleting the Job: StopTailer blocks on
-// final flush, so we guarantee the last chunk lands in MinIO before the
+// final flush, so we guarantee the last chunk lands in object storage before the
 // pod's logs disappear along with the Job.
 func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *testsv1alpha1.TestRun,
 	phase testsv1alpha1.Phase, reason, message string, job *batchv1.Job) (ctrl.Result, error) {

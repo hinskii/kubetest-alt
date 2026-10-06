@@ -49,28 +49,17 @@ import (
 // things §step-10 mandates.
 func main() {
 	var (
-		listenAddr     string
-		namespace      string
-		minioEndpoint  string
-		bucket         string
-		minioAccessKey string
-		minioSecretKey string
-		minioUseSSL    bool
-		postgresDSN    string
-		presignExpiry  time.Duration
+		listenAddr    string
+		namespace     string
+		postgresDSN   string
+		presignExpiry time.Duration
 	)
 	flag.StringVar(&listenAddr, "listen", ":8080", "HTTP listen address.")
 	flag.StringVar(&namespace, "namespace", "",
 		"Namespace to serve. Empty = cluster-wide (callers pass ?namespace= per request).")
-	flag.StringVar(&minioEndpoint, "minio-endpoint", "",
-		"MinIO/S3 endpoint (host:port). Empty disables logs+artifacts (health still up).")
-	flag.StringVar(&bucket, "minio-bucket", storage.DefaultBucket,
-		"Bucket the operator writes logs, artifacts and results to. Must match the operator's --minio-bucket.")
-	flag.StringVar(&minioAccessKey, "minio-access-key", "",
-		"MinIO access key (or $MINIO_ACCESS_KEY).")
-	flag.StringVar(&minioSecretKey, "minio-secret-key", "",
-		"MinIO secret key (or $MINIO_SECRET_KEY).")
-	flag.BoolVar(&minioUseSSL, "minio-use-ssl", false, "Use https for MinIO.")
+	// Same flags as the operator (pkg/storage.BindFlags) — must point at
+	// the same backend and bucket the operator writes to.
+	storageFlags := storage.BindFlags(flag.CommandLine)
 	flag.StringVar(&postgresDSN, "postgres-dsn", "",
 		"Postgres DSN for run history (or $POSTGRES_DSN). Empty = cluster-only listing.")
 	flag.DurationVar(&presignExpiry, "presign-expiry", 15*time.Minute,
@@ -83,11 +72,10 @@ func main() {
 	ctrl.SetLogger(logger)
 	setupLog := ctrl.Log.WithName("apiserver-setup")
 
-	if minioAccessKey == "" {
-		minioAccessKey = os.Getenv("MINIO_ACCESS_KEY")
-	}
-	if minioSecretKey == "" {
-		minioSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	storageCfg := storageFlags.Config()
+	if err := storageCfg.Validate(); err != nil {
+		setupLog.Error(err, "invalid storage flags")
+		os.Exit(1)
 	}
 	if postgresDSN == "" {
 		postgresDSN = os.Getenv("POSTGRES_DSN")
@@ -127,31 +115,25 @@ func main() {
 	srv := &apiserver.Server{
 		K8sClient:          cl.GetClient(),
 		Namespace:          namespace,
-		Bucket:             bucket,
+		Bucket:             storageCfg.Bucket,
 		PresignedURLExpiry: presignExpiry,
 	}
 
-	// MinIO wiring — one client fulfills Downloader + Lister + Presigner.
-	// If not configured, log endpoints return 503; other endpoints work.
-	if minioEndpoint != "" {
-		mc, err := storage.NewMinIO(storage.Config{
-			Endpoint:  minioEndpoint,
-			Bucket:    bucket,
-			UseSSL:    minioUseSSL,
-			AccessKey: minioAccessKey,
-			SecretKey: minioSecretKey,
-		})
+	// Object storage — one backend serves logs, artifacts, presigning and
+	// deletes. Without it those endpoints return 503; the rest work.
+	if storageCfg.Enabled() {
+		backend, err := storage.New(ctx, storageCfg)
 		if err != nil {
-			setupLog.Error(err, "MinIO init failed — logs+artifacts disabled")
+			setupLog.Error(err, "object storage init failed — logs+artifacts disabled", "type", storageCfg.Type)
 		} else {
-			srv.Downloader = mc
-			srv.Lister = mc
-			srv.Presigner = mc
-			srv.Remover = mc
-			setupLog.Info("MinIO wired", "endpoint", minioEndpoint)
+			srv.Downloader = backend
+			srv.Lister = backend
+			srv.Presigner = backend
+			srv.Remover = backend
+			setupLog.Info("object storage wired", "type", storageCfg.Type, "bucket", storageCfg.Bucket)
 		}
 	} else {
-		setupLog.Info("--minio-endpoint not set — /runs/*/logs and /runs/*/artifacts return 503")
+		setupLog.Info("--storage-type not set — /runs/*/logs and /runs/*/artifacts return 503")
 	}
 
 	// Postgres read wiring. Same shape as cmd/operator (§step-09), but

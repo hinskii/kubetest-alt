@@ -27,7 +27,7 @@ limitations under the License.
 //
 // # Live logs
 //
-// MinIO chunk-polling. Apiserver and operator are separate binaries so the
+// Object-storage chunk-polling. Apiserver and operator are separate binaries so the
 // operator's in-memory tailer registry from step 08 is unreachable without
 // gRPC/IPC. Chunk-polling is stateless and needs only the existing
 // Downloader + Lister — see chunk_reader.go for the design rationale.
@@ -64,7 +64,7 @@ type Server struct {
 	// then returns cluster-only results.
 	Store RunReader
 
-	// Downloader + Lister + Presigner make up the MinIO surface handlers
+	// Downloader + Lister + Presigner make up the object-storage surface handlers
 	// need. All three optional individually — endpoints degrade gracefully
 	// when a dep is missing (logs return 503, artifacts return 503).
 	Downloader storage.Downloader

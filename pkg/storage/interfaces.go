@@ -15,12 +15,11 @@ limitations under the License.
 */
 
 // Package storage abstracts the object store the wrapper writes to and the
-// operator reads from. Small interfaces so tests use in-memory fakes and
-// production wires a MinIO/S3 client (minio-go).
+// operator and API server read from. Two backends (config.go): any
+// S3-compatible store (AWS S3, MinIO, Ceph, R2, …) and Google Cloud
+// Storage. Small interfaces so tests use in-memory fakes.
 //
-// Layout convention (step 07): bucket = kubetest-artifacts (configurable),
-// keys = "<runID>/<relpath>" for scraped files, "<runID>/result.json" for
-// the wrapper's terminal ExecutionResult.
+// Key layout: RunKeys (keys.go).
 package storage
 
 import (
@@ -71,8 +70,8 @@ type Remover interface {
 }
 
 // Lister enumerates keys under a prefix. The API server (step 10) uses it
-// to page through log chunks (kubetest-logs/<runID>/<8d>.log) and artifact
-// listings without pulling every object body first.
+// to page through log chunks and artifact listings without pulling every
+// object body first.
 //
 // Contract:
 //   - Missing prefix returns an empty slice + nil error.
@@ -87,8 +86,8 @@ type Lister interface {
 }
 
 // Presigner issues time-bounded pre-signed URLs. The API server (step 10)
-// returns these to browsers so artifact downloads go direct to MinIO
-// without proxying bytes through the operator.
+// returns these on ?presign=1 for clients that can reach the object store
+// directly.
 //
 // Contract:
 //   - expiry must be positive; implementations return an error on 0/negative.
@@ -103,23 +102,3 @@ type Presigner interface {
 // ErrNotFound is the sentinel Downloader implementations return when the
 // requested key doesn't exist. errors.Is-friendly.
 var ErrNotFound = errors.New("storage: object not found")
-
-// Config carries the parameters both real MinIO and fake implementations
-// accept. Kept small — auth details are per-implementation.
-type Config struct {
-	// Endpoint is host:port for MinIO / S3 API (no scheme).
-	Endpoint string
-
-	// Bucket is where objects land. Layout §12: "kubetest-artifacts".
-	Bucket string
-
-	// UseSSL toggles https:// for MinIO/S3 client. Default false for in-cluster
-	// MinIO (cheaper); operators terminate TLS at ingress if needed.
-	UseSSL bool
-
-	// AccessKey / SecretKey are the S3-standard credentials. In production
-	// these come from the wrapper container's envFrom secret (the compiler
-	// injects the secret ref); locally tests set them directly.
-	AccessKey string
-	SecretKey string
-}

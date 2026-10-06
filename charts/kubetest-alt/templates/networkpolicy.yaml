@@ -2,7 +2,7 @@
 {{/*
 Values-gated NetworkPolicy. Restricts ingress to the operator+apiserver
 Pods to same-namespace traffic + a labeled Prometheus scraper.
-Egress unrestricted (operator talks to the api server, MinIO, Postgres,
+Egress unrestricted (operator talks to the api server, object storage, Postgres,
 webhook endpoints, etc. — the set is user-supplied and pinning it
 would create false negatives).
 */}}

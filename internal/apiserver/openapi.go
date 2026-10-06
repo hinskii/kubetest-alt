@@ -172,7 +172,7 @@ func OpenAPISpec() map[string]any {
 			},
 			"/runs/{id}/logs": map[string]any{
 				"get": map[string]any{
-					"summary": "Stream logs over WebSocket. Live runs poll the MinIO " +
+					"summary": "Stream logs over WebSocket. Live runs poll object storage " +
 						"chunk prefix every ~1s; archived runs stream all chunks then " +
 						"close. Binary WS frames = raw log bytes.",
 					"responses": map[string]any{

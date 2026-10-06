@@ -113,43 +113,81 @@ func TestHelmTemplate_CertManagerToggle(t *testing.T) {
 		"cert-manager path should NOT render the self-signed Secret")
 }
 
-// TestHelmTemplate_MinioPostgresValues renders with MinIO + Postgres
-// wiring enabled. Asserts the CLI args land verbatim on the operator +
-// apiserver Deployments so ops running scrapes / grepping ps output see
-// what they expect.
-func TestHelmTemplate_MinioPostgresValues(t *testing.T) {
+func helmTemplate(t *testing.T, args ...string) string {
+	t.Helper()
+	helm := helmBinary(t)
+	root := findRepoRoot(t)
+	full := append([]string{"template", "test", filepath.Join(root, chartDir), "--namespace", "kubetest-alt"}, args...)
+	// #nosec G204 -- helm resolved via LookPath; chartDir const.
+	out, err := exec.Command(helm, full...).CombinedOutput()
+	require.NoErrorf(t, err, "helm template %v failed:\n%s", args, string(out))
+	return string(out)
+}
+
+// TestHelmTemplate_StorageS3PostgresValues: S3 (here MinIO) + Postgres
+// wiring lands verbatim on both Deployments.
+func TestHelmTemplate_StorageS3PostgresValues(t *testing.T) {
+	got := helmTemplate(t,
+		"--set", "storage.type=s3",
+		"--set", "storage.s3.endpoint=minio.default.svc:9000",
+		"--set", "storage.s3.useSSL=false",
+		"--set", "storage.s3.secretName=kubetest-s3-creds",
+		"--set", "postgresql.dsn=postgres://user:pass@postgres.default.svc:5432/kubetest",
+	)
+	// Operator and API server must use the same backend and bucket — they
+	// once read logs from different buckets.
+	for _, flag := range []string{"--storage-type=s3", "--storage-bucket=kubetest-artifacts",
+		"--s3-endpoint=minio.default.svc:9000"} {
+		assert.Equal(t, 2, strings.Count(got, flag), "operator + apiserver both get %s", flag)
+	}
+	assert.NotContains(t, got, "--s3-use-ssl")
+	assert.Equal(t, 1, strings.Count(got, "--storage-secret-name=kubetest-s3-creds"), "operator only")
+	assert.Equal(t, 2, strings.Count(got, "name: AWS_ACCESS_KEY_ID"), "own creds for operator + apiserver")
+	assert.Contains(t, got, "--postgres-dsn=postgres://user:pass@postgres.default.svc:5432/kubetest")
+	// Log streaming defaults ON with storage — it used to need a manual
+	// extraArg, so default installs never stored any run logs.
+	assert.Contains(t, got, "--logs-enabled")
+}
+
+// GCS: no Secret anywhere (Workload Identity), SA annotations rendered.
+func TestHelmTemplate_StorageGCS(t *testing.T) {
+	got := helmTemplate(t,
+		"--set", "storage.type=gcs",
+		"--set", "storage.bucket=team-kubetest",
+		"--set", "storage.s3.secretName=ignored",
+		"--set", "serviceAccounts.operator.annotations.iam\\.gke\\.io/gcp-service-account=kt@p.iam.gserviceaccount.com",
+		"--set", "serviceAccounts.apiserver.annotations.iam\\.gke\\.io/gcp-service-account=kt@p.iam.gserviceaccount.com",
+	)
+	assert.Equal(t, 2, strings.Count(got, "--storage-type=gcs"))
+	assert.Equal(t, 2, strings.Count(got, "--storage-bucket=team-kubetest"))
+	assert.NotContains(t, got, "--s3-")
+	assert.NotContains(t, got, "--storage-secret-name")
+	assert.NotContains(t, got, "AWS_ACCESS_KEY_ID")
+	assert.Equal(t, 2, strings.Count(got, "iam.gke.io/gcp-service-account: kt@p.iam.gserviceaccount.com"))
+}
+
+func TestHelmTemplate_StorageDisabledByDefault(t *testing.T) {
+	got := helmTemplate(t)
+	assert.NotContains(t, got, "--storage-")
+	assert.NotContains(t, got, "--logs-enabled", "no storage → nothing to stream logs to")
+}
+
+func TestHelmTemplate_StorageRejectsUnknownType(t *testing.T) {
 	helm := helmBinary(t)
 	root := findRepoRoot(t)
 	// #nosec G204 -- helm resolved via LookPath; chartDir const.
 	out, err := exec.Command(helm, "template", "test", filepath.Join(root, chartDir),
-		"--namespace", "kubetest-alt",
-		"--set", "minio.endpoint=minio.default.svc:9000",
-		"--set", "minio.secretName=kubetest-minio-creds",
-		"--set", "postgresql.dsn=postgres://user:pass@postgres.default.svc:5432/kubetest",
-	).CombinedOutput()
-	require.NoErrorf(t, err, "helm template with minio+postgres failed:\n%s", string(out))
-	got := string(out)
-	assert.Contains(t, got, "--minio-endpoint=minio.default.svc:9000")
-	assert.Contains(t, got, "--minio-secret-name=kubetest-minio-creds")
-	assert.Contains(t, got, "--postgres-dsn=postgres://user:pass@postgres.default.svc:5432/kubetest")
-	// Log streaming defaults ON with MinIO — it used to need a manual
-	// extraArg, so default installs never stored any run logs.
-	assert.Contains(t, got, "--logs-enabled")
-	// Operator and apiserver must read/write the same single bucket.
-	assert.Equal(t, 2, strings.Count(got, "--minio-bucket=kubetest-artifacts"),
-		"operator + apiserver both get --minio-bucket")
+		"--set", "storage.type=minio").CombinedOutput()
+	require.Error(t, err)
+	assert.Contains(t, string(out), `storage.type must be "s3", "gcs" or empty`)
 }
 
 func TestHelmTemplate_LogsCanBeDisabled(t *testing.T) {
-	helm := helmBinary(t)
-	root := findRepoRoot(t)
-	// #nosec G204 -- helm resolved via LookPath; chartDir const.
-	out, err := exec.Command(helm, "template", "test", filepath.Join(root, chartDir),
-		"--set", "minio.endpoint=minio.default.svc:9000",
+	got := helmTemplate(t,
+		"--set", "storage.type=s3",
 		"--set", "operator.logs.enabled=false",
-	).CombinedOutput()
-	require.NoErrorf(t, err, "helm template failed:\n%s", string(out))
-	assert.NotContains(t, string(out), "--logs-enabled")
+	)
+	assert.NotContains(t, got, "--logs-enabled")
 }
 
 // TestHelmTemplate_RBACParity is the plan's exact requirement: the

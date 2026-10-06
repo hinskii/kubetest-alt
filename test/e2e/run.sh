@@ -20,6 +20,10 @@ set -euxo pipefail
 # template run for real, see test/catalog), or all.
 # CATALOG_TOOLS: comma-separated subset of test/catalog/cases (default all).
 E2E_SUITE="${E2E_SUITE:-e2e}"
+# E2E_STORAGE: s3 (MinIO, default) or gcs (fake-gcs-server emulator).
+E2E_STORAGE="${E2E_STORAGE:-s3}"
+FAKE_GCS_IMAGE="fsouza/fake-gcs-server:1.56.1"
+CURL_IMAGE="curlimages/curl:8.16.0"
 CATALOG_TOOLS="${CATALOG_TOOLS:-all}"
 CATALOG_PARALLEL="${CATALOG_PARALLEL:-4}"
 
@@ -100,26 +104,25 @@ for img in "${IMAGES[@]}"; do
 done
 phase_end "kind_load"
 
-phase_start "minio_deploy"
-# The operator's ResultReader is a no-op without --minio-endpoint —
-# every run would then be classified MissingResult / phase=error.
-# Deploy a single-pod in-memory MinIO in the release namespace, then
-# mirror the creds Secret into the workload namespace so the wrapper's
-# envFrom picks them up. Bucket is created by a small Job that runs
-# `mc mb` once MinIO is Ready. No PVC — kind cluster is ephemeral.
+phase_start "storage_deploy"
+# Object storage for logs, artifacts and result.json. Without it every run
+# would be judged from pod state only. E2E_STORAGE picks the backend:
+#   s3  — MinIO (an S3-compatible store) in the release namespace;
+#   gcs — fake-gcs-server (GCS emulator), exercising the native GCS backend.
+# No PVCs — the kind cluster is ephemeral.
 kubectl create namespace "$RELEASE_NS" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace kubetest-e2e --dry-run=client -o yaml | kubectl apply -f -
 
-# Creds Secret (release namespace = operator's; also mirrored into workload namespace below).
-kubectl -n "$RELEASE_NS" create secret generic minio-creds \
-  --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
-  --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
-  --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n kubetest-e2e create secret generic minio-creds \
-  --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
-  --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
-  --dry-run=client -o yaml | kubectl apply -f -
-
+if [ "$E2E_STORAGE" = "s3" ]; then
+  # S3 credentials: the operator/API server read them in the release
+  # namespace; the wrapper gets the same-named Secret via envFrom in every
+  # namespace that runs tests.
+  for ns in "$RELEASE_NS" kubetest-e2e; do
+    kubectl -n "$ns" create secret generic s3-creds \
+      --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+      --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+      --dry-run=client -o yaml | kubectl apply -f -
+  done
 # MinIO Deployment + Service.
 #
 # Images: minio/minio and minio/mc were pulled from Docker Hub (and Quay)
@@ -205,7 +208,79 @@ if ! kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket -
   kubectl -n "$RELEASE_NS" logs job/minio-mkbucket --all-containers=true || true
   exit 1
 fi
-phase_end "minio_deploy"
+  STORAGE_VALUES=(
+    --set storage.type=s3
+    --set storage.bucket=kubetest-artifacts
+    --set "storage.s3.endpoint=minio.${RELEASE_NS}.svc:9000"
+    --set storage.s3.useSSL=false
+    --set storage.s3.secretName=s3-creds
+  )
+else
+  # GCS emulator. Memory backend; bucket created through the JSON API by a
+  # one-shot Job. Test pods in other namespaces reach it by FQDN.
+  cat <<EOF | kubectl -n "$RELEASE_NS" apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: fake-gcs }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: fake-gcs } }
+  template:
+    metadata: { labels: { app: fake-gcs } }
+    spec:
+      # Kubernetes injects FAKE_GCS_PORT=tcp://<ip>:4443 for this Service,
+      # which fake-gcs-server reads as its own -port setting and dies on.
+      enableServiceLinks: false
+      containers:
+        - name: fake-gcs
+          image: ${FAKE_GCS_IMAGE}
+          args: ["-scheme", "http", "-port", "4443", "-backend", "memory",
+                 "-public-host", "fake-gcs.${RELEASE_NS}.svc:4443"]
+          ports: [{ containerPort: 4443 }]
+          readinessProbe: { tcpSocket: { port: 4443 }, periodSeconds: 2 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: fake-gcs }
+spec:
+  selector: { app: fake-gcs }
+  ports: [{ port: 4443, targetPort: 4443 }]
+EOF
+  if ! kubectl -n "$RELEASE_NS" rollout status deploy/fake-gcs --timeout=120s; then
+    log "::error::fake-gcs did not become Ready"
+    kubectl -n "$RELEASE_NS" describe pods -l app=fake-gcs || true
+    kubectl -n "$RELEASE_NS" logs deploy/fake-gcs || true
+    exit 1
+  fi
+  cat <<EOF | kubectl -n "$RELEASE_NS" apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata: { name: fake-gcs-mkbucket }
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: curl
+          image: ${CURL_IMAGE}
+          args: ["-fsS", "-X", "POST", "-H", "Content-Type: application/json",
+                 "-d", "{\"name\":\"kubetest-artifacts\"}",
+                 "http://fake-gcs:4443/storage/v1/b?project=e2e"]
+EOF
+  if ! kubectl -n "$RELEASE_NS" wait --for=condition=complete job/fake-gcs-mkbucket --timeout=120s; then
+    log "::error::fake-gcs bucket Job did not complete"
+    kubectl -n "$RELEASE_NS" describe pods -l app=fake-gcs || true
+    kubectl -n "$RELEASE_NS" logs job/fake-gcs-mkbucket --all-containers=true || true
+    exit 1
+  fi
+  STORAGE_VALUES=(
+    --set storage.type=gcs
+    --set storage.bucket=kubetest-artifacts
+    --set "storage.gcs.endpoint=http://fake-gcs.${RELEASE_NS}.svc:4443"
+  )
+fi
+phase_end "storage_deploy"
 
 phase_start "helm_install"
 if ! helm upgrade --install kt "$CHART_DIR" \
@@ -220,9 +295,7 @@ if ! helm upgrade --install kt "$CHART_DIR" \
   --set images.contentFetcher.tag="${IMAGE_TAG}" \
   --set operator.metrics.bindAddress=":8080" \
   --set operator.metrics.secure=false \
-  --set "minio.endpoint=minio.${RELEASE_NS}.svc:9000" \
-  --set minio.secretName=minio-creds \
-  --set minio.bucket=kubetest-artifacts \
+  "${STORAGE_VALUES[@]}" \
   --wait --timeout=5m; then
   log "::error::helm install failed — dumping cluster state for diagnosis"
   kubectl -n "$RELEASE_NS" get pods,deploy,jobs -o wide || true
@@ -290,10 +363,12 @@ if [ "$E2E_SUITE" = "catalog" ] || [ "$E2E_SUITE" = "all" ]; then
   # Own namespace: the platform e2e deletes kubetest-e2e when it finishes.
   CATALOG_NS=kubetest-catalog
   kubectl create namespace "$CATALOG_NS" --dry-run=client -o yaml | kubectl apply -f -
-  kubectl -n "$CATALOG_NS" create secret generic minio-creds \
-    --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
-    --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
-    --dry-run=client -o yaml | kubectl apply -f -
+  if [ "$E2E_STORAGE" = "s3" ]; then
+    kubectl -n "$CATALOG_NS" create secret generic s3-creds \
+      --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+      --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+      --dry-run=client -o yaml | kubectl apply -f -
+  fi
   kubectl -n "$CATALOG_NS" apply -f config/templates/
   # Target every case talks to: "/" → 200 with a small page, anything
   # else → 404 (python http.server), so each tool sees passes AND failures.

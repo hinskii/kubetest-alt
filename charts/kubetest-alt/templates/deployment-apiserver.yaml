@@ -29,15 +29,8 @@ spec:
             {{- with .Values.apiserver.namespace }}
             - --namespace={{ . }}
             {{- end }}
-            {{- if .Values.minio.endpoint }}
-            - --minio-endpoint={{ .Values.minio.endpoint }}
-            # Same value the operator gets: one bucket holds logs, artifacts
-            # and results; pkg/storage.RunKeys partitions it.
-            - --minio-bucket={{ .Values.minio.bucket }}
-            {{- if .Values.minio.useSSL }}
-            - --minio-use-ssl
-            {{- end }}
-            {{- end }}
+            # Same storage flags as the operator — same backend, same bucket.
+            {{- include "kubetest-alt.storageArgs" . | nindent 12 }}
             {{- if .Values.postgresql.dsn }}
             - --postgres-dsn={{ .Values.postgresql.dsn }}
             {{- end }}
@@ -45,20 +38,7 @@ spec:
             - {{ . | quote }}
             {{- end }}
           env:
-            {{- if .Values.minio.secretName }}
-            - name: MINIO_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.minio.secretName }}
-                  key: AWS_ACCESS_KEY_ID
-                  optional: true
-            - name: MINIO_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.minio.secretName }}
-                  key: AWS_SECRET_ACCESS_KEY
-                  optional: true
-            {{- end }}
+            {{- include "kubetest-alt.storageEnv" . | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.apiserver.service.port }}

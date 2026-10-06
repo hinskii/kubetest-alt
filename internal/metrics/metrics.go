@@ -253,7 +253,7 @@ var (
 	}, []string{labelCodeClass})
 
 	// LogStreamBytesTotal counts the aggregate log bytes streamed from
-	// pods into the log store (MinIO). Unlabeled — high-cardinality
+	// pods into object storage. Unlabeled — high-cardinality
 	// per-run breakdown belongs in traces.
 	LogStreamBytesTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: metricsNamespace,
@@ -262,7 +262,7 @@ var (
 	})
 
 	// ScraperBytesTotal counts the aggregate artifact bytes uploaded
-	// from the scraper to the artifact store (MinIO).
+	// from the scraper to object storage.
 	ScraperBytesTotal = prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: metricsNamespace,
 		Name:      "scraper_bytes_total",

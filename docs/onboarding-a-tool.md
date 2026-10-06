@@ -219,19 +219,15 @@ Any new template that fails to produce a `resolvedSpec` (missing
 image, unresolved required config, expression that references a
 non-declared param) trips this test.
 
-### 9. Metrics (optional)
+### 9. Catalog e2e case
 
-If the tool writes structured performance output and you want the
-operator to project metrics into TestRun.status.metrics, add a
-parser under `pkg/scraper/perf/<tool>/` and wire it into the
-scraper's dispatch. See `pkg/scraper/perf/k6/` for the shape —
-one function that reads the tool's output file and returns
-`map[string]float64`.
-
-This step is OPTIONAL. Without it the artifacts still land in MinIO
-and the JUnit processor still reports counts — you only need a
-custom parser when a per-tool metric (k6's `p95_ms`, JMeter's
-`throughput`, etc.) is worth first-class UI treatment.
+Add `test/catalog/cases/<tool>/` (a `case.yaml` with run config and
+expectations, plus the project under `repo/`) and the tool to the matrix
+in `.github/workflows/test-catalog.yml`. The case runs the template for
+real on kind — inline and through its sample in `config/samples/tools/`
+(regenerate the sample alongside). Metrics: see 4b; without
+`spec.metrics` artifacts still land in object storage and JUnit counts
+are still reported.
 
 ## When NOT to write a template
 

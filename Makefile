@@ -96,7 +96,7 @@ test-integration: manifests generate fmt vet setup-envtest ## Run integration te
 # only exercise under the `integration` build tag (real Postgres for
 # internal/store). Same 80 floor the plan sets for core-logic packages —
 # split from the default gate so `make test` stays Docker-free.
-COVERAGE_PKGS_INTEGRATION ?= internal/store:80
+COVERAGE_PKGS_INTEGRATION ?= internal/store:80 pkg/storage:80
 
 .PHONY: test-coverage-integration
 test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION floors on integration test coverage.

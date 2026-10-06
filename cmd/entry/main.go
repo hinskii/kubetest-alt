@@ -94,7 +94,7 @@ func runWrapper(ctx context.Context) int {
 		Stderr:         os.Stderr,
 		JUnitProcessor: junitProcessorFromDir,
 		JTLProcessor:   jtlProcessorFromDir,
-		Scraper:        newScraperFromEnv(), // nil when MINIO_ENDPOINT unset
+		Scraper:        newScraperFromEnv(), // nil when no object storage is configured
 		RequestPath:    executor.RequestPath,
 		ResultDir:      resultDir,
 		Loader:         os.Stderr,
@@ -194,29 +194,18 @@ func findJTL(workingDir string) (string, error) {
 	}
 }
 
-// newScraperFromEnv builds the wrapper-side artifact scraper (step 07) when
-// the operator has configured MinIO.
+// newScraperFromEnv builds the wrapper-side uploader for artifacts and
+// result.json from the storage environment the operator injected
+// (storage.Config.Env). Nil when no object storage is configured.
 func newScraperFromEnv() executor.Scraper {
-	endpoint := os.Getenv("MINIO_ENDPOINT")
-	if endpoint == "" {
+	cfg := storage.FromEnv()
+	if !cfg.Enabled() {
 		return nil
 	}
-	bucket := os.Getenv("MINIO_BUCKET")
-	if bucket == "" {
-		bucket = "kubetest-artifacts" // matches compiler.MinIODefaultBucket
-	}
-	useSSL := os.Getenv("MINIO_USE_SSL") == "true"
-
-	client, err := storage.NewMinIO(storage.Config{
-		Endpoint:  endpoint,
-		Bucket:    bucket,
-		UseSSL:    useSSL,
-		AccessKey: os.Getenv("AWS_ACCESS_KEY_ID"),
-		SecretKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
-	})
+	backend, err := storage.New(context.Background(), cfg)
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "wrapper: minio init failed, skipping scrape: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "wrapper: %s storage init failed, skipping uploads: %v\n", cfg.Type, err)
 		return nil
 	}
-	return scraper.New(client, bucket)
+	return scraper.New(backend, cfg.Bucket)
 }

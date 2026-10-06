@@ -4,7 +4,7 @@ In-house Kubernetes-native test execution platform. Operator +
 API server + CRDs (`Test`, `TestRun`, `TestTemplate`, `TestTrigger`,
 `Webhook`), a curated 15-template tool catalog (k6, cypress, jmeter,
 gatling, playwright, pytest, gradle, maven, ...), cron + Kubernetes
-event triggers, MinIO artifact + log storage, Postgres run history,
+event triggers, S3/GCS artifact + log storage, Postgres run history,
 outbound webhooks, and Prometheus metrics — packaged as a single Helm
 chart.
 
@@ -41,7 +41,7 @@ kubectl get testruns -w
 
 Optional add-ons (each independent — install only what you use):
 
-- **MinIO** for artifacts + logs: `helm install minio oci://registry-1.docker.io/bitnamicharts/minio ...`
+- **Object storage** for logs, artifacts and results — any S3-compatible store (AWS S3, MinIO, …) or Google Cloud Storage: set `storage.type` (`s3` | `gcs`). See [docs/storage.md](docs/storage.md).
 - **Postgres** for run history: `helm install postgres oci://registry-1.docker.io/bitnamicharts/postgresql ...`
 
 Then rerun `helm upgrade kt charts/kubetest-alt/ -f your-values.yaml`.

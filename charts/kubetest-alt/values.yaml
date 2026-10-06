@@ -2,8 +2,8 @@
 #
 # The chart ships as a self-contained install: one Deployment for the
 # operator (leader-elected), one Deployment + Service for the API
-# server, all CRDs, RBAC, webhook certs. Dev conveniences (MinIO,
-# Postgres) come in as subcharts turned OFF by default.
+# server, all CRDs, RBAC, webhook certs. Object storage and Postgres are
+# external (see `storage` and `postgresql` below).
 
 # Image references. TAGS PIN TO CHART.appVersion by default so a
 # single chart bump moves every platform-built image atomically.
@@ -87,7 +87,7 @@ operator:
     limits:
       cpu: 500m
       memory: 512Mi
-  # Stream pod logs to MinIO while runs execute (needs minio.endpoint).
+  # Stream pod logs to object storage while runs execute (needs storage.type).
   # Without it, run logs are never stored — the GUI shows nothing.
   logs:
     enabled: true
@@ -119,19 +119,40 @@ apiserver:
   # Extra flags appended to the apiserver's argv.
   extraArgs: []
 
-# MinIO wiring. When endpoint is empty AND minio.enabled=false, the
-# operator runs in "no artifact scraping / no log streaming" mode —
-# fine for dev. The subchart (minio.enabled=true) points these back
-# at the in-cluster service.
-minio:
-  enabled: false
-  # These flow into --minio-endpoint / --minio-bucket / --minio-secret-name.
-  # One bucket for logs, artifacts and results, shared by the operator and
-  # the apiserver (objects live under runs/<namespace>/<runUID>/).
-  endpoint: ""
+# Object storage for logs, artifacts and results — one bucket shared by
+# the operator, the API server and every test pod's wrapper (objects live
+# under runs/<namespace>/<runUID>/). Empty type = no object storage: no
+# artifacts, no stored logs, verdicts from pod state only.
+storage:
+  # "s3" (any S3-compatible store: AWS S3, MinIO, Ceph, R2, …) or "gcs".
+  type: ""
   bucket: "kubetest-artifacts"
-  secretName: ""      # Secret in the run's namespace with S3 creds
-  useSSL: false
+  s3:
+    # host[:port], no scheme. Empty = AWS S3.
+    endpoint: ""
+    useSSL: true
+    region: ""
+    # Secret with AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY. It must exist
+    # in the release namespace (operator + API server) AND in every
+    # namespace that runs tests (the wrapper gets it via envFrom). Empty =
+    # the AWS credential chain everywhere (e.g. IRSA on EKS).
+    secretName: ""
+  gcs:
+    # Emulators only (fake-gcs-server); disables authentication. Real GCS
+    # uses Application Default Credentials: Workload Identity — annotate
+    # serviceAccounts.*.annotations below, and give test pods a Kubernetes
+    # service account bound to a Google one (spec.pod.serviceAccountName,
+    # e.g. via a TestTemplate).
+    endpoint: ""
+
+# Annotations for the operator's and API server's ServiceAccounts — e.g.
+# iam.gke.io/gcp-service-account: kubetest@PROJECT.iam.gserviceaccount.com
+# (GCS via Workload Identity) or eks.amazonaws.com/role-arn (S3 via IRSA).
+serviceAccounts:
+  operator:
+    annotations: {}
+  apiserver:
+    annotations: {}
 
 # Postgres wiring. Empty DSN + disabled subchart = no run-history
 # persistence — the reconciler runs correct but archived-runs listing

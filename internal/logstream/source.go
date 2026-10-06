@@ -40,7 +40,7 @@ type K8sLogSource struct {
 
 // Open implements PodLogSource. Streams follow=true from the FIRST line —
 // TailLines nil is deliberate: §15.4 forbids relying on end-of-run
-// GetLogs, so we tail from start and flush continuously into MinIO before
+// GetLogs, so we tail from start and flush continuously into object storage before
 // kubelet rotation can drop the head of a chatty run.
 func (s *K8sLogSource) Open(ctx context.Context, namespace, podName string) (io.ReadCloser, error) {
 	if s.Client == nil {

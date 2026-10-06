@@ -4,7 +4,7 @@ description: |
   In-house Kubernetes-native test execution platform. Installs the
   operator, the thin API server, all CRDs (Test, TestRun, TestTemplate,
   TestTrigger, Webhook), RBAC, and webhook TLS certificates. Optional
-  dev subcharts (MinIO, Postgres) for zero-dependency local runs.
+  dev subcharts (object storage, Postgres) for zero-dependency local runs.
 type: application
 
 # appVersion PINS every platform image tag by default: operator,
@@ -21,16 +21,16 @@ home: https://github.com/hinskii/kubetest-alt
 sources:
   - https://github.com/hinskii/kubetest-alt
 
-# Deliberately no subchart dependencies. MinIO and Postgres are
+# Deliberately no subchart dependencies. Object storage and Postgres are
 # operationally separate — production installs external instances and
 # passes endpoints via values. Dev/e2e installs the bitnami charts
-# (or spins up MinIO/Postgres via kubectl/helm separately) alongside
+# (or spins up MinIO/fake-gcs-server + Postgres via kubectl/helm separately) alongside
 # this chart. Keeping the chart self-contained means:
 #   * `helm template` works offline without `helm dependency build`
 #   * `helm install` doesn't pull the internet on every install
-#   * chart consumers can pick their own MinIO/Postgres provider
+#   * chart consumers can pick their own object storage (S3/GCS) and Postgres
 #   * upgrade cadence stays independent from bitnami's release train
-# See docs/quickstart.md for the "install MinIO + Postgres separately"
+# See docs/quickstart.md for the "install object storage + Postgres separately"
 # recipe used by the kind e2e job.
 
 maintainers:

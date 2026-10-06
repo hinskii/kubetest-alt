@@ -48,7 +48,7 @@ import (
 // We resolve this by wiping the run's logs/ prefix BEFORE the new Tailer
 // starts. Fresh start, monotonic chunks. The alternative — resume from
 // seq K+1 — would require the Tailer to also skip already-flushed bytes
-// on the source side, and there is no way to correlate "MinIO chunk
+// on the source side, and there is no way to correlate "object-storage chunk
 // boundary" to "pod stdout byte offset" cheaply. Kubelet log rotation
 // (§15.4) can lose bytes between the old operator's crash and the new
 // operator's start regardless; wipe-and-restart doesn't lose anything the

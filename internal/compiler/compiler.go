@@ -167,35 +167,25 @@ type Options struct {
 	// that mirror the content-fetcher into an internal registry.
 	ImageRegistry string
 
-	// MinIO configures the artifact scraper (step 07). When Endpoint is set,
-	// the compiler adds:
-	//   - envFrom on the wrapper container pointing at SecretName (holds
-	//     S3-standard AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY keys);
-	//   - literal MINIO_ENDPOINT + MINIO_BUCKET env vars on the wrapper.
-	// When Endpoint is empty, the wrapper skips scraping and the controller
-	// falls back to NoResultReader. Leaves compile output identical to pre-07.
-	MinIO MinIOOptions
+	// Storage is the object store the wrapper uploads artifacts, logs-side
+	// results and result.json to. Zero Type = no object storage: the
+	// wrapper skips uploads and the controller judges from pod state.
+	Storage StorageOptions
 }
 
-// MinIOOptions groups the MinIO/S3 config the compiler injects into the
-// wrapper container's env. Populated by cmd/operator from --minio-* flags.
-type MinIOOptions struct {
-	Endpoint   string // host:port, no scheme
-	Bucket     string // default: MinIODefaultBucket
-	SecretName string // Secret in the run's namespace holding S3 creds
-	UseSSL     bool   // toggle https:// on the MinIO client
+// StorageOptions is what the compiler projects into the wrapper pod:
+// non-secret settings as env (storage.Config.Env), credentials only as a
+// Secret reference.
+type StorageOptions struct {
+	// Config holds type, bucket and endpoint settings. Credentials in it
+	// are ignored — they never go into a pod spec.
+	Config storage.Config
+	// SecretName (S3 only) is a Secret in the run's namespace with
+	// AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, injected via envFrom.
+	// Empty → the AWS credential chain in the pod (e.g. IRSA). GCS never
+	// uses it: the pod's service account (Workload Identity) does.
+	SecretName string
 }
-
-// MinIODefaultBucket is what cmd/operator uses when --minio-bucket is empty.
-const MinIODefaultBucket = storage.DefaultBucket
-
-// MinIO-facing env var names on the wrapper container. Public consts so the
-// wrapper (pkg/executor, internal/scraper) reads by the same names.
-const (
-	EnvMinIOEndpoint = "MINIO_ENDPOINT"
-	EnvMinIOBucket   = "MINIO_BUCKET"
-	EnvMinIOUseSSL   = "MINIO_USE_SSL"
-)
 
 // Note: the ExecutionRequest wire format lives in pkg/executor as the public
 // contract between the operator (which serializes) and the /entry wrapper
@@ -338,21 +328,10 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		corev1.EnvVar{Name: executor.EnvRunID, Value: run.Name},
 		corev1.EnvVar{Name: executor.EnvTestRef, Value: run.Spec.TestRef},
 	)
-	// MinIO config (step 07): only injected when the operator is configured
-	// with --minio-endpoint. Wrapper's cmd/entry checks $MINIO_ENDPOINT and
-	// skips scraping when unset — so a step 06 cluster keeps working.
-	if opts.MinIO.Endpoint != "" {
-		bucket := opts.MinIO.Bucket
-		if bucket == "" {
-			bucket = MinIODefaultBucket
-		}
-		wrapperEnv = append(wrapperEnv,
-			corev1.EnvVar{Name: EnvMinIOEndpoint, Value: opts.MinIO.Endpoint},
-			corev1.EnvVar{Name: EnvMinIOBucket, Value: bucket},
-		)
-		if opts.MinIO.UseSSL {
-			wrapperEnv = append(wrapperEnv, corev1.EnvVar{Name: EnvMinIOUseSSL, Value: "true"})
-		}
+	// Object storage: only when configured. The wrapper reads these back
+	// with storage.FromEnv and skips uploads when they're absent.
+	for _, e := range opts.Storage.Config.Env() {
+		wrapperEnv = append(wrapperEnv, corev1.EnvVar{Name: e.Name, Value: e.Value})
 	}
 	wrapperEnv = append(wrapperEnv, test.Spec.Container.Env...)
 
@@ -360,10 +339,10 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 	// name/value listing free of credentials in kubectl describe. Compiler
 	// only projects the ref; k8s resolves at pod-start.
 	var wrapperEnvFrom []corev1.EnvFromSource
-	if opts.MinIO.Endpoint != "" && opts.MinIO.SecretName != "" {
+	if opts.Storage.Config.Type == storage.TypeS3 && opts.Storage.SecretName != "" {
 		wrapperEnvFrom = append(wrapperEnvFrom, corev1.EnvFromSource{
 			SecretRef: &corev1.SecretEnvSource{
-				LocalObjectReference: corev1.LocalObjectReference{Name: opts.MinIO.SecretName},
+				LocalObjectReference: corev1.LocalObjectReference{Name: opts.Storage.SecretName},
 			},
 		})
 	}

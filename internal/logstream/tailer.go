@@ -500,10 +500,10 @@ func pump(ctx context.Context, src io.Reader, skip int64,
 // then clears the buffer. Called from the run loop only.
 //
 // On upload error we still increment chunkSeq and clear pending — trading
-// log durability for progress. Blocking the tail loop on MinIO would defeat
+// log durability for progress. Blocking the tail loop on object storage would defeat
 // the subscriber-backpressure guarantee, and the ring buffer + live
 // subscribers still see everything. Repeated failures produce visible gaps
-// in the MinIO layout, which is exactly the signal SRE needs.
+// in the object-storage layout, which is exactly the signal SRE needs.
 func (t *Tailer) flushPending(ctx context.Context) {
 	if t.pending.Len() == 0 || t.cfg.Uploader == nil {
 		return
@@ -523,7 +523,7 @@ func (t *Tailer) flushPending(ctx context.Context) {
 // finalize runs on run-loop exit: last flush, close all subscribers with
 // ReasonEOF, mark stopped so Subscribe returns pre-closed subs. Uses a
 // fresh background ctx so the flush still happens even when Stop cancelled
-// the tailer's own ctx — otherwise Stop would kill the final MinIO write.
+// the tailer's own ctx — otherwise Stop would kill the final object-storage write.
 func (t *Tailer) finalize() {
 	flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

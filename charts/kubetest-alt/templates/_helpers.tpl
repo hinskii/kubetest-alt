@@ -66,3 +66,49 @@ app.kubernetes.io/component: apiserver
 {{- define "kubetest-alt.apiserver.serviceAccountName" -}}
 {{ include "kubetest-alt.fullname" . }}-apiserver
 {{- end -}}
+
+{{/* Object-storage flags, shared by the operator and the API server so
+they always point at the same backend and bucket. */}}
+{{- define "kubetest-alt.storageArgs" -}}
+{{- $s := .Values.storage -}}
+{{- if not (has $s.type (list "" "s3" "gcs")) -}}
+{{- fail (printf "storage.type must be \"s3\", \"gcs\" or empty, got %q" $s.type) -}}
+{{- end -}}
+{{- if $s.type }}
+- --storage-type={{ $s.type }}
+- --storage-bucket={{ required "storage.bucket is required when storage.type is set" $s.bucket }}
+{{- if eq $s.type "s3" }}
+{{- with $s.s3.endpoint }}
+- --s3-endpoint={{ . }}
+{{- end }}
+{{- if $s.s3.useSSL }}
+- --s3-use-ssl
+{{- end }}
+{{- with $s.s3.region }}
+- --s3-region={{ . }}
+{{- end }}
+{{- end }}
+{{- if and (eq $s.type "gcs") $s.gcs.endpoint }}
+- --gcs-endpoint={{ $s.gcs.endpoint }}
+{{- end }}
+{{- end }}
+{{- end -}}
+
+{{/* S3 static credentials for the operator's / API server's own client,
+from storage.s3.secretName. Nothing for GCS (service account) or when no
+Secret is set (AWS credential chain, e.g. IRSA). */}}
+{{- define "kubetest-alt.storageEnv" -}}
+{{- $s := .Values.storage -}}
+{{- if and (eq $s.type "s3") $s.s3.secretName }}
+- name: AWS_ACCESS_KEY_ID
+  valueFrom:
+    secretKeyRef:
+      name: {{ $s.s3.secretName }}
+      key: AWS_ACCESS_KEY_ID
+- name: AWS_SECRET_ACCESS_KEY
+  valueFrom:
+    secretKeyRef:
+      name: {{ $s.s3.secretName }}
+      key: AWS_SECRET_ACCESS_KEY
+{{- end }}
+{{- end -}}

@@ -33,12 +33,12 @@ import (
 )
 
 // getRunLogs upgrades to a WebSocket and streams log chunks. Two modes:
-//   - Live (CR exists AND phase not terminal): chunk_reader polls the MinIO
+//   - Live (CR exists AND phase not terminal): chunk_reader polls the object-storage
 //     prefix, streaming new chunks as they appear.
 //   - Archive (CR gone OR phase terminal): streams all chunks in seq order
 //     then closes the connection.
 //
-// See chunk_reader.go for why we poll MinIO instead of tapping the
+// See chunk_reader.go for why we poll object storage instead of tapping the
 // operator's in-memory tailer registry.
 func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")

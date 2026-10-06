@@ -18,6 +18,6 @@ package controller
 
 // FinalizerName gates deletion of a TestRun so the controller can synchronously
 // tear down the Job (and, later, its log stream) before k8s reaps the object.
-// See CLAUDE.md §15.5: "delete during running = kill Job + cleanup MinIO
+// See CLAUDE.md §15.5: "delete during running = kill Job + cleanup object storage
 // stream + then remove finalizer".
 const FinalizerName = "kubetest.io/testrun-finalizer"

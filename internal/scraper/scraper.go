@@ -38,7 +38,7 @@ import (
 )
 
 // Retry defaults for uploadOne. Transient uploader errors (network flakes,
-// 5xx from MinIO) get retried; a run whose bucket is genuinely gone still
+// 5xx from the object store) get retried; a run whose bucket is genuinely gone still
 // hits the wall after MaxUploadAttempts × BackoffBase in the worst case.
 //
 // Kept as package vars so tests can shorten BackoffBase to zero and avoid
@@ -132,7 +132,7 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 // to ExecutionResult.Artifacts.
 //
 // Retry policy: MaxUploadAttempts with exponential backoff starting at
-// UploadBackoffBase. This handles both network flakes and 5xx from MinIO
+// UploadBackoffBase. This handles both network flakes and 5xx from the object store
 // where the next request is likely to succeed. A truly gone bucket / hard
 // permission error just hits the wall N times — caller records failure
 // in ScrapeError without changing the run's Phase.

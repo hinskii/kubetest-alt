@@ -21,7 +21,7 @@ limitations under the License.
 //   - default: canonical Test + minimal invocation
 //   - tool-label: kubetest.io/tool label propagated to Job + Pod
 //   - verdict-jtl: spec.verdict.from=jtl passed through into request.json
-//   - minio-enabled: MinIO env + envFrom on the wrapper
+//   - storage-s3 / storage-gcs: object-storage env (+ S3 Secret envFrom)
 //   - git-auth: content.git.token / sshKey secret refs on the init container
 package compiler
 
@@ -41,6 +41,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // updateGolden regenerates fixtures instead of asserting. Run with
@@ -133,17 +134,24 @@ func TestGolden_VerdictJTL(t *testing.T) {
 	assertGolden(t, "verdict-jtl.yaml", test, canonicalTestRun(), defaultOpts())
 }
 
-// TestGolden_MinioEnabled asserts the MinIO env + envFrom scaffolding
-// lands on the wrapper container when Options.MinIO is populated.
-func TestGolden_MinioEnabled(t *testing.T) {
+// TestGolden_StorageS3 asserts the S3 env + envFrom Secret ref on the
+// wrapper container.
+func TestGolden_StorageS3(t *testing.T) {
 	opts := defaultOpts()
-	// #nosec G101 -- SecretName is a k8s Secret name (label), not a credential value.
-	opts.MinIO = MinIOOptions{
-		Endpoint:   "minio.kubetest.svc:9000",
-		Bucket:     "kubetest-artifacts",
-		SecretName: "kubetest-minio-creds",
+	// #nosec G101 -- SecretName is the name of a Secret, not a credential.
+	opts.Storage = StorageOptions{
+		Config: storage.Config{Type: storage.TypeS3, Bucket: "kubetest-artifacts",
+			S3: storage.S3Config{Endpoint: "minio.kubetest.svc:9000"}},
+		SecretName: "kubetest-s3-creds",
 	}
-	assertGolden(t, "minio-enabled.yaml", canonicalTest(), canonicalTestRun(), opts)
+	assertGolden(t, "storage-s3.yaml", canonicalTest(), canonicalTestRun(), opts)
+}
+
+// TestGolden_StorageGCS asserts the GCS env and that no Secret is mounted.
+func TestGolden_StorageGCS(t *testing.T) {
+	opts := defaultOpts()
+	opts.Storage = StorageOptions{Config: storage.Config{Type: storage.TypeGCS, Bucket: "kubetest-artifacts"}}
+	assertGolden(t, "storage-gcs.yaml", canonicalTest(), canonicalTestRun(), opts)
 }
 
 // TestGolden_GitAuth asserts token+username secret refs land on the

@@ -30,3 +30,24 @@ jobs:
 
       - name: Build
         run: make build
+
+  integration:
+    permissions:
+      contents: read
+    # Real Postgres (run history) and real object stores — MinIO for the S3
+    # backend, fake-gcs-server for the GCS backend — via testcontainers.
+    name: Integration (Postgres, S3, GCS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
+        with:
+          go-version-file: go.mod
+
+      - name: Integration tests
+        run: make test-coverage-integration

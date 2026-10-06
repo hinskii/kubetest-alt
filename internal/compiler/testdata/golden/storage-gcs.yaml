@@ -42,15 +42,12 @@ spec:
           value: sample-run
         - name: KUBETEST_TEST_REF
           value: sample
-        - name: MINIO_ENDPOINT
-          value: minio.kubetest.svc:9000
-        - name: MINIO_BUCKET
+        - name: KUBETEST_STORAGE_TYPE
+          value: gcs
+        - name: KUBETEST_STORAGE_BUCKET
           value: kubetest-artifacts
         - name: FEATURE_X
           value: "on"
-        envFrom:
-        - secretRef:
-            name: kubetest-minio-creds
         image: grafana/k6:2.2.0
         name: wrapper
         resources: {}

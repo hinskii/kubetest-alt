@@ -21,7 +21,7 @@ import "context"
 // Scraper is the wrapper's post-tool step: glob artifacts.paths from the
 // working directory, upload matches to object storage, aggregate JUnit
 // counts. cmd/entry composes a concrete implementation (internal/scraper)
-// with an Uploader (pkg/storage.MinIO) — the wrapper package (pkg/executor)
+// with an Uploader (a pkg/storage.Backend) — the wrapper package (pkg/executor)
 // stays free of both dependencies.
 //
 // Contract:

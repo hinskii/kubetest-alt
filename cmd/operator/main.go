@@ -135,36 +135,24 @@ func main() {
 			"model: main image comes verbatim from spec.container.image, not "+
 			"through this prefix).")
 
-	// MinIO wiring (step 07). When --minio-endpoint is empty, artifact
-	// scraping is disabled and the controller uses NoResultReader. Setting
-	// endpoint enables both the wrapper-side scraper (via env on wrapper
-	// container) and the controller-side ResultReader.
-	var minioEndpoint, minioBucket, minioSecret, minioAccessKey, minioSecretKey string
-	var minioUseSSL bool
-	flag.StringVar(&minioEndpoint, "minio-endpoint", "",
-		"MinIO/S3 endpoint (host:port). Empty disables artifact scraping.")
-	flag.StringVar(&minioBucket, "minio-bucket", compiler.MinIODefaultBucket,
-		"Object-store bucket for artifacts + result.json.")
-	flag.StringVar(&minioSecret, "minio-secret-name", "",
-		"Name of the Secret in the run's namespace holding AWS_ACCESS_KEY_ID + "+
-			"AWS_SECRET_ACCESS_KEY. Injected as envFrom on the wrapper container.")
-	flag.BoolVar(&minioUseSSL, "minio-use-ssl", false,
-		"Use https:// for the MinIO/S3 client.")
-	flag.StringVar(&minioAccessKey, "minio-access-key", "",
-		"Access key for the OPERATOR's own MinIO client (result.json download). "+
-			"Wrapper uses --minio-secret-name; the operator needs its own creds. "+
-			"Alternatively set via env $MINIO_ACCESS_KEY.")
-	flag.StringVar(&minioSecretKey, "minio-secret-key", "",
-		"Secret key for the operator's MinIO client. Or $MINIO_SECRET_KEY.")
+	// Object storage (S3-compatible or GCS). Unset --storage-type disables
+	// artifacts, stored logs and result.json; the controller then judges
+	// runs from pod state (NoResultReader).
+	storageFlags := storage.BindFlags(flag.CommandLine)
+	var storageSecret string
+	flag.StringVar(&storageSecret, "storage-secret-name", "",
+		"S3 only: Secret in each run's namespace with AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY, "+
+			"injected into the wrapper via envFrom. Empty = the AWS credential chain in the pod (e.g. IRSA). "+
+			"GCS uses the run pod's service account (Workload Identity) instead.")
 
 	// Log-streaming (step 08). When enabled, the operator opens a follow=true
 	// PodLogs stream for every Running pod, fans out to any subscribers, and
-	// flushes chunk-objects to the MinIO bucket. Disabled by default because
+	// flushes chunk-objects to object storage. Disabled by default because
 	// it requires pods/log RBAC.
 	var logsEnabled bool
 	flag.BoolVar(&logsEnabled, "logs-enabled", false,
-		"Tail pod logs, fan out to subscribers, and flush chunk-objects to MinIO. "+
-			"Requires MinIO to be configured (--minio-endpoint) and RBAC for pods/log.")
+		"Tail pod logs, fan out to subscribers, and flush chunk-objects to object storage. "+
+			"Requires object storage (--storage-type) and RBAC for pods/log.")
 
 	// Postgres run-history store (step 09). Empty DSN → no store, controller
 	// runs without persisting finished TestRuns (a valid dev-mode config).
@@ -193,13 +181,22 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	// Env-var fallbacks for operator's own creds — Kubernetes deployments
-	// mount these from a Secret volume; flags are for local dev.
-	if minioAccessKey == "" {
-		minioAccessKey = os.Getenv("MINIO_ACCESS_KEY")
+	storageCfg := storageFlags.Config()
+	if err := storageCfg.Validate(); err != nil {
+		setupLog.Error(err, "invalid storage flags")
+		os.Exit(1)
 	}
-	if minioSecretKey == "" {
-		minioSecretKey = os.Getenv("MINIO_SECRET_KEY")
+	// One backend for everything the operator does with object storage:
+	// reading result.json and streaming log chunks.
+	var objectStore storage.Backend
+	if storageCfg.Enabled() {
+		var err error
+		objectStore, err = storage.New(context.Background(), storageCfg)
+		if err != nil {
+			setupLog.Error(err, "object storage init failed — running without it", "type", storageCfg.Type)
+		} else {
+			setupLog.Info("object storage wired", "type", storageCfg.Type, "bucket", storageCfg.Bucket)
+		}
 	}
 	if postgresDSN == "" {
 		postgresDSN = os.Getenv("POSTGRES_DSN")
@@ -219,36 +216,17 @@ func main() {
 	compilerOpts := compiler.Options{
 		ContentFetcherImage: contentFetcherImage,
 		ImageRegistry:       imageRegistry,
-		MinIO: compiler.MinIOOptions{
-			Endpoint:   minioEndpoint,
-			Bucket:     minioBucket,
-			SecretName: minioSecret,
-			UseSSL:     minioUseSSL,
-		},
+		Storage:             compiler.StorageOptions{Config: storageCfg, SecretName: storageSecret},
 	}
 
-	// ResultReader wiring — when MinIO is configured, the controller reads
-	// result.json from the bucket. Without MinIO, NoResultReader falls the
-	// controller back to Pod terminated state analysis (§15.2).
+	// ResultReader: result.json from object storage when configured;
+	// otherwise NoResultReader falls back to pod terminated state (§15.2).
 	var resultReader controller.ResultReader = controller.NoResultReader{}
-	if minioEndpoint != "" {
-		mc, err := storage.NewMinIO(storage.Config{
-			Endpoint:  minioEndpoint,
-			Bucket:    minioBucket,
-			UseSSL:    minioUseSSL,
-			AccessKey: minioAccessKey,
-			SecretKey: minioSecretKey,
-		})
-		if err != nil {
-			setupLog.Error(err, "Failed to init MinIO client — controller will use NoResultReader")
-		} else {
-			resultReader = controller.NewStorageResultReader(mc, minioBucket)
-			setupLog.Info("MinIO result reader wired", "endpoint", minioEndpoint, "bucket", minioBucket)
-		}
+	if objectStore != nil {
+		resultReader = controller.NewStorageResultReader(objectStore, storageCfg.Bucket)
 	} else {
-		setupLog.Info("--minio-endpoint not set — artifact scraping disabled, using NoResultReader")
+		setupLog.Info("no object storage — no artifacts, no stored logs, verdicts from pod state")
 	}
-
 	// if the enable-http2 flag is false (the default), http/2 should be disabled
 	// due to its vulnerabilities. More specifically, disabling http/2 will
 	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
@@ -365,34 +343,21 @@ func main() {
 
 	// Log-streaming registry. Wired only when --logs-enabled is set; the
 	// reconciler treats a nil LogRegistry as "logs disabled" and never calls
-	// into it. We also need MinIO up — chunk flushes go there.
+	// into it. Needs object storage — chunk flushes go there.
 	var logRegistry controller.LogRegistry
 	var logRegistryConcrete *logstream.Registry
 	if logsEnabled {
-		if minioEndpoint == "" {
-			setupLog.Info("WARNING: --logs-enabled requires --minio-endpoint; log streaming disabled")
+		if objectStore == nil {
+			setupLog.Info("WARNING: --logs-enabled requires object storage (--storage-type); log streaming disabled")
 		} else {
 			kubeClient, err := kubernetes.NewForConfig(restCfg)
 			if err != nil {
 				setupLog.Error(err, "Failed to build kubernetes client for log source; log streaming disabled")
 			} else {
-				uploader, uerr := storage.NewMinIO(storage.Config{
-					Endpoint:  minioEndpoint,
-					Bucket:    minioBucket,
-					UseSSL:    minioUseSSL,
-					AccessKey: minioAccessKey,
-					SecretKey: minioSecretKey,
-				})
-				if uerr != nil {
-					setupLog.Error(uerr, "Failed to init MinIO client for logs; log streaming disabled")
-				} else {
-					src := &logstream.K8sLogSource{Client: kubeClient}
-					// uploader is *storage.MinIO which also implements Remover —
-					// same client wipes the run's chunk-prefix on restart.
-					logRegistryConcrete = logstream.NewRegistry(src, uploader, uploader, minioBucket)
-					logRegistry = logRegistryConcrete
-					setupLog.Info("log streaming enabled", "bucket", minioBucket)
-				}
+				src := &logstream.K8sLogSource{Client: kubeClient}
+				logRegistryConcrete = logstream.NewRegistry(src, objectStore, objectStore, storageCfg.Bucket)
+				logRegistry = logRegistryConcrete
+				setupLog.Info("log streaming enabled", "bucket", storageCfg.Bucket)
 			}
 		}
 	}
@@ -453,7 +418,7 @@ func main() {
 		APIReader:    mgr.GetAPIReader(), // orphan-detection cache-lag guard
 		Scheme:       mgr.GetScheme(),
 		CompilerOpts: compilerOpts,
-		Results:      resultReader, // step 07: real MinIO reader when configured
+		Results:      resultReader, // object storage reader when configured
 		LogRegistry:  logRegistry,  // step 08: nil when --logs-enabled=false
 		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
 		// Step 13: template resolution. Store reads TestTemplates from the
@@ -525,7 +490,7 @@ func main() {
 		os.Exit(1)
 	}
 	// Manager exited — flush remaining tailers so shutdown doesn't leak
-	// goroutines and the last chunks land in MinIO.
+	// goroutines and the last chunks land in object storage.
 	if logRegistryConcrete != nil {
 		logRegistryConcrete.Shutdown()
 	}

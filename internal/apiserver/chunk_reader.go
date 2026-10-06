@@ -38,7 +38,7 @@ import (
 // Apiserver and operator are separate binaries; operator's in-memory
 // logstream.Registry is unreachable without gRPC/IPC. Adding IPC would
 // duplicate pods/log RBAC, race the operator on chunk ordering, and put
-// two writers on the same MinIO prefix. Chunk-polling reads the same
+// two writers on the same object-storage prefix. Chunk-polling reads the same
 // artifacts the operator produces — stateless, single writer, correct on
 // operator restart, doesn't need to talk to the operator at all. Ugly
 // (an extra HEAD every second while a run is live) but MVP-correct.
@@ -71,7 +71,7 @@ type chunkStream struct {
 	// instead of waiting for PollDeadline. The stream ALWAYS does one
 	// final List+emit after IsTerminal returns true — the operator's
 	// finalize() flush can race the phase Update, so a chunk may land in
-	// MinIO after the CR is already terminal. Callback runs on the loop
+	// object storage after the CR is already terminal. Callback runs on the loop
 	// goroutine, so a blocking implementation blocks the reader (use a
 	// cached / short-timeout k8s Get).
 	IsTerminal func() bool
