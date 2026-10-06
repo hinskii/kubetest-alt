@@ -157,8 +157,14 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 			stepKids = kidsForStep(kids, i)
 		}
 
-		// Are all expected children present AND terminal?
-		outcomes, allDone := gatherOutcomes(stepKids, expected)
+		// Are all expected children present AND terminal? Children that
+		// failed with retries left get their next try instead.
+		outcomes, allDone, retries := gatherOutcomes(stepKids, expected, stepRetries(step), step.Negative)
+		for _, rt := range retries {
+			if err := r.createChild(ctx, logger, run, i, rt.child, rt.attempt); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		if !allDone {
 			// Step still in flight — mark the step-aggregate as running
 			// so the GUI can show progress, then requeue softly.
@@ -172,7 +178,7 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 			// Persist per-child StepResult entries (nice-to-have; the
 			// child TestRuns are the source of truth, but this keeps
 			// GUI-only clients from needing a second list call).
-			r.updatePerChildStepResults(run, 0, stepKids, expected)
+			r.updatePerChildStepResults(run, stepKids, expected, stepRetries(step))
 			if err := r.Status().Update(ctx, run); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -197,7 +203,7 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 		// All done — aggregate.
 		v := composer.Aggregate(outcomes, composer.AggregateOpts{Negative: step.Negative})
 		r.recordStepAggregate(run, i, v)
-		r.updatePerChildStepResults(run, 0, stepKids, expected)
+		r.updatePerChildStepResults(run, stepKids, expected, stepRetries(step))
 		stepVerdicts[i] = &v
 	}
 
@@ -300,21 +306,65 @@ func findChild(kids []testsv1alpha1.TestRun, name string) *testsv1alpha1.TestRun
 	return nil
 }
 
-// gatherOutcomes returns per-expected-child phase + a done flag.
-// done=true only when every expected child exists AND is terminal.
-func gatherOutcomes(kids []testsv1alpha1.TestRun, expected []expectedChild) ([]composer.ChildOutcome, bool) {
-	outcomes := make([]composer.ChildOutcome, 0, len(expected))
-	for _, e := range expected {
-		child := findChild(kids, e.Name)
-		if child == nil {
-			return nil, false
-		}
-		if !IsTerminalPhase(child.Status.Phase) {
-			return nil, false
-		}
-		outcomes = append(outcomes, composer.ChildOutcome{Phase: child.Status.Phase})
+// stepRetries is how many times a failed child of step may be tried again.
+func stepRetries(step testsv1alpha1.Step) int32 {
+	if step.Retry == nil {
+		return 0
 	}
-	return outcomes, true
+	return step.Retry.Count
+}
+
+// attemptName names try n (0 = the first) of expected child e. Deterministic,
+// so a duplicate create hits AlreadyExists.
+func attemptName(e expectedChild, n int32) string {
+	if n == 0 {
+		return e.Name
+	}
+	return names.Bounded(fmt.Sprintf("%s-r%d", e.Name, n))
+}
+
+// latestAttempt returns the newest existing try of e and its number, or
+// (nil, -1) when e has no child yet.
+func latestAttempt(kids []testsv1alpha1.TestRun, e expectedChild, retries int32) (*testsv1alpha1.TestRun, int32) {
+	for n := retries; n >= 0; n-- {
+		if c := findChild(kids, attemptName(e, n)); c != nil {
+			return c, n
+		}
+	}
+	return nil, -1
+}
+
+// childRetry is a child to try again.
+type childRetry struct {
+	child   expectedChild
+	attempt int32
+}
+
+// gatherOutcomes returns the outcome of each expected child's latest try
+// and whether the step is done: every expected child exists, is terminal
+// and needs no retry. Children that failed with retries left
+// (steps[].retry) are returned for their next try.
+func gatherOutcomes(kids []testsv1alpha1.TestRun, expected []expectedChild, retries int32, negative bool) (
+	[]composer.ChildOutcome, bool, []childRetry) {
+	outcomes := make([]composer.ChildOutcome, 0, len(expected))
+	done := true
+	var again []childRetry
+	for _, e := range expected {
+		child, n := latestAttempt(kids, e, retries)
+		switch {
+		case child == nil || !IsTerminalPhase(child.Status.Phase):
+			done = false
+		case n < retries && composer.ChildNeedsRetry(child.Status.Phase, negative):
+			done = false
+			again = append(again, childRetry{child: e, attempt: n + 1})
+		default:
+			outcomes = append(outcomes, composer.ChildOutcome{Phase: child.Status.Phase})
+		}
+	}
+	if !done {
+		return nil, false, again
+	}
+	return outcomes, true, nil
 }
 
 // ensureStepChildren creates any expected children that don't yet
@@ -357,48 +407,59 @@ func (r *TestRunReconciler) ensureStepChildren(
 		if inFlight >= cap {
 			return nil
 		}
-		name := e.Name
-		// Already exists?
-		if findChild(kids, name) != nil {
+		// Already exists (any try)?
+		if c, _ := latestAttempt(kids, e, stepRetries(step)); c != nil {
 			continue
 		}
-		child := &testsv1alpha1.TestRun{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: parent.Namespace,
-				Labels: map[string]string{
-					compiler.LabelParentRun:    parent.Name,
-					compiler.LabelStep:         fmt.Sprintf("%d", stepIdx),
-					compiler.LabelExecIndex:    fmt.Sprintf("%d", e.Index),
-					compiler.LabelKubetestTool: parent.Labels[compiler.LabelKubetestTool],
-				},
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: testsv1alpha1.GroupVersion.String(),
-					Kind:       "TestRun",
-					Name:       parent.Name,
-					UID:        parent.UID,
-					// Controller=true → parent owns child; Background cascade
-					// deletes on parent Delete (envtest-safe).
-					Controller:         boolPtr(true),
-					BlockOwnerDeletion: boolPtr(true),
-				}},
-			},
-			Spec: testsv1alpha1.TestRunSpec{
-				TestRef: e.TestRef,
-				Source:  parent.Spec.Source, // provenance inherited
-				Config:  e.Config,
-			},
+		if err := r.createChild(ctx, logger, parent, stepIdx, e, 0); err != nil {
+			return err
 		}
-		if err := r.Create(ctx, child); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				continue
-			}
-			return fmt.Errorf("create child %s: %w", name, err)
-		}
-		logger.Info("composite: created child",
-			"parent", parent.Name, "step", stepIdx, "child", name, "testRef", e.TestRef)
 		inFlight++
 	}
+	return nil
+}
+
+// createChild creates try `attempt` of expected child e. AlreadyExists is
+// success (deterministic names make a duplicate reconcile a no-op).
+func (r *TestRunReconciler) createChild(ctx context.Context, logger interface{ Info(string, ...any) },
+	parent *testsv1alpha1.TestRun, stepIdx int, e expectedChild, attempt int32) error {
+	name := attemptName(e, attempt)
+	child := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: parent.Namespace,
+			Labels: map[string]string{
+				compiler.LabelParentRun:    parent.Name,
+				compiler.LabelStep:         fmt.Sprintf("%d", stepIdx),
+				compiler.LabelExecIndex:    fmt.Sprintf("%d", e.Index),
+				compiler.LabelAttempt:      fmt.Sprintf("%d", attempt),
+				compiler.LabelKubetestTool: parent.Labels[compiler.LabelKubetestTool],
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: testsv1alpha1.GroupVersion.String(),
+				Kind:       "TestRun",
+				Name:       parent.Name,
+				UID:        parent.UID,
+				// Controller=true → parent owns child; Background cascade
+				// deletes on parent Delete (envtest-safe).
+				Controller:         boolPtr(true),
+				BlockOwnerDeletion: boolPtr(true),
+			}},
+		},
+		Spec: testsv1alpha1.TestRunSpec{
+			TestRef: e.TestRef,
+			Source:  parent.Spec.Source, // provenance inherited
+			Config:  e.Config,
+		},
+	}
+	if err := r.Create(ctx, child); err != nil {
+		if apierrors.IsAlreadyExists(err) {
+			return nil
+		}
+		return fmt.Errorf("create child %s: %w", name, err)
+	}
+	logger.Info("composite: created child",
+		"parent", parent.Name, "step", stepIdx, "child", name, "testRef", e.TestRef, "attempt", attempt)
 	return nil
 }
 
@@ -456,9 +517,10 @@ func recordedStepVerdict(sr testsv1alpha1.StepResult) *composer.StepVerdict {
 // updatePerChildStepResults writes one StepResult per child so the GUI
 // can render a hierarchy without a second List. Idempotent — no-op
 // when nothing has changed.
-func (r *TestRunReconciler) updatePerChildStepResults(run *testsv1alpha1.TestRun, _ int, kids []testsv1alpha1.TestRun, expected []expectedChild) {
+func (r *TestRunReconciler) updatePerChildStepResults(run *testsv1alpha1.TestRun, kids []testsv1alpha1.TestRun,
+	expected []expectedChild, retries int32) {
 	for _, e := range expected {
-		child := findChild(kids, e.Name)
+		child, n := latestAttempt(kids, e, retries)
 		if child == nil {
 			continue
 		}
@@ -467,6 +529,9 @@ func (r *TestRunReconciler) updatePerChildStepResults(run *testsv1alpha1.TestRun
 			QueuedAt:   child.Status.QueuedAt,
 			StartedAt:  child.Status.StartedAt,
 			FinishedAt: child.Status.FinishedAt,
+		}
+		if n > 0 {
+			sr.Message = fmt.Sprintf("try %d of %d (%s)", n+1, retries+1, child.Name)
 		}
 		run.Status.Steps[e.Key] = sr
 	}

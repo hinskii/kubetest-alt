@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 // RunResult is the reconciler-facing subset of the wrapper's result.json.
@@ -41,6 +42,9 @@ type RunResult struct {
 	// TestCounts is the JUnit-aggregated summary the scraper computed. Nil
 	// when no JUnit files were uploaded.
 	TestCounts *testsv1alpha1.TestCounts
+
+	// Attempts lists every try of a retried run (empty for a single try).
+	Attempts []executor.AttemptResult
 
 	// Artifacts is the ref list — path + object-store key + size. Populated
 	// by the scraper. Empty slice means "scraper ran, nothing matched".

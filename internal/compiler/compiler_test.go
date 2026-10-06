@@ -240,6 +240,7 @@ func TestCompile_RequestJSON_HasAllExpectedFields(t *testing.T) {
 	test.Spec.Timeout = &metav1.Duration{Duration: 5 * time.Minute}
 	test.Spec.Verdict = &testsv1alpha1.VerdictSpec{From: "jtl", ErrorRateMax: "0.02"}
 	test.Spec.Metrics = &testsv1alpha1.MetricsSpec{From: "jtl", Path: "repo/results/*.jtl"}
+	test.Spec.Retry = &testsv1alpha1.RetryPolicy{Count: 2}
 	run := canonicalTestRun()
 
 	_, aux, err := Compile(test, run, defaultOpts())
@@ -260,6 +261,8 @@ func TestCompile_RequestJSON_HasAllExpectedFields(t *testing.T) {
 
 	// spec.metrics passed through for the wrapper's report parser.
 	assert.Equal(t, executor.MetricsSpec{From: "jtl", Path: "repo/results/*.jtl"}, req.Metrics)
+	// spec.retry: the wrapper re-runs the tool (fixes.md #16).
+	assert.Equal(t, executor.RetrySpec{Count: 2}, req.Retry)
 }
 
 func TestCompile_RequestJSON_ValueFromEnvExcluded(t *testing.T) {

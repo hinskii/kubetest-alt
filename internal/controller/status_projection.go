@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"strconv"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -53,4 +54,18 @@ func applyRunResultToStatus(run *testsv1alpha1.TestRun, r *RunResult) {
 	if len(r.Artifacts) > 0 {
 		run.Status.ArtifactRefs = r.Artifacts
 	}
+	// A retried run (spec.retry) lists every try, so history shows "passed
+	// on try 2" rather than just "passed".
+	for i, a := range r.Attempts {
+		if run.Status.Steps == nil {
+			run.Status.Steps = map[string]testsv1alpha1.StepResult{}
+		}
+		run.Status.Steps[AttemptStepKey(i+1)] = testsv1alpha1.StepResult{
+			Phase:   testsv1alpha1.StepPhase(a.Phase),
+			Message: a.ErrorMessage,
+		}
+	}
 }
+
+// AttemptStepKey is the status.steps key of try n (1-based) of a retried run.
+func AttemptStepKey(n int) string { return fmt.Sprintf("attempt-%d", n) }

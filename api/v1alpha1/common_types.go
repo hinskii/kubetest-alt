@@ -193,10 +193,19 @@ type TestCounts struct {
 	Skipped int `json:"skipped"`
 }
 
-// RetryPolicy configures automatic retry on step failure.
+// RetryPolicy re-runs what failed. On a Test (spec.retry) the wrapper
+// runs the tool again inside the same pod while the verdict isn't passed —
+// one log, one artifact set, tries listed in status.steps (attempt-N). On
+// a composite step (steps[].retry) each failed child gets a new TestRun
+// <child>-r<N>. Not retried: aborted runs, a timeout, a tool that can't
+// start, pod-level failures (OOM, eviction).
 type RetryPolicy struct {
+	// Count is how many times to try again after the first try.
 	// +kubebuilder:validation:Minimum=1
 	Count int32 `json:"count"`
+	// Until is the stop condition: "passed" (the default, the only one
+	// supported).
+	// +kubebuilder:validation:Enum=passed
 	// +optional
 	Until string `json:"until,omitempty"`
 }

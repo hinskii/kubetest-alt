@@ -140,10 +140,10 @@ type Step struct {
 	// +optional
 	Negative bool `json:"negative,omitempty"`
 
-	// Retry re-creates FAILED children of this step up to Count times
-	// (each retry gets an exec-index suffix -r{N}). Retry does not
-	// affect the child Test's own retry semantics — this is
-	// step-scoped retry only.
+	// Retry re-creates each child whose outcome is a failure (error, or
+	// failed — passed when the step is negative) as <child>-r<N>, up to
+	// Count times; the step uses each child's latest try. Independent of
+	// the child Test's own spec.retry.
 	// +optional
 	Retry *RetryPolicy `json:"retry,omitempty"`
 

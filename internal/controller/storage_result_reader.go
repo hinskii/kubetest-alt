@@ -101,6 +101,7 @@ func projectRunResult(er *executor.ExecutionResult) *RunResult {
 		Metrics:      er.Metrics,
 		Artifacts:    convertArtifacts(er.Artifacts),
 		ScrapeError:  er.ScrapeError,
+		Attempts:     er.Attempts,
 	}
 	if er.TestCounts != nil {
 		rr.TestCounts = &testsv1alpha1.TestCounts{

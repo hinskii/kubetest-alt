@@ -154,6 +154,13 @@ func TestE2E(t *testing.T) {
 		scenarioCompositeSkipOnFail(t, ctx, c)
 	})
 
+	// Step 19a: spec.retry — the wrapper tries again inside the same pod.
+	t.Run("Scenario7_RetryPassesOnSecondTry", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=7 kind=retry duration=%s", time.Since(start)) }()
+		scenarioRetry(t, ctx, c)
+	})
+
 	// Post-scenario: /metrics from operator + apiserver. Asserts the
 	// step-14 counters got real events end-to-end.
 	t.Run("MetricsScrape_OperatorAndApiserver", func(t *testing.T) {
@@ -254,6 +261,41 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 		// must strip them: stored logs are the container's own output.
 		assert.NotRegexp(t, `(?m)^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z `, logs,
 			"kubelet timestamps leaked into the stored log")
+	}
+}
+
+// scenarioRetry: a tool that fails on its first try and passes on the
+// second (a marker file in the pod's /tmp survives between tries — they
+// run in the same container). spec.retry.count=1 → passed, with both
+// tries in status.steps and a separator in the stored log.
+func scenarioRetry(t *testing.T, ctx context.Context, c client.Client) {
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-retry", Namespace: workloadNS},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image:   "grafana/k6:1.4.0",
+				Command: []string{"sh", "-c"},
+				Args: []string{`if [ -f /tmp/tried ]; then echo "second try"; exit 0; fi; ` +
+					`touch /tmp/tried; echo "first try"; exit 1`},
+			},
+			Retry: &testsv1alpha1.RetryPolicy{Count: 1},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-retry-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: test.Name, Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 3*time.Minute)
+	assert.Equal(t, testsv1alpha1.StepPhase("failed"), final.Status.Steps["attempt-1"].Phase)
+	assert.Equal(t, testsv1alpha1.StepPhase("passed"), final.Status.Steps["attempt-2"].Phase)
+	if apiURL := os.Getenv("APISERVER_URL"); apiURL != "" {
+		logs := readRunLogs(t, ctx, apiURL, workloadNS, run.Name)
+		assert.Contains(t, logs, "first try")
+		assert.Contains(t, logs, "kubetest: try 1/2 failed (exit code 1), retrying")
+		assert.Contains(t, logs, "second try")
 	}
 }
 

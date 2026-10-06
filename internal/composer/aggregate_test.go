@@ -221,3 +221,21 @@ func mapLookup(m map[string]*testsv1alpha1.TestSpec) TestLookup {
 func nameAt(i int) string {
 	return "n" + strings.Repeat("x", i)
 }
+
+func TestChildNeedsRetry(t *testing.T) {
+	for _, tc := range []struct {
+		phase    testsv1alpha1.Phase
+		negative bool
+		want     bool
+	}{
+		{testsv1alpha1.PhaseFailed, false, true},
+		{testsv1alpha1.PhasePassed, false, false},
+		{testsv1alpha1.PhaseError, false, true},
+		{testsv1alpha1.PhaseAborted, false, false},
+		{testsv1alpha1.PhaseFailed, true, false},
+		{testsv1alpha1.PhasePassed, true, true},
+		{testsv1alpha1.PhaseError, true, true},
+	} {
+		assert.Equal(t, tc.want, ChildNeedsRetry(tc.phase, tc.negative), "%s negative=%v", tc.phase, tc.negative)
+	}
+}

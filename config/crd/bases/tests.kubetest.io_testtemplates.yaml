@@ -4412,13 +4412,26 @@ spec:
                     type: array
                 type: object
               retry:
-                description: RetryPolicy configures automatic retry on step failure.
+                description: |-
+                  RetryPolicy re-runs what failed. On a Test (spec.retry) the wrapper
+                  runs the tool again inside the same pod while the verdict isn't passed —
+                  one log, one artifact set, tries listed in status.steps (attempt-N). On
+                  a composite step (steps[].retry) each failed child gets a new TestRun
+                  <child>-r<N>. Not retried: aborted runs, a timeout, a tool that can't
+                  start, pod-level failures (OOM, eviction).
                 properties:
                   count:
+                    description: Count is how many times to try again after the first
+                      try.
                     format: int32
                     minimum: 1
                     type: integer
                   until:
+                    description: |-
+                      Until is the stop condition: "passed" (the default, the only one
+                      supported).
+                    enum:
+                    - passed
                     type: string
                 required:
                 - count

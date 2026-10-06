@@ -289,3 +289,19 @@ func joinPath(names []string) string {
 	}
 	return b.String()
 }
+
+// ChildNeedsRetry reports whether a finished child's outcome is a failure
+// worth retrying under steps[].retry: error, or failed (passed when the
+// step is negative). Aborted children are never retried — someone or
+// something stopped them on purpose.
+func ChildNeedsRetry(phase testsv1alpha1.Phase, negative bool) bool {
+	switch phase {
+	case testsv1alpha1.PhaseError:
+		return true
+	case testsv1alpha1.PhaseFailed:
+		return !negative
+	case testsv1alpha1.PhasePassed:
+		return negative
+	}
+	return false
+}

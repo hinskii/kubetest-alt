@@ -295,3 +295,90 @@ func forceChildPhase(t *testing.T, ctx context.Context, ns, name string, phase t
 		require.NoError(t, k8sClient.Status().Update(ctx, &latest), fmt.Sprintf("force phase %s on %s", phase, name))
 	}
 }
+
+// fixes.md #16: steps[].retry re-creates a failed child (<child>-r<N>);
+// the step uses the latest try of each child.
+func TestReconcile_Composite_StepRetry(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, newTestFixture(ns, "rt-leaf")))
+	parent := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "composite-retry", Namespace: ns},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: PolicyAllow,
+			Steps: []testsv1alpha1.Step{{
+				Name:    "flaky",
+				Retry:   &testsv1alpha1.RetryPolicy{Count: 2},
+				Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "rt-leaf"}}},
+			}},
+		},
+	}
+	require.NoError(t, k8sClient.Create(ctx, parent))
+	parentRun := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "retry-run", Namespace: ns},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "composite-retry", Source: "api"},
+	}
+	require.NoError(t, k8sClient.Create(ctx, parentRun))
+	parentKey := client.ObjectKey{Namespace: ns, Name: parentRun.Name}
+
+	waitChild := func(name string) {
+		t.Helper()
+		require.Eventually(t, func() bool {
+			for _, k := range listChildren(t, ctx, ns, parentRun.Name) {
+				if k.Name == name {
+					return true
+				}
+			}
+			return false
+		}, 10*time.Second, 50*time.Millisecond, "child %s", name)
+	}
+	first := "retry-run-s0-rt-leaf-0"
+	waitChild(first)
+	forceChildPhase(t, ctx, ns, first, testsv1alpha1.PhaseFailed)
+	waitChild(first + "-r1")
+	forceChildPhase(t, ctx, ns, first+"-r1", testsv1alpha1.PhaseError)
+	waitChild(first + "-r2")
+	forceChildPhase(t, ctx, ns, first+"-r2", testsv1alpha1.PhasePassed)
+
+	final := waitForPhase(t, ctx, parentKey, testsv1alpha1.PhasePassed, 15*time.Second)
+	assert.Equal(t, "try 3 of 3 ("+first+"-r2)", final.Status.Steps["s0/rt-leaf[0]"].Message)
+	kids := listChildren(t, ctx, ns, parentRun.Name)
+	assert.Len(t, kids, 3, "no try beyond retry.count")
+	for _, k := range kids {
+		if k.Name == first+"-r1" {
+			assert.Equal(t, "1", k.Labels[compiler.LabelAttempt])
+		}
+	}
+}
+
+// Retries run out: the step (and parent) fail with the last try.
+func TestReconcile_Composite_StepRetryExhausted(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, newTestFixture(ns, "rx-leaf")))
+	require.NoError(t, k8sClient.Create(ctx, &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "composite-rx", Namespace: ns},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: PolicyAllow,
+			Steps: []testsv1alpha1.Step{{
+				Retry:   &testsv1alpha1.RetryPolicy{Count: 1},
+				Execute: &testsv1alpha1.StepExecute{Tests: []testsv1alpha1.StepExecuteTest{{Name: "rx-leaf"}}},
+			}},
+		},
+	}))
+	require.NoError(t, k8sClient.Create(ctx, &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "rx-run", Namespace: ns},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "composite-rx", Source: "api"},
+	}))
+	for _, name := range []string{"rx-run-s0-rx-leaf-0", "rx-run-s0-rx-leaf-0-r1"} {
+		require.Eventually(t, func() bool {
+			var c testsv1alpha1.TestRun
+			return k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &c) == nil
+		}, 10*time.Second, 50*time.Millisecond, name)
+		forceChildPhase(t, ctx, ns, name, testsv1alpha1.PhaseFailed)
+	}
+	waitForPhase(t, ctx, client.ObjectKey{Namespace: ns, Name: "rx-run"}, testsv1alpha1.PhaseFailed, 15*time.Second)
+	assert.Len(t, listChildren(t, ctx, ns, "rx-run"), 2)
+}

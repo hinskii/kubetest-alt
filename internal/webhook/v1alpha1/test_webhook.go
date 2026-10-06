@@ -174,6 +174,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateMetrics(spec.Metrics); err != nil {
 		return err
 	}
+	if err := validateRetry("spec.retry", spec.Retry); err != nil {
+		return err
+	}
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
 	}
@@ -215,6 +218,9 @@ func validateCompositeShape(spec *testsv1alpha1.TestSpec) error {
 	if spec.Parallel != nil {
 		return errors.New("spec.steps and spec.parallel are mutually exclusive")
 	}
+	if spec.Retry != nil {
+		return errors.New("spec.retry does not apply to a composite Test — set retry on the steps (spec.steps[].retry)")
+	}
 	// concurrencyPolicy on composite is fine — it applies to the parent run itself.
 	if _, ok := allowedConcurrencyPolicies[spec.ConcurrencyPolicy]; !ok {
 		return fmt.Errorf("spec.concurrencyPolicy %q is not one of [Allow Forbid Replace]", spec.ConcurrencyPolicy)
@@ -243,7 +249,7 @@ func validateStep(idx int, s *testsv1alpha1.Step) error {
 	if s.Execute.Parallelism < 0 {
 		return fmt.Errorf("spec.steps[%d].execute.parallelism must be >= 0", idx)
 	}
-	if s.Condition != "" && s.Condition != "passed" && s.Condition != "always" {
+	if s.Condition != "" && s.Condition != conditionPassed && s.Condition != "always" {
 		return fmt.Errorf("spec.steps[%d].condition %q is not one of [passed always]", idx, s.Condition)
 	}
 	for j := range s.Execute.Tests {
@@ -255,8 +261,25 @@ func validateStep(idx int, s *testsv1alpha1.Step) error {
 			return fmt.Errorf("spec.steps[%d].execute.tests[%d].count must be >= 1 (0/unset means default 1)", idx, j)
 		}
 	}
-	if s.Retry != nil && s.Retry.Count < 1 {
-		return fmt.Errorf("spec.steps[%d].retry.count must be >= 1 when set", idx)
+	return validateRetry(fmt.Sprintf("spec.steps[%d].retry", idx), s.Retry)
+}
+
+// conditionPassed is the "until the run passes" condition (steps[].condition,
+// retry.until).
+const conditionPassed = "passed"
+
+// validateRetry: count >= 1; until is "passed" (retry until the run
+// passes, the default) — the only condition implemented, so anything else
+// is refused rather than accepted and ignored.
+func validateRetry(field string, r *testsv1alpha1.RetryPolicy) error {
+	if r == nil {
+		return nil
+	}
+	if r.Count < 1 {
+		return fmt.Errorf("%s.count must be >= 1 when set", field)
+	}
+	if r.Until != "" && r.Until != conditionPassed {
+		return fmt.Errorf("%s.until %q is not supported (only \"passed\", the default)", field, r.Until)
 	}
 	return nil
 }

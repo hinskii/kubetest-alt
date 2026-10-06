@@ -513,3 +513,28 @@ func TestValidateMetrics(t *testing.T) {
 	}
 	assert.NoError(t, validateMetrics(nil))
 }
+
+func TestValidateTest_Retry(t *testing.T) {
+	leaf := func(r *testsv1alpha1.RetryPolicy) *testsv1alpha1.TestSpec {
+		s := baseValidSpec()
+		s.Retry = r
+		return &s
+	}
+	require.NoError(t, validateTest(leaf(&testsv1alpha1.RetryPolicy{Count: 2})))
+	require.NoError(t, validateTest(leaf(&testsv1alpha1.RetryPolicy{Count: 2, Until: "passed"})))
+	require.ErrorContains(t, validateTest(leaf(&testsv1alpha1.RetryPolicy{Count: 0})), "spec.retry.count")
+	require.ErrorContains(t, validateTest(leaf(&testsv1alpha1.RetryPolicy{Count: 1, Until: "self.failed"})),
+		`spec.retry.until "self.failed" is not supported`)
+
+	composite := &testsv1alpha1.TestSpec{
+		ConcurrencyPolicy: "Allow",
+		Steps: []testsv1alpha1.Step{{Execute: &testsv1alpha1.StepExecute{
+			Tests: []testsv1alpha1.StepExecuteTest{{Name: "a"}},
+		}, Retry: &testsv1alpha1.RetryPolicy{Count: 1, Until: "nope"}}},
+	}
+	require.ErrorContains(t, validateTest(composite), "spec.steps[0].retry.until")
+	composite.Steps[0].Retry.Until = ""
+	require.NoError(t, validateTest(composite))
+	composite.Retry = &testsv1alpha1.RetryPolicy{Count: 1}
+	require.ErrorContains(t, validateTest(composite), "set retry on the steps")
+}

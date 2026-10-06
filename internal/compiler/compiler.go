@@ -487,6 +487,9 @@ func buildRequestJSON(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun,
 	if m := test.Spec.Metrics; m != nil {
 		req.Metrics = executor.MetricsSpec{From: m.From, Path: m.Path}
 	}
+	if r := test.Spec.Retry; r != nil {
+		req.Retry = executor.RetrySpec{Count: int(r.Count)}
+	}
 	if v := test.Spec.Verdict; v != nil {
 		req.Verdict = executor.VerdictSpec{
 			From:         v.From,

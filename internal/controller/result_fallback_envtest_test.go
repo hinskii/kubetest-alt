@@ -149,3 +149,24 @@ func TestReconcile_LatestRunOnTest(t *testing.T) {
 		return lr == nil || lr.Name != "latest-new"
 	}, time.Second, 100*time.Millisecond, "an older run finishing late must not overwrite latestRun")
 }
+
+// A retried leaf run lists its tries in status.steps (fixes.md #16).
+func TestReconcile_RetriedRun_AttemptsInSteps(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, newTestFixture(ns, "flaky")))
+	run := newRunFixture(ns, "flaky-run", "flaky")
+	require.NoError(t, k8sClient.Create(ctx, run))
+	key := client.ObjectKey{Namespace: ns, Name: run.Name}
+	waitForJob(t, ctx, key, 5*time.Second)
+
+	fakeResults.Set(run.Name, &RunResult{Phase: testsv1alpha1.PhasePassed, Attempts: []executor.AttemptResult{
+		{Phase: executor.PhaseFailed, ErrorMessage: "exit code 1"},
+		{Phase: executor.PhasePassed},
+	}})
+	patchJobConditions(t, ctx, key, []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}})
+	final := waitForPhase(t, ctx, key, testsv1alpha1.PhasePassed, 5*time.Second)
+	assert.Equal(t, testsv1alpha1.StepResult{Phase: "failed", Message: "exit code 1"}, final.Status.Steps[AttemptStepKey(1)])
+	assert.Equal(t, testsv1alpha1.StepPhase("passed"), final.Status.Steps[AttemptStepKey(2)].Phase)
+}

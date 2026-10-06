@@ -54,6 +54,22 @@ type ExecutionRequest struct {
 	// after the tool exits into ExecutionResult.Metrics; never changes the
 	// verdict.
 	Metrics MetricsSpec `json:"metrics,omitzero"`
+
+	// Retry re-runs the tool while the verdict isn't passed (Test.spec.retry).
+	Retry RetrySpec `json:"retry,omitzero"`
+}
+
+// RetrySpec mirrors api/v1alpha1.RetryPolicy on the wire.
+type RetrySpec struct {
+	// Count is how many times the tool may run AGAIN after the first try.
+	Count int `json:"count,omitempty"`
+}
+
+// AttemptResult is one try of a retried run.
+type AttemptResult struct {
+	Phase        string `json:"phase"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+	ToolExitCode *int   `json:"toolExitCode,omitempty"`
 }
 
 // MetricsSpec mirrors api/v1alpha1.MetricsSpec on the wire.
@@ -113,6 +129,11 @@ type ExecutionResult struct {
 	// TestCounts is filled by the scraper (step 07) when JUnit XML files
 	// are found and parsed. Nil when the tool doesn't emit JUnit output.
 	TestCounts *TestCounts `json:"testCounts,omitempty"`
+
+	// Attempts lists every try when the run was retried (Retry.Count > 0
+	// and the first try wasn't passed); the last entry is the verdict
+	// above. Empty for a single try.
+	Attempts []AttemptResult `json:"attempts,omitempty"`
 
 	// Steps is per-step results for tools with an internal step concept
 	// (Cypress specs, Newman requests). k6 leaves it empty.

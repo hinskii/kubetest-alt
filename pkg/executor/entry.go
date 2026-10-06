@@ -147,8 +147,9 @@ func (e *Entry) Execute(ctx context.Context) error {
 	// --output) on a missing parent directory.
 	e.prepareOutputDirs(req)
 
-	// Exec the tool verbatim.
-	result := e.runTool(ctx, req)
+	// Exec the tool verbatim — again while it isn't passed and retries
+	// remain (Test.spec.retry).
+	result := e.runWithRetry(ctx, req)
 
 	// Reclassify by ctx state — timeout/signal win over any verdict.
 	switch {
@@ -164,6 +165,9 @@ func (e *Entry) Execute(ctx context.Context) error {
 		if result.ErrorMessage == "" {
 			result.ErrorMessage = "aborted by signal"
 		}
+	}
+	if n := len(result.Attempts); n > 0 {
+		result.Attempts[n-1] = attemptOf(result) // the last try's final verdict
 	}
 
 	// Metrics from the tool's report (spec.metrics). After the verdict and
@@ -190,6 +194,45 @@ func (e *Entry) Execute(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// runWithRetry runs the tool up to 1 + req.Retry.Count times, until the
+// verdict is passed. Like a TestWorkflow step retry, every try runs in
+// this pod: one log stream (a separator line between tries), one artifact
+// scrape after the last. Not retried: a tool that couldn't even start, and
+// anything after the timeout or a signal (the TimeoutSeconds budget
+// covers all tries).
+//
+// A verdict processor may read a report a previous try left behind; those
+// tries were not passed, so a stale report can only fail the verdict,
+// never pass it.
+func (e *Entry) runWithRetry(ctx context.Context, req ExecutionRequest) ExecutionResult {
+	result := e.runTool(ctx, req)
+	if req.Retry.Count <= 0 {
+		return result
+	}
+	total := req.Retry.Count + 1
+	var attempts []AttemptResult
+	for try := 1; try < total && retryable(result) && ctx.Err() == nil; try++ {
+		attempts = append(attempts, attemptOf(result))
+		_, _ = fmt.Fprintf(e.Stdout, "\n--- kubetest: try %d/%d %s (%s), retrying ---\n\n",
+			try, total, result.Phase, result.ErrorMessage)
+		result = e.runTool(ctx, req)
+	}
+	if len(attempts) > 0 {
+		result.Attempts = append(attempts, attemptOf(result))
+	}
+	return result
+}
+
+// retryable: the tool ran and its verdict wasn't passed. A tool that
+// couldn't start (no exit code) fails the same way every time.
+func retryable(r ExecutionResult) bool {
+	return r.Phase == PhaseFailed || (r.Phase == PhaseError && r.ToolExitCode != nil)
+}
+
+func attemptOf(r ExecutionResult) AttemptResult {
+	return AttemptResult{Phase: r.Phase, ErrorMessage: r.ErrorMessage, ToolExitCode: r.ToolExitCode}
 }
 
 // runTool execs the request's Command/Args and returns a preliminary

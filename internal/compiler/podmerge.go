@@ -43,6 +43,8 @@ const (
 	LabelParentRun = "kubetest.io/parent-run"
 	LabelStep      = "kubetest.io/step"
 	LabelExecIndex = "kubetest.io/exec-index"
+	// LabelAttempt numbers a child's tries under steps[].retry (0 = first).
+	LabelAttempt = "kubetest.io/attempt"
 
 	// ReservedLabelPrefix marks the whole namespace the operator reserves for
 	// future labels. Any user label under this prefix is silently dropped.
