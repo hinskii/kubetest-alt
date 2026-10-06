@@ -364,6 +364,89 @@
         }
       ]
     },
+    "/runs/{id}/abort": {
+      "parameters": [
+        {
+          "description": "TestRun name.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "message": {
+                    "maxLength": 512,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEnvelope"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Abort a live run. Sets spec.abort (reason User, requestedBy from the X-Kubetest-User header); the controller kills the Job, records the run as aborted, persists it and fires webhooks. Idempotent. Allowed on runs of GitOps-managed Tests (runs are not definitions, §7)."
+      }
+    },
     "/runs/{id}/artifacts/{path}": {
       "get": {
         "responses": {

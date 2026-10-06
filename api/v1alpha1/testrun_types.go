@@ -46,6 +46,44 @@ type TestRunSpec struct {
 	// +kubebuilder:validation:Enum=ui;api;cli;cron;trigger;gitops
 	// +optional
 	Source string `json:"source,omitempty"`
+
+	// Abort, once set, stops the run: the controller kills the Job (or
+	// aborts the children of a composite run), ends the run as "aborted",
+	// persists it to run history and fires webhooks — the same path every
+	// other terminal transition takes. One-way: the validating webhook
+	// rejects clearing or changing it. No effect on an already-terminal run.
+	// +optional
+	Abort *AbortRequest `json:"abort,omitempty"`
+}
+
+// Abort reasons. The reason is part of the run's final status message so
+// history shows WHY a run was stopped, not just that it was.
+const (
+	// AbortReasonUser: a person asked for it (GUI/API/CLI).
+	AbortReasonUser = "User"
+	// AbortReasonConcurrency: superseded by a newer run of a Test with
+	// concurrencyPolicy=Replace.
+	AbortReasonConcurrency = "Concurrency"
+	// AbortReasonParent: the composite parent stopped this child (parent
+	// aborted, or the step timed out).
+	AbortReasonParent = "Parent"
+)
+
+// AbortRequest asks the controller to stop a run.
+type AbortRequest struct {
+	// +kubebuilder:validation:Enum=User;Concurrency;Parent
+	Reason string `json:"reason"`
+
+	// Message is free text shown in the run's status.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+
+	// RequestedBy identifies who asked (user e-mail, or the run that
+	// superseded this one).
+	// +kubebuilder:validation:MaxLength=256
+	// +optional
+	RequestedBy string `json:"requestedBy,omitempty"`
 }
 
 // TestRunStatus captures per-run progress. Timestamps are populated by the

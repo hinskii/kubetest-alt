@@ -49,6 +49,33 @@ spec:
           spec:
             description: TestRunSpec is a single execution request for a Test.
             properties:
+              abort:
+                description: |-
+                  Abort, once set, stops the run: the controller kills the Job (or
+                  aborts the children of a composite run), ends the run as "aborted",
+                  persists it to run history and fires webhooks — the same path every
+                  other terminal transition takes. One-way: the validating webhook
+                  rejects clearing or changing it. No effect on an already-terminal run.
+                properties:
+                  message:
+                    description: Message is free text shown in the run's status.
+                    maxLength: 512
+                    type: string
+                  reason:
+                    enum:
+                    - User
+                    - Concurrency
+                    - Parent
+                    type: string
+                  requestedBy:
+                    description: |-
+                      RequestedBy identifies who asked (user e-mail, or the run that
+                      superseded this one).
+                    maxLength: 256
+                    type: string
+                required:
+                - reason
+                type: object
               config:
                 additionalProperties:
                   type: string
@@ -3371,6 +3398,11 @@ spec:
                   properties:
                     finishedAt:
                       format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        Message explains a step-level verdict the children alone don't
+                        (e.g. "step timeout exceeded").
                       type: string
                     phase:
                       description: |-

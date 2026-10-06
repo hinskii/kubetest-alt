@@ -136,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /runs", s.createRun)
 	mux.HandleFunc("GET /runs", s.listRuns)
 	mux.HandleFunc("GET /runs/{id}", s.getRun)
+	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
 
 	// Logs + artifacts.
 	mux.HandleFunc("GET /runs/{id}/logs", s.getRunLogs)

@@ -706,6 +706,7 @@ func TestReconcile_Concurrency_Forbid(t *testing.T) {
 // the still-active run1.
 func TestReconcile_Concurrency_Replace(t *testing.T) {
 	fakeResults.Reset()
+	fakeRunStore.Reset()
 	resetReconcileCounts()
 	ctx := context.Background()
 	ns := uniqueNamespace(t)
@@ -728,6 +729,12 @@ func TestReconcile_Concurrency_Replace(t *testing.T) {
 	final := waitForPhase(t, ctx, client.ObjectKey{Namespace: ns, Name: run1.Name},
 		testsv1alpha1.PhaseAborted, 5*time.Second)
 	assert.Contains(t, final.Status.Message, ReasonAborted)
+	assert.Contains(t, final.Status.Message, run2.Name, "message names the superseding run")
+	// fixes.md #11: a Replace-aborted run used to skip persistence (and the
+	// tailer stop / gauge decrement / webhook that come with it).
+	assert.Eventually(t, func() bool {
+		return persistedPhase(string(final.UID)) == testsv1alpha1.PhaseAborted
+	}, 3*time.Second, 50*time.Millisecond, "Replace-aborted run must reach run history")
 
 	// run2 proceeds.
 	waitForJob(t, ctx, client.ObjectKey{Namespace: ns, Name: run2.Name}, 5*time.Second)

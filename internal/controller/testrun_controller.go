@@ -305,6 +305,13 @@ func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// Abort requested (GUI/API, Replace concurrency, or composite parent).
+	// Checked before setup so a run still waiting in queued can be aborted
+	// too.
+	if run.Spec.Abort != nil {
+		return r.reconcileAbort(ctx, &run)
+	}
+
 	// Setup path: first time we see this run, snapshot the Test spec, check
 	// concurrency, transition to queued.
 	if run.Status.ResolvedSpec == "" {
@@ -422,7 +429,7 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 
 	case ConcurrencyReplacePrior:
 		for _, prior := range SelectPriorsToAbort(priors, run) {
-			if err := r.abortRun(ctx, prior); err != nil {
+			if err := r.abortRun(ctx, prior, run); err != nil {
 				return ctrl.Result{}, err
 			}
 		}
@@ -812,23 +819,80 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 	return ctrl.Result{}, nil
 }
 
-// abortRun marks a prior TestRun as aborted (for Replace concurrency) and
-// deletes its Job. Used by setup() when the new run's policy is Replace.
-func (r *TestRunReconciler) abortRun(ctx context.Context, prior *testsv1alpha1.TestRun) error {
-	patch := client.MergeFrom(prior.DeepCopy())
-	prior.Status.Phase = testsv1alpha1.PhaseAborted
-	prior.Status.Message = ReasonAborted + ": superseded by a Replace-policy run"
-	now := r.Now()
-	prior.Status.FinishedAt = &now
-	if err := r.Status().Patch(ctx, prior, patch); err != nil && !apierrors.IsNotFound(err) {
+// reconcileAbort ends a run whose spec.abort is set. Leaf runs take the
+// same path as any other terminal transition (terminalAndDeleteJob: status,
+// run history, webhooks, log tailer, Job delete). Composite runs first ask
+// their children to abort, then terminate themselves the same way.
+func (r *TestRunReconciler) reconcileAbort(ctx context.Context, run *testsv1alpha1.TestRun) (ctrl.Result, error) {
+	reason, msg := abortStatus(run.Spec.Abort)
+	if isCompositeRun(run) {
+		kids, err := r.listChildRuns(ctx, run)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.abortStepChildren(ctx, run, kids, "parent run aborted"); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseAborted, reason, msg, nil)
+	}
+	var job *batchv1.Job
+	var j batchv1.Job
+	switch err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &j); {
+	case err == nil:
+		job = &j
+	case !apierrors.IsNotFound(err):
+		return ctrl.Result{}, err
+	}
+	return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseAborted, reason, msg, job)
+}
+
+// abortStatus maps an AbortRequest to the status reason + message.
+func abortStatus(req *testsv1alpha1.AbortRequest) (reason, message string) {
+	switch req.Reason {
+	case testsv1alpha1.AbortReasonConcurrency:
+		reason = ReasonAborted
+	case testsv1alpha1.AbortReasonParent:
+		reason = ReasonAbortedByParent
+	default:
+		reason = ReasonAbortedByUser
+	}
+	message = req.Message
+	if req.RequestedBy != "" {
+		if message != "" {
+			message += " "
+		}
+		message += "(requested by " + req.RequestedBy + ")"
+	}
+	return reason, message
+}
+
+// requestAbort sets spec.abort on run; the run's own reconcile then does
+// the teardown. No-op for runs that are already terminal or already asked
+// to abort (spec.abort is one-way and must not be rewritten).
+func (r *TestRunReconciler) requestAbort(ctx context.Context, run *testsv1alpha1.TestRun, req testsv1alpha1.AbortRequest) error {
+	if run.Spec.Abort != nil || IsTerminalPhase(run.Status.Phase) {
+		return nil
+	}
+	patch := client.MergeFrom(run.DeepCopy())
+	run.Spec.Abort = &req
+	if err := r.Patch(ctx, run, patch); err != nil && !apierrors.IsNotFound(err) {
 		return err
 	}
-	// Best-effort Job delete (Background propagation — see deleteJobBackground).
-	var job batchv1.Job
-	if err := r.Get(ctx, types.NamespacedName{Namespace: prior.Namespace, Name: prior.Name}, &job); err == nil {
-		_ = deleteJobBackground(ctx, r.Client, &job)
-	}
 	return nil
+}
+
+// abortRun marks a prior TestRun as aborted (for Replace concurrency) and
+// deletes its Job. Used by setup() when the new run's policy is Replace.
+func (r *TestRunReconciler) abortRun(ctx context.Context, prior, by *testsv1alpha1.TestRun) error {
+	// Via spec.abort rather than patching the prior's status directly: the
+	// prior's own reconcile then stops its log tailer, decrements the
+	// ActiveRuns gauge, persists it and fires webhooks (fixes.md #11) — and
+	// the spec patch can't clobber a status the prior just wrote.
+	return r.requestAbort(ctx, prior, testsv1alpha1.AbortRequest{
+		Reason:      testsv1alpha1.AbortReasonConcurrency,
+		Message:     "superseded by a Replace-policy run",
+		RequestedBy: by.Name,
+	})
 }
 
 // listPriorRuns fetches all TestRuns in the same namespace referencing the

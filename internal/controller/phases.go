@@ -49,6 +49,8 @@ const (
 	// doesn't complain about the literal appearing on the reader-side too.
 	k8sReasonDeadlineExceeded = "DeadlineExceeded"
 	ReasonAborted             = "AbortedByConcurrency"
+	ReasonAbortedByUser       = "AbortedByUser"
+	ReasonAbortedByParent     = "AbortedByParent"
 	ReasonMissingResult       = "MissingResult"
 )
 

@@ -86,6 +86,30 @@ func OpenAPISpec() map[string]any {
 					nil, jsonRef("#/components/schemas/RunEnvelope"), errorResp()),
 				"parameters": []any{pathParam("id", "TestRun name (cluster) or UID (archive)."), namespaceParam()},
 			},
+			"/runs/{id}/abort": map[string]any{
+				"post": map[string]any{
+					"summary": "Abort a live run. Sets spec.abort (reason User, requestedBy from " +
+						"the X-Kubetest-User header); the controller kills the Job, records the " +
+						"run as aborted, persists it and fires webhooks. Idempotent. Allowed on " +
+						"runs of GitOps-managed Tests (runs are not definitions, §7).",
+					"requestBody": map[string]any{
+						"required": false,
+						"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"message": map[string]any{"type": "string", "maxLength": maxAbortMessageLen},
+							},
+						}}},
+					},
+					"responses": map[string]any{
+						"202": jsonResponse(jsonRef("#/components/schemas/RunEnvelope")),
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"409": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name."), namespaceParam()},
+			},
 			"/runs/{id}/logs": map[string]any{
 				"get": map[string]any{
 					"summary": "Stream logs over WebSocket. Live runs poll the MinIO " +

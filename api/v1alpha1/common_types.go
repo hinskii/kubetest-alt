@@ -266,6 +266,10 @@ type StepResult struct {
 	StartedAt *metav1.Time `json:"startedAt,omitempty"`
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+	// Message explains a step-level verdict the children alone don't
+	// (e.g. "step timeout exceeded").
+	// +optional
+	Message string `json:"message,omitempty"`
 }
 
 // StepPhase is the enum for StepResult.Phase. Kept as a separate type

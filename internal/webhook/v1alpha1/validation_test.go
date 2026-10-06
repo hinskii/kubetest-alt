@@ -467,3 +467,30 @@ func cloneStringMap(m map[string]string) map[string]string {
 	maps.Copy(out, m)
 	return out
 }
+
+func TestValidateAbortTransition(t *testing.T) {
+	user := &testsv1alpha1.AbortRequest{Reason: testsv1alpha1.AbortReasonUser, RequestedBy: "a@x"}
+	other := &testsv1alpha1.AbortRequest{Reason: testsv1alpha1.AbortReasonUser, RequestedBy: "b@x"}
+	cases := []struct {
+		name     string
+		old, new *testsv1alpha1.AbortRequest
+		wantErr  string
+	}{
+		{"unset stays unset", nil, nil, ""},
+		{"set from unset", nil, user, ""},
+		{"unchanged", user, user, ""},
+		{"cleared", user, nil, "cannot be cleared"},
+		{"rewritten", user, other, "cannot be changed"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateAbortTransition(c.old, c.new)
+			if c.wantErr == "" {
+				assert.NoError(t, err)
+				return
+			}
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), c.wantErr)
+		})
+	}
+}

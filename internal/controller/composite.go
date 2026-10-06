@@ -136,6 +136,11 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 			continue
 		}
 
+		if v := recordedStepVerdict(existing); v != nil {
+			stepVerdicts[i] = v
+			continue
+		}
+
 		// Look up (or create) children for this step.
 		stepKids := kidsForStep(kids, i)
 		expected := expectedChildren(step, i)
@@ -175,7 +180,7 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 			// mark the step failed.
 			if step.Timeout != nil && step.Timeout.Duration > 0 {
 				if existing.StartedAt != nil && r.Now().Sub(existing.StartedAt.Time) > step.Timeout.Duration {
-					if aerr := r.abortStepChildren(ctx, stepKids); aerr != nil {
+					if aerr := r.abortStepChildren(ctx, run, stepKids, "step timeout exceeded"); aerr != nil {
 						return ctrl.Result{}, aerr
 					}
 					v := composer.StepVerdict{Phase: testsv1alpha1.PhaseFailed, Message: "step timeout exceeded"}
@@ -388,14 +393,20 @@ func (r *TestRunReconciler) ensureStepChildren(
 	return nil
 }
 
-// abortStepChildren deletes any non-terminal child in the given slice.
-// Used by step-timeout to force termination before advancing.
-func (r *TestRunReconciler) abortStepChildren(ctx context.Context, kids []testsv1alpha1.TestRun) error {
+// abortStepChildren asks every non-terminal child in kids to abort (spec.abort,
+// reason Parent). Children are NOT deleted: an aborted child still reaches
+// run history, and a deleted one used to be re-created by
+// ensureStepChildren on the next requeue (fixes.md #7).
+// Used by step-timeout and by aborting the parent itself.
+func (r *TestRunReconciler) abortStepChildren(ctx context.Context, parent *testsv1alpha1.TestRun,
+	kids []testsv1alpha1.TestRun, why string) error {
 	for i := range kids {
-		if IsTerminalPhase(kids[i].Status.Phase) {
-			continue
+		req := testsv1alpha1.AbortRequest{
+			Reason:      testsv1alpha1.AbortReasonParent,
+			Message:     why,
+			RequestedBy: parent.Name,
 		}
-		if err := r.Delete(ctx, &kids[i]); err != nil && !apierrors.IsNotFound(err) {
+		if err := r.requestAbort(ctx, &kids[i], req); err != nil {
 			return fmt.Errorf("abort child %s: %w", kids[i].Name, err)
 		}
 	}
@@ -414,7 +425,23 @@ func (r *TestRunReconciler) recordStepAggregate(run *testsv1alpha1.TestRun, step
 	}
 	now := r.Now()
 	sr.FinishedAt = &now
+	sr.Message = v.Message
 	run.Status.Steps[key] = sr
+}
+
+// recordedStepVerdict returns the verdict already recorded for a step, or
+// nil while the step is still open. Once a step has a terminal verdict it
+// is final: re-aggregating from the children on later reconciles would let
+// a step-timeout verdict ("failed") be overwritten by the aborted
+// children's aggregate, and — before children were aborted instead of
+// deleted — re-created the deleted children on every requeue.
+func recordedStepVerdict(sr testsv1alpha1.StepResult) *composer.StepVerdict {
+	switch sr.Phase {
+	case testsv1alpha1.StepPhasePassed, testsv1alpha1.StepPhaseFailed,
+		testsv1alpha1.StepPhaseAborted, testsv1alpha1.StepPhaseError:
+		return &composer.StepVerdict{Phase: testsv1alpha1.Phase(sr.Phase), Message: sr.Message}
+	}
+	return nil
 }
 
 // updatePerChildStepResults writes one StepResult per child so the GUI

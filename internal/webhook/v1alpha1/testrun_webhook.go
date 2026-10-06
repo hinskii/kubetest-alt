@@ -68,8 +68,28 @@ func (v *TestRunCustomValidator) ValidateCreate(_ context.Context, obj *testsv1a
 }
 
 // ValidateUpdate runs on TestRun update. Same rules as create.
-func (v *TestRunCustomValidator) ValidateUpdate(_ context.Context, _, newObj *testsv1alpha1.TestRun) (admission.Warnings, error) {
-	return nil, validateTestRun(&newObj.Spec)
+func (v *TestRunCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj *testsv1alpha1.TestRun) (admission.Warnings, error) {
+	if err := validateTestRun(&newObj.Spec); err != nil {
+		return nil, err
+	}
+	return nil, validateAbortTransition(oldObj.Spec.Abort, newObj.Spec.Abort)
+}
+
+// validateAbortTransition keeps spec.abort one-way: it may go from unset to
+// set, never back, and never be rewritten. Otherwise a run already being
+// torn down could be "un-aborted" (or have its recorded reason swapped)
+// while the controller is mid-way through killing its Job.
+func validateAbortTransition(oldAbort, newAbort *testsv1alpha1.AbortRequest) error {
+	if oldAbort == nil {
+		return nil
+	}
+	if newAbort == nil {
+		return errors.New("spec.abort cannot be cleared once set — an aborted run stays aborted")
+	}
+	if *oldAbort != *newAbort {
+		return errors.New("spec.abort cannot be changed once set")
+	}
+	return nil
 }
 
 // ValidateDelete is a no-op — step-02 only validates create/update.

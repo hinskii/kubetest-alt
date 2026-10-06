@@ -199,6 +199,28 @@ func TestEnvtest_RejectInvalidTestRun_EmptyTestRef(t *testing.T) {
 	assert.Contains(t, err.Error(), "spec.testRef")
 }
 
+// TestEnvtest_AbortIsOneWay is the sentinel for the TestRun update rule:
+// "spec.abort cannot be cleared" is a cross-version (old vs new) predicate
+// the OpenAPI schema can't express, so this only passes if the validating
+// webhook is actually on the UPDATE path.
+func TestEnvtest_AbortIsOneWay(t *testing.T) {
+	ctx := context.Background()
+	tr := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "abort-once", Namespace: "default"},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "t"},
+	}
+	require.NoError(t, k8sClient.Create(ctx, tr))
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, tr) })
+
+	tr.Spec.Abort = &testsv1alpha1.AbortRequest{Reason: testsv1alpha1.AbortReasonUser, RequestedBy: "a@x"}
+	require.NoError(t, k8sClient.Update(ctx, tr), "setting abort is allowed")
+
+	tr.Spec.Abort = nil
+	err := k8sClient.Update(ctx, tr)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.abort cannot be cleared")
+}
+
 // TestEnvtest_PodConfigAnnotationsPassThrough is the §8 regression guard at
 // the envtest layer: after a round-trip through defaulting + validating +
 // api-server storage, every user-supplied annotation/label must survive
