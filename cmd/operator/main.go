@@ -355,7 +355,7 @@ func main() {
 				setupLog.Error(err, "Failed to build kubernetes client for log source; log streaming disabled")
 			} else {
 				src := &logstream.K8sLogSource{Client: kubeClient}
-				logRegistryConcrete = logstream.NewRegistry(src, objectStore, objectStore, storageCfg.Bucket)
+				logRegistryConcrete = logstream.NewRegistry(src, objectStore, objectStore, objectStore, storageCfg.Bucket)
 				logRegistry = logRegistryConcrete
 				setupLog.Info("log streaming enabled", "bucket", storageCfg.Bucket)
 			}

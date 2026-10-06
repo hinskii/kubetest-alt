@@ -250,6 +250,10 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 		logs := readRunLogs(t, ctx, apiURL, workloadNS, run.Name)
 		assert.Contains(t, logs, "script.js",
 			"k6 output streamed by the operator must be readable through the apiserver")
+		// The tailer reads with timestamps=true for its resume position and
+		// must strip them: stored logs are the container's own output.
+		assert.NotRegexp(t, `(?m)^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z `, logs,
+			"kubelet timestamps leaked into the stored log")
 	}
 }
 

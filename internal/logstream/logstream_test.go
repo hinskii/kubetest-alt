@@ -26,6 +26,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 
@@ -158,7 +159,7 @@ func TestFanOut_ThreeSubscribers_ReceiveSameBytes(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys: storage.ForRun("ns", "r1"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) {
 			return fr, nil
 		},
 		FlushInterval:   1e6, // 1s — irrelevant; test drives via Stop
@@ -193,7 +194,7 @@ func TestFanOut_LateJoiner_GetsReplayThenLive(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys:            storage.ForRun("ns", "r1b"),
-		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource:      func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 		RingBytes:       1024,
 		SubscriberQueue: 32,
 	})
@@ -245,7 +246,7 @@ func TestRing_OverflowKeepsNewestAndMarksReplay(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys: storage.ForRun("ns", "r2"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) {
 			return fr, nil
 		},
 		RingBytes:       4, // tiny ring so we overflow immediately
@@ -295,7 +296,7 @@ func TestSlowClient_DroppedWithOverflowMarker(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys:            storage.ForRun("ns", "r3"),
-		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource:      func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 		SubscriberQueue: queue,
 	})
 	tailer.Start(t.Context())
@@ -345,7 +346,7 @@ func TestFlush_ChunkAtSizeThreshold(t *testing.T) {
 	up := &captureUploader{}
 	tailer := New(Config{
 		Keys:       storage.ForRun("ns", "r4a"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 		Uploader:   up,
 		Bucket:     "logs",
 		ChunkBytes: 4, // flush every 4 bytes
@@ -394,7 +395,7 @@ func TestFlush_FinalFlushOnEOF(t *testing.T) {
 	up := &captureUploader{}
 	tailer := New(Config{
 		Keys:       storage.ForRun("ns", "r4b"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 		Uploader:   up,
 		Bucket:     "logs",
 		ChunkBytes: 1024, // large — no size-triggered flush
@@ -424,65 +425,6 @@ func TestFlush_FinalFlushOnEOF(t *testing.T) {
 	}
 }
 
-// R4c Simulated stream error mid-run → resume produces no duplicate/lost
-// bytes (offset dedupe).
-func TestReopen_DedupsAlreadyEmittedBytes(t *testing.T) {
-	// Two fake readers: first errors after emitting "AAA"; second replays
-	// "AAA" (as k8s would on reopen) then continues with "BBB". The tailer
-	// must skip the duplicate "AAA" and deliver only "AAABBB" to subscribers.
-	first := newFakeReader()
-	second := newFakeReader()
-	var callCount int
-	var mu sync.Mutex
-
-	tailer := New(Config{
-		Keys: storage.ForRun("ns", "r4c"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
-			mu.Lock()
-			defer mu.Unlock()
-			callCount++
-			if callCount == 1 {
-				return first, nil
-			}
-			return second, nil
-		},
-		ReopenBackoff:     1, // 1ns — instant
-		ReopenMaxAttempts: 5,
-	})
-	tailer.Start(t.Context())
-	<-tailer.Started()
-
-	gate := tailer.Subscribe()
-
-	// First stream: emit AAA, then close with a NON-EOF error to force reopen.
-	first.SetReadErr(errors.New("connection reset"))
-	first.Push([]byte("AAA"))
-	// Wait for those 3 bytes.
-	var got []byte
-	for len(got) < 3 {
-		f := <-gate.Frames
-		got = append(got, f.Data...)
-	}
-	_ = first.Close()
-
-	// The tailer will now reopen. Feed the second stream a duplicate prefix
-	// then new bytes.
-	second.Push([]byte("AAA")) // must be deduped
-	second.Push([]byte("BBB")) // must be delivered
-	_ = second.Close()
-
-	<-tailer.Done()
-	rest, reason := drainAll(gate)
-	got = append(got, rest...)
-
-	if string(got) != "AAABBB" {
-		t.Errorf("subscriber got %q, want %q (dedupe failed)", got, "AAABBB")
-	}
-	if reason != ReasonEOF {
-		t.Errorf("reason %q, want %q", reason, ReasonEOF)
-	}
-}
-
 // R5 Race safety: concurrent Subscribe/Unsubscribe/publish under -race.
 // Runs with `go test -race`; body is designed to trigger data-race detection
 // if publish/subscribe/unsubscribe touch shared state without locking.
@@ -490,7 +432,7 @@ func TestConcurrent_SubscribeUnsubscribePublish(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys:            storage.ForRun("ns", "r5"),
-		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource:      func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 		SubscriberQueue: 128,
 	})
 	tailer.Start(t.Context())
@@ -539,7 +481,7 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 	fr := newFakeReader()
 	src := &fakePodSource{reader: fr}
 	up := &captureUploader{}
-	reg := NewRegistry(src, up, up, "logs")
+	reg := NewRegistry(src, up, up, up, "logs")
 
 	ctx := t.Context()
 
@@ -593,7 +535,7 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 // R7 Registry Shutdown stops every tailer.
 func TestRegistry_ShutdownStopsAllTailers(t *testing.T) {
 	src := &fakePodSource{makeReader: newFakeReader}
-	reg := NewRegistry(src, nil, nil, "")
+	reg := NewRegistry(src, nil, nil, nil, "")
 
 	ctx := t.Context()
 	if err := reg.EnsureTailer(ctx, "run-A", storage.ForRun("ns", "run-A"), "ns", "pod-A"); err != nil {
@@ -626,7 +568,7 @@ func TestSubscribe_AfterStop_ReturnsClosed(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys:       storage.ForRun("ns", "r8"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 	})
 	tailer.Start(t.Context())
 	<-tailer.Started()
@@ -653,7 +595,7 @@ func TestUnsubscribe_ClosesWithReason(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
 		Keys:       storage.ForRun("ns", "r9"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) { return fr, nil },
 	})
 	tailer.Start(t.Context())
 	<-tailer.Started()
@@ -687,7 +629,7 @@ func TestRegistry_RestartResume_WipesStalePrefix(t *testing.T) {
 	fr := newFakeReader()
 	src := &fakePodSource{reader: fr}
 	up := &captureUploader{}
-	reg := NewRegistry(src, up, up, "logs")
+	reg := NewRegistry(src, up, up, up, "logs")
 
 	// Simulate 3 stale chunks from the previous operator lifetime, plus a
 	// decoy under a lookalike sibling prefix that MUST survive the wipe.
@@ -744,7 +686,7 @@ func TestRegistry_RestartResume_WipeErrorIsNonFatal(t *testing.T) {
 	// A Remover that always fails.
 	badRemover := &failingRemover{err: errors.New("s3 timeout")}
 	up := &captureUploader{}
-	reg := NewRegistry(src, up, badRemover, "logs")
+	reg := NewRegistry(src, up, badRemover, nil, "logs")
 
 	if err := reg.EnsureTailer(t.Context(), "run-Y", storage.ForRun("ns", "run-Y"), "ns", "pod-Y"); err != nil {
 		t.Fatalf("EnsureTailer must not fail on wipe error: %v", err)
@@ -765,7 +707,7 @@ func TestRegistry_ConcurrentDoubleStop(t *testing.T) {
 	fr := newFakeReader()
 	src := &fakePodSource{reader: fr}
 	up := &captureUploader{}
-	reg := NewRegistry(src, up, up, "logs")
+	reg := NewRegistry(src, up, up, up, "logs")
 
 	if err := reg.EnsureTailer(t.Context(), "run-DS", storage.ForRun("ns", "run-DS"), "ns", "pod-DS"); err != nil {
 		t.Fatalf("EnsureTailer: %v", err)
@@ -831,7 +773,7 @@ func TestReopen_BudgetExhausted(t *testing.T) {
 	openErr := errors.New("open failed")
 	tailer := New(Config{
 		Keys: storage.ForRun("ns", "r10"),
-		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
+		OpenSource: func(_ context.Context, _ *time.Time) (io.ReadCloser, error) {
 			return nil, openErr
 		},
 		ReopenMaxAttempts: 2,
@@ -892,7 +834,7 @@ func TestRingBuffer_CapacityCoercion(t *testing.T) {
 // R13 Registry rejects invalid storage keys rather than writing chunks to
 // an un-namespaced prefix.
 func TestRegistry_EnsureTailerRejectsInvalidKeys(t *testing.T) {
-	reg := NewRegistry(nil, nil, nil, "")
+	reg := NewRegistry(nil, nil, nil, nil, "")
 	defer reg.Shutdown()
 	if err := reg.EnsureTailer(t.Context(), "ns/run", storage.ForRun("", "uid"), "ns", "pod"); err == nil {
 		t.Fatal("expected error for keys without namespace")
@@ -971,6 +913,19 @@ func (c *captureUploader) preloadChunk(key string, body []byte) {
 	c.bodies = append(c.bodies, append([]byte(nil), body...))
 }
 
+// Get implements storage.Downloader over the recorded objects (the last
+// Put of a key wins) — the registry reads log cursors through it.
+func (c *captureUploader) Get(_ context.Context, _bucket, key string) (io.ReadCloser, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, k := range slices.Backward(c.keys) {
+		if k == key {
+			return io.NopCloser(strings.NewReader(string(c.bodies[i]))), nil
+		}
+	}
+	return nil, storage.ErrNotFound
+}
+
 // removedPrefixes returns a copy of the wipe-history for assertion.
 func (c *captureUploader) removedPrefixes() []string {
 	c.mu.Lock()
@@ -984,11 +939,23 @@ func (c *captureUploader) removedPrefixes() []string {
 type fakePodSource struct {
 	reader     *fakeReader
 	makeReader func() *fakeReader
+
+	mu     sync.Mutex
+	sinces []*time.Time // since argument of every Open
 }
 
-func (s *fakePodSource) Open(_ context.Context, _ns, _pod string) (io.ReadCloser, error) {
+func (s *fakePodSource) Open(_ context.Context, _ns, _pod string, since *time.Time) (io.ReadCloser, error) {
+	s.mu.Lock()
+	s.sinces = append(s.sinces, since)
+	s.mu.Unlock()
 	if s.reader != nil {
 		return s.reader, nil
 	}
 	return s.makeReader(), nil
+}
+
+func (s *fakePodSource) openedSince() []*time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]*time.Time(nil), s.sinces...)
 }

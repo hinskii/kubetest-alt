@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -42,12 +44,19 @@ type K8sLogSource struct {
 // TailLines nil is deliberate: §15.4 forbids relying on end-of-run
 // GetLogs, so we tail from start and flush continuously into object storage before
 // kubelet rotation can drop the head of a chatty run.
-func (s *K8sLogSource) Open(ctx context.Context, namespace, podName string) (io.ReadCloser, error) {
+//
+// Timestamps are always on: the tailer strips them and uses them as its
+// position (see position.go). since (nil = from the first line) is where a
+// reopened or resumed stream starts; the API takes whole seconds, the
+// tailer drops the overlap.
+func (s *K8sLogSource) Open(ctx context.Context, namespace, podName string, since *time.Time) (io.ReadCloser, error) {
 	if s.Client == nil {
 		return nil, fmt.Errorf("k8s log source: nil client")
 	}
-	req := s.Client.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{
-		Follow: true,
-	})
-	return req.Stream(ctx)
+	opts := &corev1.PodLogOptions{Follow: true, Timestamps: true}
+	if since != nil {
+		t := metav1.NewTime(*since)
+		opts.SinceTime = &t
+	}
+	return s.Client.CoreV1().Pods(namespace).GetLogs(podName, opts).Stream(ctx)
 }

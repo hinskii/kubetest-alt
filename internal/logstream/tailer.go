@@ -52,6 +52,7 @@ package logstream
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"sync"
@@ -89,10 +90,16 @@ type Config struct {
 	// to Keys.LogChunk(seq).
 	Keys storage.RunKeys
 
-	// OpenSource returns a fresh follow-mode reader over the pod's stdout.
-	// The Tailer calls it at Start and again after each retriable read
-	// error (up to ReopenMaxAttempts). Required.
-	OpenSource func(ctx context.Context) (io.ReadCloser, error)
+	// OpenSource returns a fresh follow-mode reader over the pod's stdout,
+	// with kubelet timestamps on every line, starting at since (nil = from
+	// the first line). The Tailer calls it at Start and again after each
+	// retriable read error (up to ReopenMaxAttempts in a row). Required.
+	OpenSource func(ctx context.Context, since *time.Time) (io.ReadCloser, error)
+
+	// Resume continues a previous tailer of the same run (operator
+	// restart): chunks continue at Resume.NextSeq and lines up to
+	// Resume.Position are not published again. Nil starts fresh.
+	Resume *Cursor
 
 	// Uploader receives chunks. Nil disables the flush path — useful for
 	// tests that exercise only fan-out.
@@ -175,10 +182,14 @@ type Tailer struct {
 	pending  bytes.Buffer
 	chunkSeq uint64
 
-	// Total bytes handed to publish so far. Used as the skip offset on
-	// reopen — the next stream re-emits from byte 0, and we drop the prefix
-	// we've already delivered.
-	emitted int64
+	// Run-loop owned line state (see consume): where in the current line
+	// the stream is, a line start being read as a possible timestamp, the
+	// position of the last published line, and the filter dropping lines a
+	// reopened stream replays.
+	line   int
+	hdr    bytes.Buffer
+	pos    Position
+	filter replayFilter
 
 	// Lifecycle.
 	started   chan struct{}
@@ -191,13 +202,18 @@ type Tailer struct {
 // New constructs a Tailer. Does not start any goroutine — call Start.
 func New(cfg Config) *Tailer {
 	applyDefaults(&cfg)
-	return &Tailer{
+	t := &Tailer{
 		cfg:     cfg,
 		ring:    newRingBuffer(cfg.RingBytes),
 		subs:    map[int]*Subscription{},
 		started: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
+	if cfg.Resume != nil {
+		t.chunkSeq = cfg.Resume.NextSeq
+		t.pos = cfg.Resume.Position
+	}
+	return t
 }
 
 func applyDefaults(cfg *Config) {
@@ -312,7 +328,6 @@ func (t *Tailer) publish(data []byte) {
 	}
 	t.ring.Append(data)
 	t.pending.Write(data)
-	t.emitted += int64(len(data))
 
 	// Copy so subscribers don't share the run loop's read buffer.
 	frame := Frame{Data: append([]byte(nil), data...)}
@@ -334,6 +349,79 @@ func (t *Tailer) publish(data []byte) {
 	}
 }
 
+// Line states of consume.
+const (
+	lineHeader = iota // at a line start: reading a possible timestamp
+	lineKeep          // publishing the rest of the line
+	lineDrop          // dropping the rest of a replayed line
+)
+
+// maxTimestampLen bounds the header read at a line start; RFC 3339 with
+// nanoseconds and a zone offset is at most 35 bytes.
+const maxTimestampLen = 35
+
+func isTimestampByte(c byte) bool {
+	return (c >= '0' && c <= '9') || c == '-' || c == ':' || c == '.' || c == 'T' || c == 'Z' || c == '+'
+}
+
+// consume publishes the new part of raw stream bytes. At each line start
+// it reads the kubelet timestamp, decides whether the line is new (see
+// replayFilter) and strips the timestamp; the rest of the line streams
+// through as it arrives — a line still being written isn't held back. A
+// line start that isn't a timestamp passes through unchanged.
+func (t *Tailer) consume(data []byte) {
+	var out []byte
+	for len(data) > 0 {
+		if t.line == lineHeader {
+			c := data[0]
+			if c == ' ' && t.hdr.Len() > 0 {
+				if ts, err := time.Parse(time.RFC3339Nano, t.hdr.String()); err == nil {
+					data = data[1:]
+					t.hdr.Reset()
+					t.line = lineDrop
+					if t.filter.keep(ts) {
+						t.pos.advance(ts)
+						t.line = lineKeep
+					}
+					continue
+				}
+			}
+			if isTimestampByte(c) && t.hdr.Len() < maxTimestampLen {
+				t.hdr.WriteByte(c)
+				data = data[1:]
+				continue
+			}
+			// Not a timestamp: what was buffered is line content.
+			out = append(out, t.hdr.Bytes()...)
+			t.hdr.Reset()
+			t.line = lineKeep
+		}
+		end, eol := len(data), false
+		if i := bytes.IndexByte(data, '\n'); i >= 0 {
+			end, eol = i+1, true
+		}
+		if t.line == lineKeep {
+			out = append(out, data[:end]...)
+		}
+		data = data[end:]
+		if eol {
+			t.line = lineHeader
+		}
+	}
+	if len(out) > 0 {
+		t.publish(out)
+	}
+}
+
+// flushPartialLine publishes a line start still being read as a possible
+// timestamp when the stream ends.
+func (t *Tailer) flushPartialLine() {
+	if t.hdr.Len() > 0 {
+		t.publish(append([]byte(nil), t.hdr.Bytes()...))
+		t.hdr.Reset()
+	}
+}
+
 // readEvent is what the pump goroutine sends to the run loop.
 type readEvent struct {
 	data      []byte
@@ -342,7 +430,7 @@ type readEvent struct {
 }
 
 // run is the single tailer goroutine. Owns:
-//   - source open + reopen loop with byte-offset dedup
+//   - source open + reopen loop with timestamp-position dedup
 //   - flush timer
 //   - final flush + subscriber notification at exit
 func (t *Tailer) run(ctx context.Context) {
@@ -364,21 +452,33 @@ func (t *Tailer) run(ctx context.Context) {
 	var currentSrc io.ReadCloser
 	var pumpDone chan struct{}
 
-	// startPump opens a fresh source and spawns the read goroutine. skip
-	// is the number of bytes to discard from the head of this stream (the
-	// portion we already delivered on a prior connection). Returns false
-	// if opening failed and we've hit the retry budget or ctx cancelled.
-	startPump := func(skip int64) bool {
+	// startPump opens a fresh source at the current position and spawns
+	// the read goroutine; lines the new stream replays up to the position
+	// are filtered out. Returns false if opening failed and we've hit the
+	// retry budget or ctx cancelled.
+	startPump := func() bool {
 		for {
 			if ctx.Err() != nil {
 				return false
 			}
-			src, err := t.cfg.OpenSource(ctx)
+			var since *time.Time
+			if !t.pos.Last.IsZero() {
+				last := t.pos.Last
+				since = &last
+			}
+			t.filter = replayFilter{upTo: t.pos}
+			// A new stream starts at a line start. A line cut by the
+			// disconnect is replayed whole and filtered as already
+			// published, so its unread tail is lost — rare, and the
+			// price of never duplicating lines.
+			t.line = lineHeader
+			t.hdr.Reset()
+			src, err := t.cfg.OpenSource(ctx, since)
 			if err == nil {
 				currentSrc = src
 				done := make(chan struct{})
 				pumpDone = done
-				go pump(ctx, src, skip, t.cfg.ReadBufferBytes, readCh, done)
+				go pump(ctx, src, t.cfg.ReadBufferBytes, readCh, done)
 				return true
 			}
 			attempts++
@@ -391,7 +491,7 @@ func (t *Tailer) run(ctx context.Context) {
 		}
 	}
 
-	if !startPump(0) {
+	if !startPump() {
 		signalStarted()
 		return
 	}
@@ -407,6 +507,7 @@ func (t *Tailer) run(ctx context.Context) {
 			if pumpDone != nil {
 				<-pumpDone
 			}
+			t.flushPartialLine()
 			return
 
 		case <-timer.C:
@@ -414,7 +515,10 @@ func (t *Tailer) run(ctx context.Context) {
 
 		case ev := <-readCh:
 			if len(ev.data) > 0 {
-				t.publish(ev.data)
+				// Data flowing again: the reopen budget is for failures
+				// in a row, not over the run's lifetime (fixes.md #13).
+				attempts = 0
+				t.consume(ev.data)
 				if t.pending.Len() >= t.cfg.ChunkBytes {
 					t.flushPending(ctx)
 				}
@@ -432,6 +536,7 @@ func (t *Tailer) run(ctx context.Context) {
 
 			if !ev.retriable {
 				// EOF — clean exit.
+				t.flushPartialLine()
 				return
 			}
 
@@ -442,7 +547,7 @@ func (t *Tailer) run(ctx context.Context) {
 			if !sleepCtx(ctx, t.cfg.ReopenBackoff) {
 				return
 			}
-			if !startPump(t.emitted) {
+			if !startPump() {
 				return
 			}
 		}
@@ -456,32 +561,18 @@ func (t *Tailer) run(ctx context.Context) {
 // Under ctx cancel the run loop closes src, which unblocks the Read call;
 // we then send the resulting error (or fall through the readCh send's ctx
 // arm if the run loop is already gone).
-func pump(ctx context.Context, src io.Reader, skip int64,
-	bufSize int, readCh chan<- readEvent, done chan<- struct{}) {
-
+func pump(ctx context.Context, src io.Reader, bufSize int, readCh chan<- readEvent, done chan<- struct{}) {
 	defer close(done)
 	buf := make([]byte, bufSize)
 
 	for {
 		n, err := src.Read(buf)
 		if n > 0 {
-			slice := buf[:n]
-			if skip > 0 {
-				if int64(n) <= skip {
-					skip -= int64(n)
-					slice = nil
-				} else {
-					slice = slice[skip:]
-					skip = 0
-				}
-			}
-			if len(slice) > 0 {
-				data := append([]byte(nil), slice...)
-				select {
-				case readCh <- readEvent{data: data}:
-				case <-ctx.Done():
-					return
-				}
+			data := append([]byte(nil), buf[:n]...)
+			select {
+			case readCh <- readEvent{data: data}:
+			case <-ctx.Done():
+				return
 			}
 		}
 		if err == nil {
@@ -510,14 +601,32 @@ func (t *Tailer) flushPending(ctx context.Context) {
 	}
 	body := append([]byte(nil), t.pending.Bytes()...)
 	key := t.cfg.Keys.LogChunk(t.chunkSeq)
-	if err := t.cfg.Uploader.Put(ctx, t.cfg.Bucket, key, bytes.NewReader(body),
-		int64(len(body)), "text/plain"); err == nil {
-		// Only count successful uploads — a failed Put doesn't move
-		// bytes to storage.
-		metrics.LogStreamBytesTotal.Add(float64(len(body)))
-	}
+	err := t.cfg.Uploader.Put(ctx, t.cfg.Bucket, key, bytes.NewReader(body), int64(len(body)), "text/plain")
 	t.chunkSeq++
 	t.pending.Reset()
+	if err != nil {
+		return
+	}
+	// Only count successful uploads — a failed Put doesn't move bytes to
+	// storage.
+	metrics.LogStreamBytesTotal.Add(float64(len(body)))
+	t.saveCursor(ctx)
+}
+
+// saveCursor records how far the stored chunks reach, for a restarted
+// operator to resume from. Best effort, like the chunks themselves.
+// Without a timestamped line there is no position to resume from; a
+// restarted operator then starts the log over (Registry).
+func (t *Tailer) saveCursor(ctx context.Context) {
+	if t.pos.Last.IsZero() {
+		return // no timestamped line yet: nothing to resume from
+	}
+	b, err := json.Marshal(Cursor{NextSeq: t.chunkSeq, Position: t.pos})
+	if err != nil {
+		return
+	}
+	_ = t.cfg.Uploader.Put(ctx, t.cfg.Bucket, t.cfg.Keys.LogCursor(), bytes.NewReader(b),
+		int64(len(b)), "application/json")
 }
 
 // finalize runs on run-loop exit: last flush, close all subscribers with

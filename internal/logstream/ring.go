@@ -38,7 +38,7 @@ type ringBuffer struct {
 	// since construction (never wraps). Callers use it to compute the
 	// starting-offset a subscriber sees when they subscribe mid-stream:
 	//   snapshotStartOffset = totalWritten - len(snapshot)
-	// which lets the tailer dedupe on reopen (skip bytes we already emitted).
+	// (overflow detection for replay markers).
 	totalWritten int64
 
 	// overflowed becomes true the first time an Append pushed us past

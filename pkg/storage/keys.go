@@ -94,6 +94,12 @@ func (k RunKeys) LogChunk(seq uint64) string {
 	return fmt.Sprintf("%s%08d.log", k.Logs(), seq)
 }
 
+// LogCursor is where the operator's log tailer records how far the stored
+// chunks reach (next chunk seq + last line timestamp), so a restarted
+// operator resumes instead of starting over. Outside Logs() so readers
+// that concatenate the log prefix never see it.
+func (k RunKeys) LogCursor() string { return string(k) + "logcursor.json" }
+
 // Artifacts is the prefix under which scraped artifacts are written.
 func (k RunKeys) Artifacts() string { return string(k) + "artifacts/" }
 
