@@ -98,6 +98,58 @@ type Scope struct {
 	// Services maps each spec.services name to its DNS name —
 	// {{ services.<name> }}.
 	Services map[string]string
+
+	// Parallel declares the worker namespaces of a spec.parallel Test.
+	// Their refs are checked here and left in place ("deferred"); each
+	// worker fills them in later with SubstituteWorker. Nil = not a
+	// parallel Test: those namespaces are errors.
+	Parallel *ParallelKeys
+}
+
+// ParallelKeys are the keys {{ matrix.* }} and {{ shard.* }} may use.
+type ParallelKeys struct {
+	Matrix map[string]bool
+	Shard  map[string]bool
+}
+
+// WorkerVars is one parallel worker's identity.
+type WorkerVars struct {
+	Index, Count int
+	Matrix       map[string]string
+	Shard        map[string]string
+}
+
+// Worker namespaces (spec.parallel).
+const (
+	nsWorker = "worker"
+	nsMatrix = "matrix"
+	nsShard  = "shard"
+)
+
+// workerRefRE matches a deferred worker ref as Eval leaves it.
+var workerRefRE = regexp.MustCompile(`\{\{\s*(worker|matrix|shard)\.([A-Za-z_][A-Za-z0-9_]*)\s*\}\}`)
+
+// SubstituteWorker fills the worker refs Eval deferred. Only those refs
+// are touched; anything else in s stays as it is (Eval output is never
+// evaluated again).
+func SubstituteWorker(s string, w WorkerVars) string {
+	if !strings.Contains(s, "{{") {
+		return s
+	}
+	return workerRefRE.ReplaceAllStringFunc(s, func(ref string) string {
+		m := workerRefRE.FindStringSubmatch(ref)
+		switch m[1] {
+		case nsWorker:
+			if m[2] == "index" {
+				return strconv.Itoa(w.Index)
+			}
+			return strconv.Itoa(w.Count)
+		case nsMatrix:
+			return w.Matrix[m[2]]
+		default:
+			return w.Shard[m[2]]
+		}
+	})
 }
 
 // Error is returned from Eval on any resolution failure. Fields are exported
@@ -317,6 +369,8 @@ func resolveRef(raw string, scope Scope, line, col int) (string, error) {
 			}
 		}
 		return v, nil
+	case nsWorker, nsMatrix, nsShard:
+		return deferWorkerRef(ns, key, raw, scope, line, col)
 	case "services":
 		v, ok := scope.Services[key]
 		if !ok {
@@ -340,9 +394,35 @@ func resolveRef(raw string, scope Scope, line, col int) (string, error) {
 			Line:    line,
 			Col:     col,
 			Ref:     raw,
-			Message: fmt.Sprintf("unknown namespace %q (allowed: config, env, run, test, services)", ns),
+			Message: fmt.Sprintf("unknown namespace %q (allowed: config, env, run, test, services, worker, matrix, shard)", ns),
 		}
 	}
+}
+
+// deferWorkerRef checks a worker ref against the Test's spec.parallel and
+// returns it unchanged for SubstituteWorker.
+func deferWorkerRef(ns, key, raw string, scope Scope, line, col int) (string, error) {
+	fail := func(msg string) (string, error) {
+		return "", &Error{Line: line, Col: col, Ref: raw, Message: msg}
+	}
+	if scope.Parallel == nil {
+		return fail(fmt.Sprintf("%s.* is only available in a Test with spec.parallel", ns))
+	}
+	switch ns {
+	case nsWorker:
+		if key != "index" && key != "count" {
+			return fail(fmt.Sprintf("unknown worker field %q (worker.index, worker.count)", key))
+		}
+	case nsMatrix:
+		if !scope.Parallel.Matrix[key] {
+			return fail(fmt.Sprintf("unknown matrix key %q (declare it in spec.parallel.matrix)", key))
+		}
+	case nsShard:
+		if !scope.Parallel.Shard[key] {
+			return fail(fmt.Sprintf("unknown shard key %q (declare it in spec.parallel.shards)", key))
+		}
+	}
+	return "{{ " + ns + "." + key + " }}", nil
 }
 
 // defaultLeafFor names the ONE valid key for run.* / test.* so the

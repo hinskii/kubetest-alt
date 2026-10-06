@@ -183,6 +183,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateServices(spec.Services); err != nil {
 		return err
 	}
+	if err := validateParallel(spec.Parallel); err != nil {
+		return err
+	}
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
 	}
@@ -321,6 +324,58 @@ func validateServices(services map[string]testsv1alpha1.ServiceSpec) error {
 		if total > MaxServiceReplicas {
 			return fmt.Errorf("spec.services start %d+ replicas; at most %d per run", total, MaxServiceReplicas)
 		}
+	}
+	return nil
+}
+
+// MaxParallelWorkers caps the workers (Jobs) one run may start.
+const MaxParallelWorkers = 50
+
+// validateParallel checks spec.parallel: identifier keys (they become
+// expressions and env var names), non-empty value lists, maxCount only
+// where shards decide the count, and the worker total.
+func validateParallel(p *testsv1alpha1.ParallelSpec) error {
+	if p == nil {
+		return nil
+	}
+	if p.MaxCount != nil && p.Count != nil {
+		return errors.New("spec.parallel: set count (workers per combination) or maxCount (cap when shards decide), not both")
+	}
+	if p.MaxCount != nil && len(p.Shards) == 0 {
+		return errors.New("spec.parallel.maxCount only applies with shards")
+	}
+	combos := 1
+	for _, field := range []struct {
+		name string
+		m    map[string][]string
+	}{{"matrix", p.Matrix}, {"shards", p.Shards}} {
+		for key, values := range field.m {
+			if !matrixKeyRE.MatchString(key) {
+				return fmt.Errorf("spec.parallel.%s key %q must be an identifier ([A-Za-z_][A-Za-z0-9_]*)", field.name, key)
+			}
+			if len(values) == 0 {
+				return fmt.Errorf("spec.parallel.%s.%s needs at least one value", field.name, key)
+			}
+			if field.name == "matrix" {
+				combos *= len(values)
+			}
+		}
+	}
+	per := 1
+	switch {
+	case p.Count != nil:
+		per = int(*p.Count)
+	case len(p.Shards) > 0:
+		per = 0
+		for _, v := range p.Shards {
+			per = max(per, len(v))
+		}
+		if p.MaxCount != nil {
+			per = min(per, int(*p.MaxCount))
+		}
+	}
+	if total := combos * per; total > MaxParallelWorkers {
+		return fmt.Errorf("spec.parallel starts %d workers; at most %d per run", total, MaxParallelWorkers)
 	}
 	return nil
 }

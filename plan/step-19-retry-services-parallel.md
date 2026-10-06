@@ -52,25 +52,33 @@ Dependent pods started before the test, reachable by DNS:
 - `shards` / `maxCount` on a service: rejected by the webhook (no meaning
   for a dependency).
 
-## 19c — parallel
+## 19c — parallel ✅
 
 N workers of the same Test, each its own Job/Pod:
 
-- workers from `count` (replicas), `matrix` (cartesian product of the
-  values), or both (each combination × count); `shards` splits each
-  list of values across the workers (`shard.<key>` = that worker's slice,
-  comma-joined); `maxCount` caps concurrently running workers;
+- workers: `count` per `matrix` combination; with `shards` and no
+  `count`, one per value of the longest shard list, capped by `maxCount`
+  (Testkube semantics); `shards` are now `map[string][]string`, each list
+  split into contiguous near-equal parts (`shard.<key>` comma-joined);
 - expressions `{{ matrix.<k> }}`, `{{ shard.<k> }}`, `{{ worker.index }}`,
-  `{{ worker.count }}` — checked at setup, evaluated per worker at
-  compile time; also exposed as env `KUBETEST_WORKER_INDEX`, …;
-- each worker writes to `runs/<ns>/<uid>/workers/<i>/` (logs, artifacts,
-  result.json); the run passes when every worker passes (any error →
-  error, else any failure → failed); per-worker phases in
-  `status.steps["worker-<i>"]`;
-- `transfer`: not needed — every worker fetches the Test's content itself;
-  rejected with that explanation. `fetch`: worker artifacts are already
-  collected under the run (per worker prefix); rejected likewise. `logs`:
-  always on per worker.
+  `{{ worker.count }}` — checked at setup (resolver), filled per worker at
+  compile time (`expr.SubstituteWorker`); also env
+  `KUBETEST_WORKER_INDEX/COUNT`, `KUBETEST_MATRIX_<K>`, `KUBETEST_SHARD_<K>`;
+- worker i writes to `runs/<ns>/<uid>/artifacts/workers/<i>/` — inside the
+  run's artifacts, so the API serves worker logs, result.json and
+  artifacts with no API change (`workers/<i>/logs/…`,
+  `workers/<i>/artifacts/…`); retention and delete cover them. Service
+  logs moved the same way (`artifacts/services/<pod>/`);
+- verdict: any error → error, else any failure/abort → failed, else
+  passed; per-worker phases in `status.steps["worker-<i>"]`, test counts
+  summed, artifact refs merged with their `workers/<i>/artifacts/` path;
+- a worker's Job is deleted only after its verdict is persisted (a lost
+  status write must not turn into "Job missing");
+- `transfer`, `fetch`, `logs` removed from the API: every worker fetches
+  the content itself, its output is already under the run, and logs are
+  always stored. Webhook: count xor maxCount, maxCount only with shards,
+  identifier keys, ≤ 50 workers;
+- with `services`, the services start first and serve every worker.
 
 ## Out of scope here
 - GUI for attempts/services/workers (18e).

@@ -74,6 +74,13 @@ type ResultReader interface {
 	Read(ctx context.Context, run *testsv1alpha1.TestRun) (*RunResult, error)
 }
 
+// WorkerResultReader is implemented by readers that can also read a
+// spec.parallel worker's result (RunKeys.Worker). A reader without it
+// leaves workers to the termination-message fallback.
+type WorkerResultReader interface {
+	ReadWorker(ctx context.Context, run *testsv1alpha1.TestRun, worker int) (*RunResult, error)
+}
+
 // NoResultReader always returns ErrResultNotFound. It's the default when the
 // operator boots before step 07 wires the real reader — every Job completion
 // then falls back to the pod-terminated-state analysis, which is the correct

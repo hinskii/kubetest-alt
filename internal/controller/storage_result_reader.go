@@ -65,6 +65,22 @@ func (r *StorageResultReader) Read(ctx context.Context, run *testsv1alpha1.TestR
 	if !keys.Valid() {
 		return nil, fmt.Errorf("storage-result-reader: run %s/%s has no UID", run.Namespace, run.Name)
 	}
+	return r.readKeys(ctx, keys)
+}
+
+// ReadWorker implements WorkerResultReader: worker i of a spec.parallel run.
+func (r *StorageResultReader) ReadWorker(ctx context.Context, run *testsv1alpha1.TestRun, worker int) (*RunResult, error) {
+	if r.Downloader == nil || r.Bucket == "" {
+		return nil, errors.New("storage-result-reader: not configured")
+	}
+	keys := storage.ForRun(run.Namespace, string(run.UID))
+	if !keys.Valid() {
+		return nil, fmt.Errorf("storage-result-reader: run %s/%s has no UID", run.Namespace, run.Name)
+	}
+	return r.readKeys(ctx, keys.Worker(worker))
+}
+
+func (r *StorageResultReader) readKeys(ctx context.Context, keys storage.RunKeys) (*RunResult, error) {
 	key := keys.Result()
 	rc, err := r.Downloader.Get(ctx, r.Bucket, key)
 	if err != nil {

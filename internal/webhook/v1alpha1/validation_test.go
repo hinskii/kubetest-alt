@@ -566,3 +566,26 @@ func TestValidateTest_Services(t *testing.T) {
 		t.Run(name, func(t *testing.T) { require.ErrorContains(t, with(tc.svcs), tc.want) })
 	}
 }
+
+func TestValidateTest_Parallel(t *testing.T) {
+	n := func(v int32) *int32 { return &v }
+	with := func(p *testsv1alpha1.ParallelSpec) error {
+		s := baseValidSpec()
+		s.Parallel = p
+		return validateTest(&s)
+	}
+	require.NoError(t, with(&testsv1alpha1.ParallelSpec{Count: n(3), Matrix: map[string][]string{"browser": {"chrome", "firefox"}}}))
+	require.NoError(t, with(&testsv1alpha1.ParallelSpec{MaxCount: n(4), Shards: map[string][]string{"spec": {"a", "b"}}}))
+	for name, tc := range map[string]struct {
+		p    *testsv1alpha1.ParallelSpec
+		want string
+	}{
+		"count+maxCount":   {&testsv1alpha1.ParallelSpec{Count: n(2), MaxCount: n(2), Shards: map[string][]string{"s": {"a"}}}, "not both"},
+		"maxCount alone":   {&testsv1alpha1.ParallelSpec{MaxCount: n(2)}, "only applies with shards"},
+		"bad matrix key":   {&testsv1alpha1.ParallelSpec{Matrix: map[string][]string{"my-key": {"a"}}}, "identifier"},
+		"empty shard":      {&testsv1alpha1.ParallelSpec{Shards: map[string][]string{"spec": {}}}, "at least one value"},
+		"too many workers": {&testsv1alpha1.ParallelSpec{Count: n(10), Matrix: map[string][]string{"a": {"1", "2", "3", "4", "5", "6"}}}, "at most 50"},
+	} {
+		t.Run(name, func(t *testing.T) { require.ErrorContains(t, with(tc.p), tc.want) })
+	}
+}

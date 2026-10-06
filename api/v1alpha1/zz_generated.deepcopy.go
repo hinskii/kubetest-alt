@@ -266,20 +266,19 @@ func (in *ParallelSpec) DeepCopyInto(out *ParallelSpec) {
 	}
 	if in.Shards != nil {
 		in, out := &in.Shards, &out.Shards
-		*out = make(map[string]string, len(*in))
+		*out = make(map[string][]string, len(*in))
 		for key, val := range *in {
-			(*out)[key] = val
+			var outVal []string
+			if val == nil {
+				(*out)[key] = nil
+			} else {
+				inVal := (*in)[key]
+				in, out := &inVal, &outVal
+				*out = make([]string, len(*in))
+				copy(*out, *in)
+			}
+			(*out)[key] = outVal
 		}
-	}
-	if in.Transfer != nil {
-		in, out := &in.Transfer, &out.Transfer
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
-	if in.Fetch != nil {
-		in, out := &in.Fetch, &out.Fetch
-		*out = make([]string, len(*in))
-		copy(*out, *in)
 	}
 }
 

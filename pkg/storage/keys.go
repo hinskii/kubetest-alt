@@ -18,6 +18,7 @@ package storage
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -62,6 +63,18 @@ func ForRun(namespace, uid string) RunKeys {
 // ForRun could not have produced, so a malformed request can't make the
 // wrapper write outside its own run's subtree.
 func ParseRunKeys(prefix string) (RunKeys, error) {
+	// A parallel worker's subtree: runs/<ns>/<uid>/artifacts/workers/<i>/.
+	if base, idx, ok := strings.Cut(prefix, "artifacts/workers/"); ok {
+		run, err := ParseRunKeys(base)
+		if err != nil {
+			return "", err
+		}
+		i, err := strconv.Atoi(strings.TrimSuffix(idx, "/"))
+		if err != nil || i < 0 || !strings.HasSuffix(idx, "/") || strings.Count(idx, "/") != 1 {
+			return "", fmt.Errorf("storage prefix %q: bad worker index", prefix)
+		}
+		return run.Worker(i), nil
+	}
 	parts := strings.Split(prefix, "/")
 	// "runs/<ns>/<uid>/" splits into ["runs", ns, uid, ""].
 	if len(parts) != 4 || parts[0] != "runs" || parts[3] != "" {
@@ -100,10 +113,18 @@ func (k RunKeys) LogChunk(seq uint64) string {
 // that concatenate the log prefix never see it.
 func (k RunKeys) LogCursor() string { return string(k) + "logcursor.json" }
 
-// Service is the subtree of one spec.services replica (its logs), inside
-// the run's: removed with the run.
+// Service is the subtree of one spec.services replica (its logs). Inside
+// the run's artifacts, so the API serves it like any artifact
+// (services/<replica>/logs/...) and it goes with the run.
 func (k RunKeys) Service(replica string) RunKeys {
-	return RunKeys(string(k) + "services/" + replica + "/")
+	return RunKeys(k.Artifacts() + "services/" + replica + "/")
+}
+
+// Worker is the subtree of spec.parallel worker i: its logs, result.json
+// and artifacts. Inside the run's artifacts (workers/<i>/...), like
+// Service, so worker output is served as the run's artifacts.
+func (k RunKeys) Worker(i int) RunKeys {
+	return RunKeys(fmt.Sprintf("%sworkers/%d/", k.Artifacts(), i))
 }
 
 // Artifacts is the prefix under which scraped artifacts are written.

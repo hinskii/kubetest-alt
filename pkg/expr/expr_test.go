@@ -314,3 +314,38 @@ func TestEval_Services(t *testing.T) {
 		t.Fatalf("want unknown service error, got %v", err)
 	}
 }
+
+func TestEval_WorkerRefsDeferredThenSubstituted(t *testing.T) {
+	scope := Scope{
+		Config:   map[string]string{"env": "stage"},
+		Parallel: &ParallelKeys{Matrix: map[string]bool{"browser": true}, Shard: map[string]bool{"specs": true}},
+	}
+	got, err := Eval("--browser={{matrix.browser}} --spec={{ shard.specs }} "+
+		"--n={{ worker.index }}/{{ worker.count }} {{ config.env }}", scope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "--browser={{ matrix.browser }} --spec={{ shard.specs }} --n={{ worker.index }}/{{ worker.count }} stage"
+	if got != want {
+		t.Fatalf("first pass: got %q want %q", got, want)
+	}
+	final := SubstituteWorker(got, WorkerVars{Index: 1, Count: 4,
+		Matrix: map[string]string{"browser": "firefox"}, Shard: map[string]string{"specs": "a.cy.js,b.cy.js"}})
+	if final != "--browser=firefox --spec=a.cy.js,b.cy.js --n=1/4 stage" {
+		t.Fatalf("second pass: %q", final)
+	}
+
+	for expr, msg := range map[string]string{
+		"{{ matrix.os }}":   `unknown matrix key "os"`,
+		"{{ shard.x }}":     `unknown shard key "x"`,
+		"{{ worker.name }}": `unknown worker field "name"`,
+	} {
+		if _, err := Eval(expr, scope); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%s: want %q, got %v", expr, msg, err)
+		}
+	}
+	_, err = Eval("{{ worker.index }}", Scope{})
+	if err == nil || !strings.Contains(err.Error(), "only available in a Test with spec.parallel") {
+		t.Errorf("non-parallel Test: got %v", err)
+	}
+}

@@ -129,6 +129,17 @@ func Resolve(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, store Templat
 			scope.Services[name] = names.ServiceHost(run.Name, run.Namespace, name)
 		}
 	}
+	// spec.parallel: worker refs are checked now and filled per worker
+	// at compile time (expr.SubstituteWorker).
+	if p := merged.Parallel; p != nil {
+		scope.Parallel = &expr.ParallelKeys{Matrix: map[string]bool{}, Shard: map[string]bool{}}
+		for k := range p.Matrix {
+			scope.Parallel.Matrix[k] = true
+		}
+		for k := range p.Shards {
+			scope.Parallel.Shard[k] = true
+		}
+	}
 	if err := evalStringsInSpec(merged, scope); err != nil {
 		return nil, err
 	}

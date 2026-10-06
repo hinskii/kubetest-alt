@@ -169,6 +169,13 @@ func TestE2E(t *testing.T) {
 		scenarioServices(t, ctx, c)
 	})
 
+	// Step 19c: spec.parallel — one Job per worker, aggregated verdict.
+	t.Run("Scenario9_ParallelMatrix", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=9 kind=parallel duration=%s", time.Since(start)) }()
+		scenarioParallel(t, ctx, c)
+	})
+
 	// Post-scenario: /metrics from operator + apiserver. Asserts the
 	// step-14 counters got real events end-to-end.
 	t.Run("MetricsScrape_OperatorAndApiserver", func(t *testing.T) {
@@ -349,6 +356,54 @@ export default function () {
 		err := c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-services-run-web-0"}, &pod)
 		return apierrors.IsNotFound(err) || pod.DeletionTimestamp != nil
 	}, time.Minute, time.Second, "the service replica is removed when the run ends")
+}
+
+// scenarioParallel: two workers from a matrix; each prints its identity
+// (expression + env); both pass → run passes; worker 1's log is served by
+// the apiserver as the run's artifact workers/1/logs/00000000.log.
+func scenarioParallel(t *testing.T, ctx context.Context, c client.Client) {
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-parallel", Namespace: workloadNS},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image:   "grafana/k6:1.4.0",
+				Command: []string{"sh", "-c"},
+				Args:    []string{`echo "worker $KUBETEST_WORKER_INDEX/{{ worker.count }} says {{ matrix.greeting }}"`},
+			},
+			Parallel: &testsv1alpha1.ParallelSpec{Matrix: map[string][]string{"greeting": {"hello", "hi"}}},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-parallel-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: test.Name, Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 4*time.Minute)
+	assert.Equal(t, "all 2 workers passed", final.Status.Message)
+	assert.Equal(t, testsv1alpha1.StepPhase("passed"), final.Status.Steps["worker-1"].Phase)
+
+	if apiURL := os.Getenv("APISERVER_URL"); apiURL != "" {
+		url := fmt.Sprintf("%s/runs/%s/artifacts/workers/1/logs/00000000.log?namespace=%s",
+			strings.TrimRight(apiURL, "/"), run.Name, workloadNS)
+		var body string
+		require.Eventually(t, func() bool {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if err != nil {
+				return false
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return false
+			}
+			defer func() { _ = resp.Body.Close() }()
+			b, _ := io.ReadAll(resp.Body)
+			body = string(b)
+			return resp.StatusCode == http.StatusOK
+		}, time.Minute, 2*time.Second, "worker 1 log via the apiserver")
+		assert.Contains(t, body, "worker 1/2 says hi")
+	}
 }
 
 // readRunLogs reads a finished run's whole log over the apiserver's

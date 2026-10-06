@@ -362,6 +362,10 @@ func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	if isCompositeRun(&run) {
 		return r.reconcileComposite(ctx, logger, &run)
 	}
+	// Step 19c: spec.parallel runs one Job per worker.
+	if isParallelRun(&run) {
+		return r.reconcileParallel(ctx, &run)
+	}
 
 	// From here we expect either an existing Job or a not-yet-created one.
 	return r.observeOrCreateJob(ctx, logger, &run)
@@ -939,6 +943,10 @@ func (r *TestRunReconciler) reconcileAbort(ctx context.Context, run *testsv1alph
 		}
 		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseAborted, reason, msg, nil)
 	}
+	if isParallelRun(run) {
+		r.stopWorkers(ctx, run)
+		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseAborted, reason, msg, nil)
+	}
 	var job *batchv1.Job
 	var j batchv1.Job
 	switch err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &j); {
@@ -1025,11 +1033,13 @@ func (r *TestRunReconciler) findPodForJob(ctx context.Context, job *batchv1.Job)
 	if !ok {
 		return nil, nil
 	}
+	// A parallel worker's pod shares the run's run-id with its siblings.
+	selector := client.MatchingLabels{compiler.LabelRunID: runID}
+	if w, ok := job.Labels[compiler.LabelWorker]; ok {
+		selector[compiler.LabelWorker] = w
+	}
 	var pods corev1.PodList
-	if err := r.List(ctx, &pods,
-		client.InNamespace(job.Namespace),
-		client.MatchingLabels{compiler.LabelRunID: runID},
-	); err != nil {
+	if err := r.List(ctx, &pods, client.InNamespace(job.Namespace), selector); err != nil {
 		return nil, err
 	}
 	if len(pods.Items) == 0 {
@@ -1063,6 +1073,7 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 	// NotFound handler is the primary bound-guarantee; this covers the
 	// normal delete path so we don't wait for an eventual NotFound observation.
 	r.persistedRuns.Delete(types.NamespacedName{Namespace: run.Namespace, Name: run.Name})
+	r.stopWorkers(ctx, run)
 	var job batchv1.Job
 	if err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: run.Name}, &job); err == nil {
 		if err := deleteJobBackground(ctx, r.Client, &job); err != nil {

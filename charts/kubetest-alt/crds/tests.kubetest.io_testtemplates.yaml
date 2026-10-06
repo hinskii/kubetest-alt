@@ -1241,35 +1241,49 @@ spec:
                 type: object
               parallel:
                 description: |-
-                  ParallelSpec configures matrix/sharding for parallel execution. Detailed
-                  fields land in step 06+; step 02 keeps the shape minimal.
+                  ParallelSpec runs the Test as several workers at once, each its own Job
+                  and pod with its own content checkout, log and artifacts. The run passes
+                  when every worker passes (any error → error, else any failure → failed);
+                  each worker's phase is in status.steps["worker-<i>"], its log, result
+                  and artifacts under the run's artifacts at workers/<i>/.
+
+                  Workers: Count copies of every Matrix combination. With Shards and no
+                  Count, each combination gets one worker per value of the longest shard
+                  list, at most MaxCount. A worker sees its identity as expressions
+                  {{ worker.index }} / {{ worker.count }} / {{ matrix.<key> }} /
+                  {{ shard.<key> }} in the container's command, args, env and working dir,
+                  and as env KUBETEST_WORKER_INDEX, KUBETEST_WORKER_COUNT,
+                  KUBETEST_MATRIX_<KEY>, KUBETEST_SHARD_<KEY> (shard values comma-joined).
                 properties:
                   count:
+                    description: Count is the number of workers per matrix combination.
                     format: int32
+                    minimum: 1
                     type: integer
-                  fetch:
-                    items:
-                      type: string
-                    type: array
-                  logs:
-                    type: boolean
                   matrix:
                     additionalProperties:
                       items:
                         type: string
                       type: array
+                    description: 'Matrix: one worker group per combination of the
+                      values.'
                     type: object
                   maxCount:
+                    description: |-
+                      MaxCount caps the workers per combination when Shards decide the
+                      number (no Count).
                     format: int32
+                    minimum: 1
                     type: integer
                   shards:
                     additionalProperties:
-                      type: string
+                      items:
+                        type: string
+                      type: array
+                    description: |-
+                      Shards splits each list of values into contiguous, near-equal parts,
+                      one per worker of a combination: shard.<key> is that worker's part.
                     type: object
-                  transfer:
-                    items:
-                      type: string
-                    type: array
                 type: object
               pod:
                 description: |-

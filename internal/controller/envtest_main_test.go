@@ -270,6 +270,20 @@ func (f *FakeResultReader) Read(_ context.Context, run *testsv1alpha1.TestRun) (
 	return nil, ErrResultNotFound
 }
 
+// ReadWorker serves results Set under "<run>/w<i>".
+func (f *FakeResultReader) ReadWorker(_ context.Context, run *testsv1alpha1.TestRun, worker int) (*RunResult, error) {
+	id := fmt.Sprintf("%s/w%d", run.Name, worker)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if err, ok := f.errs[id]; ok {
+		return nil, err
+	}
+	if r, ok := f.results[id]; ok {
+		return r, nil
+	}
+	return nil, ErrResultNotFound
+}
+
 // countingReconciler wraps the real reconciler and bumps per-key counters.
 type countingReconciler struct {
 	inner reconcile.Reconciler

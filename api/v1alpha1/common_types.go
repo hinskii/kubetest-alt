@@ -263,23 +263,36 @@ type ServiceSpec struct {
 	RestartPolicy corev1.RestartPolicy `json:"restartPolicy,omitempty"`
 }
 
-// ParallelSpec configures matrix/sharding for parallel execution. Detailed
-// fields land in step 06+; step 02 keeps the shape minimal.
+// ParallelSpec runs the Test as several workers at once, each its own Job
+// and pod with its own content checkout, log and artifacts. The run passes
+// when every worker passes (any error → error, else any failure → failed);
+// each worker's phase is in status.steps["worker-<i>"], its log, result
+// and artifacts under the run's artifacts at workers/<i>/.
+//
+// Workers: Count copies of every Matrix combination. With Shards and no
+// Count, each combination gets one worker per value of the longest shard
+// list, at most MaxCount. A worker sees its identity as expressions
+// {{ worker.index }} / {{ worker.count }} / {{ matrix.<key> }} /
+// {{ shard.<key> }} in the container's command, args, env and working dir,
+// and as env KUBETEST_WORKER_INDEX, KUBETEST_WORKER_COUNT,
+// KUBETEST_MATRIX_<KEY>, KUBETEST_SHARD_<KEY> (shard values comma-joined).
 type ParallelSpec struct {
+	// Count is the number of workers per matrix combination.
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Count *int32 `json:"count,omitempty"`
+	// MaxCount caps the workers per combination when Shards decide the
+	// number (no Count).
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	MaxCount *int32 `json:"maxCount,omitempty"`
+	// Matrix: one worker group per combination of the values.
 	// +optional
 	Matrix map[string][]string `json:"matrix,omitempty"`
+	// Shards splits each list of values into contiguous, near-equal parts,
+	// one per worker of a combination: shard.<key> is that worker's part.
 	// +optional
-	Shards map[string]string `json:"shards,omitempty"`
-	// +optional
-	Transfer []string `json:"transfer,omitempty"`
-	// +optional
-	Fetch []string `json:"fetch,omitempty"`
-	// +optional
-	Logs bool `json:"logs,omitempty"`
+	Shards map[string][]string `json:"shards,omitempty"`
 }
 
 // StepResult carries per-step timing and phase for TestRunStatus.steps.

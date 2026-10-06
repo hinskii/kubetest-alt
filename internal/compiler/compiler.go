@@ -209,6 +209,25 @@ type StorageOptions struct {
 //
 // Never mutates the input objects.
 func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options) (*batchv1.Job, []client.Object, error) {
+	if run == nil {
+		return nil, nil, ErrNilTestRun
+	}
+	return compile(test, run, opts, jobTarget{
+		Name: run.Name,
+		Keys: storage.ForRun(run.Namespace, string(run.UID)),
+	})
+}
+
+// jobTarget is what differs between a run's own Job and a parallel
+// worker's: the Job name, where its objects go, extra labels and env.
+type jobTarget struct {
+	Name   string
+	Keys   storage.RunKeys
+	Labels map[string]string
+	Env    []corev1.EnvVar
+}
+
+func compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options, target jobTarget) (*batchv1.Job, []client.Object, error) {
 	if test == nil {
 		return nil, nil, ErrNilTest
 	}
@@ -234,7 +253,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 	timeoutSec := int64(timeout.Seconds())
 	adsSec := timeoutSec + ADSBufferSeconds
 
-	requestJSON, err := buildRequestJSON(test, run, image, command, args, timeoutSec)
+	requestJSON, err := buildRequestJSON(test, run, target.Keys, image, command, args, timeoutSec)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal execution request: %w", err)
 	}
@@ -247,7 +266,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		return nil, nil, fmt.Errorf("marshal content spec: %w", err)
 	}
 
-	cmName := run.Name + "-request"
+	cmName := target.Name + "-request"
 	cm := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -267,6 +286,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 
 	mergedPod := mergePodConfig(test.Spec.Pod, run.Spec.Pod)
 	podLabels := mergeLabels(test.Spec.Pod, run.Spec.Pod, run.Name)
+	maps.Copy(podLabels, target.Labels)
 	podAnnotations := mergeAnnotations(test.Spec.Pod, run.Spec.Pod)
 
 	volumes := make([]corev1.Volume, 0, 4+len(mergedPod.Volumes))
@@ -343,6 +363,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 			Name: ServiceHostEnv(name), Value: names.ServiceHost(run.Name, run.Namespace, name),
 		})
 	}
+	wrapperEnv = append(wrapperEnv, target.Env...)
 	wrapperEnv = append(wrapperEnv, test.Spec.Container.Env...)
 
 	// envFrom is separate from env: keeps the wrapper container's env-var
@@ -403,6 +424,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 		LabelRunID:     run.Name,
 		LabelManagedBy: ManagedByValue,
 	}
+	maps.Copy(jobLabels, target.Labels)
 	if tool := test.Labels[LabelKubetestTool]; tool != "" {
 		jobLabels[LabelKubetestTool] = tool
 		if podLabels == nil {
@@ -414,7 +436,7 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 	job := &batchv1.Job{
 		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:            run.Name,
+			Name:            target.Name,
 			Namespace:       run.Namespace,
 			OwnerReferences: ownerRefForTestRun(run),
 			Labels:          jobLabels,
@@ -474,11 +496,11 @@ func ownerRefForTestRun(run *testsv1alpha1.TestRun) []metav1.OwnerReference {
 // `command` here is the TOOL command (user override via Test.spec.container.command
 // or nil for defaults). NOT to be confused with container.Command on the pod,
 // which is always /entry.
-func buildRequestJSON(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun,
+func buildRequestJSON(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, keys storage.RunKeys,
 	image string, command, args []string, timeoutSec int64) (string, error) {
 	req := executor.ExecutionRequest{
 		RunID:          run.Name,
-		StoragePrefix:  storage.ForRun(run.Namespace, string(run.UID)).Prefix(),
+		StoragePrefix:  keys.Prefix(),
 		TestRef:        run.Spec.TestRef,
 		DataDir:        DataDirPath,
 		WorkingDir:     test.Spec.Container.WorkingDir,

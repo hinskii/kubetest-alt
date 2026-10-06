@@ -76,3 +76,22 @@ func TestNewS3_DefaultsToAWSEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "s3.amazonaws.com", b.client.EndpointURL().Host)
 }
+
+func TestRunKeys_WorkerAndService(t *testing.T) {
+	k := ForRun("team-a", "u1")
+	w := k.Worker(3)
+	assert.Equal(t, "runs/team-a/u1/artifacts/workers/3/", w.Prefix())
+	assert.Equal(t, "runs/team-a/u1/artifacts/workers/3/result.json", w.Result())
+	assert.Equal(t, "runs/team-a/u1/artifacts/services/web-0/logs/", k.Service("web-0").Logs())
+
+	parsed, err := ParseRunKeys(w.Prefix())
+	require.NoError(t, err)
+	assert.Equal(t, w, parsed)
+	for _, bad := range []string{
+		"runs/team-a/u1/artifacts/workers/x/", "runs/team-a/u1/artifacts/workers/1/2/",
+		"runs/team-a/u1/artifacts/workers/1", "runs/../u1/artifacts/workers/1/",
+	} {
+		_, err := ParseRunKeys(bad)
+		assert.Error(t, err, bad)
+	}
+}
