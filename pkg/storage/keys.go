@@ -100,6 +100,12 @@ func (k RunKeys) LogChunk(seq uint64) string {
 // that concatenate the log prefix never see it.
 func (k RunKeys) LogCursor() string { return string(k) + "logcursor.json" }
 
+// Service is the subtree of one spec.services replica (its logs), inside
+// the run's: removed with the run.
+func (k RunKeys) Service(replica string) RunKeys {
+	return RunKeys(string(k) + "services/" + replica + "/")
+}
+
 // Artifacts is the prefix under which scraped artifacts are written.
 func (k RunKeys) Artifacts() string { return string(k) + "artifacts/" }
 

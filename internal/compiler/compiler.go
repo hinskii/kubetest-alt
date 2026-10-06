@@ -24,6 +24,8 @@ package compiler
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -32,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/names"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
@@ -332,6 +335,13 @@ func Compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options)
 	// with storage.FromEnv and skips uploads when they're absent.
 	for _, e := range opts.Storage.Config.Env() {
 		wrapperEnv = append(wrapperEnv, corev1.EnvVar{Name: e.Name, Value: e.Value})
+	}
+	// spec.services: where each dependency answers. Before the user's env
+	// so a Test can still override one.
+	for _, name := range slices.Sorted(maps.Keys(test.Spec.Services)) {
+		wrapperEnv = append(wrapperEnv, corev1.EnvVar{
+			Name: ServiceHostEnv(name), Value: names.ServiceHost(run.Name, run.Namespace, name),
+		})
 	}
 	wrapperEnv = append(wrapperEnv, test.Spec.Container.Env...)
 

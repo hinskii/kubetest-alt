@@ -7,7 +7,7 @@ deferred — recorded as a known risk in docs/security.md.
 
 One commit + push per sub-step; gates per plan/README.md.
 
-## 19a — retry
+## 19a — retry ✅
 
 **Leaf runs (`Test.spec.retry`)** — retried inside the wrapper, like a
 TestWorkflow step retry: `/entry` runs the tool, computes the verdict, and
@@ -31,7 +31,7 @@ the last attempt), one `result.json` with the last attempt's verdict plus
 `<child>-r<N>` is created; the step aggregates the latest attempt of each
 expected child. Aborted children are not retried.
 
-## 19b — services
+## 19b — services ✅
 
 Dependent pods started before the test, reachable by DNS:
 
@@ -45,8 +45,8 @@ Dependent pods started before the test, reachable by DNS:
   creates the test Job; services are deleted at the terminal transition
   (owner reference as a safety net);
 - the test gets `KUBETEST_SERVICE_<NAME>_HOST` and expressions
-  `{{ services.<name>.host }}` (deterministic DNS name, resolvable at
-  setup);
+  `{{ services.<name> }}` (deterministic DNS name, resolvable at setup;
+  the expression language has no nested keys, so not `.host`);
 - `logs: true` tails each replica's log to
   `runs/<ns>/<uid>/services/<svc>-<i>/logs/`;
 - `shards` / `maxCount` on a service: rejected by the webhook (no meaning

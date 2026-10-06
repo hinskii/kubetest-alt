@@ -538,3 +538,31 @@ func TestValidateTest_Retry(t *testing.T) {
 	composite.Retry = &testsv1alpha1.RetryPolicy{Count: 1}
 	require.ErrorContains(t, validateTest(composite), "set retry on the steps")
 }
+
+func TestValidateTest_Services(t *testing.T) {
+	one := int32(1)
+	with := func(svcs map[string]testsv1alpha1.ServiceSpec) error {
+		s := baseValidSpec()
+		s.Services = svcs
+		return validateTest(&s)
+	}
+	require.NoError(t, with(map[string]testsv1alpha1.ServiceSpec{
+		"db":    {Image: "postgres:17", Count: &one},
+		"grid2": {Image: "selenium/node", Matrix: map[string][]string{"BROWSER": {"chrome", "firefox"}}},
+	}))
+	for name, tc := range map[string]struct {
+		svcs map[string]testsv1alpha1.ServiceSpec
+		want string
+	}{
+		"bad name":   {map[string]testsv1alpha1.ServiceSpec{"Postgres_DB": {Image: "x"}}, "DNS label"},
+		"no image":   {map[string]testsv1alpha1.ServiceSpec{"db": {}}, "spec.services.db.image is required"},
+		"maxCount":   {map[string]testsv1alpha1.ServiceSpec{"db": {Image: "x", MaxCount: &one}}, "maxCount is not supported"},
+		"shards":     {map[string]testsv1alpha1.ServiceSpec{"db": {Image: "x", Shards: map[string]string{"a": "b"}}}, "shards is not supported"},
+		"matrix key": {map[string]testsv1alpha1.ServiceSpec{"db": {Image: "x", Matrix: map[string][]string{"a-b": {"1"}}}}, "identifier"},
+		"empty axis": {map[string]testsv1alpha1.ServiceSpec{"db": {Image: "x", Matrix: map[string][]string{"A": {}}}}, "at least one value"},
+		"too many": {map[string]testsv1alpha1.ServiceSpec{"db": {Image: "x",
+			Matrix: map[string][]string{"A": {"1", "2", "3", "4", "5"}, "B": {"1", "2", "3", "4", "5"}}}}, "at most 20"},
+	} {
+		t.Run(name, func(t *testing.T) { require.ErrorContains(t, with(tc.svcs), tc.want) })
+	}
+}

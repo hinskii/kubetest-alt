@@ -36,6 +36,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/names"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
 )
 
@@ -119,6 +120,14 @@ func Resolve(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, store Templat
 		Env:      opts.Env,
 		RunID:    runID,
 		TestName: test.Name,
+	}
+	// Service DNS names are deterministic (run name + service name), so
+	// {{ services.<name> }} resolves before the services exist.
+	if len(merged.Services) > 0 {
+		scope.Services = make(map[string]string, len(merged.Services))
+		for name := range merged.Services {
+			scope.Services[name] = names.ServiceHost(run.Name, run.Namespace, name)
+		}
 	}
 	if err := evalStringsInSpec(merged, scope); err != nil {
 		return nil, err
@@ -281,7 +290,7 @@ func mergeTemplateInto(dst *testsv1alpha1.TestSpec, tmpl *testsv1alpha1.TestTemp
 		dst.Retry = tmpl.Retry.DeepCopy()
 	}
 	if len(tmpl.Services) > 0 && dst.Services == nil {
-		dst.Services = maps.Clone(tmpl.Services)
+		dst.Services = cloneServices(tmpl.Services)
 	}
 	if tmpl.Parallel != nil && dst.Parallel == nil {
 		dst.Parallel = tmpl.Parallel.DeepCopy()
@@ -345,7 +354,7 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 		dst.Schedule = test.Schedule
 	}
 	if len(test.Services) > 0 {
-		dst.Services = maps.Clone(test.Services)
+		dst.Services = cloneServices(test.Services)
 	}
 	if test.Parallel != nil {
 		dst.Parallel = test.Parallel.DeepCopy()
@@ -613,6 +622,44 @@ func evalStringsInSpec(spec *testsv1alpha1.TestSpec, scope expr.Scope) error {
 			return fmt.Errorf("resolve spec.artifacts.paths: %w", err)
 		} else {
 			spec.Artifacts.Paths = v
+		}
+	}
+	for name, svc := range spec.Services {
+		if err := evalService(&svc, scope); err != nil {
+			return fmt.Errorf("resolve spec.services.%s: %w", name, err)
+		}
+		spec.Services[name] = svc
+	}
+	return nil
+}
+
+// cloneServices deep-copies a services map so resolution never mutates
+// the cached Test or TestTemplate.
+func cloneServices(in map[string]testsv1alpha1.ServiceSpec) map[string]testsv1alpha1.ServiceSpec {
+	out := make(map[string]testsv1alpha1.ServiceSpec, len(in))
+	for k, v := range in {
+		out[k] = *v.DeepCopy()
+	}
+	return out
+}
+
+// evalService templates a service's invocation and env values, like the
+// test container's.
+func evalService(svc *testsv1alpha1.ServiceSpec, scope expr.Scope) error {
+	var err error
+	if svc.Command, err = expr.EvalSlice(svc.Command, scope); err != nil {
+		return fmt.Errorf("command: %w", err)
+	}
+	if svc.Args, err = expr.EvalSlice(svc.Args, scope); err != nil {
+		return fmt.Errorf("args: %w", err)
+	}
+	svc.Env = append([]corev1.EnvVar(nil), svc.Env...)
+	for i := range svc.Env {
+		if svc.Env[i].Value == "" {
+			continue
+		}
+		if svc.Env[i].Value, err = expr.Eval(svc.Env[i].Value, scope); err != nil {
+			return fmt.Errorf("env[%d].value: %w", i, err)
 		}
 	}
 	return nil

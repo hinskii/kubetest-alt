@@ -225,11 +225,14 @@ func (r *TestRunReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // hasRunIDLabelPredicate lets only pods carrying the compiler-set run-id
-// label into our event stream — every other pod on the cluster gets filtered
-// out here (cheap) instead of in the mapper.
+// (the test pod) or service-of (a spec.services replica) label into our
+// event stream — every other pod on the cluster gets filtered out here
+// (cheap) instead of in the mapper.
 var hasRunIDLabelPredicate = predicate.NewPredicateFuncs(func(obj client.Object) bool {
-	_, ok := obj.GetLabels()[compiler.LabelRunID]
-	return ok
+	l := obj.GetLabels()
+	_, test := l[compiler.LabelRunID]
+	_, service := l[compiler.LabelServiceOf]
+	return test || service
 })
 
 // mapPodToTestRun turns a Pod event into a Reconcile request for the TestRun
@@ -241,6 +244,9 @@ func (r *TestRunReconciler) mapPodToTestRun(_ context.Context, obj client.Object
 		return nil
 	}
 	runID := pod.Labels[compiler.LabelRunID]
+	if runID == "" {
+		runID = pod.Labels[compiler.LabelServiceOf] // readiness of a service replica
+	}
 	if runID == "" {
 		return nil
 	}
@@ -618,6 +624,12 @@ func (r *TestRunReconciler) createJob(ctx context.Context, logger interface{ Inf
 	if tool := runTool(run); tool != "" {
 		testForCompile.Labels = map[string]string{compiler.LabelKubetestTool: tool}
 	}
+	// spec.services start first; the Job waits until they're all ready.
+	if len(testSpec.Services) > 0 {
+		if res, wait, err := r.ensureServices(ctx, run, testForCompile); wait || err != nil {
+			return res, err
+		}
+	}
 	job, aux, cerr := compiler.Compile(testForCompile, run, r.CompilerOpts)
 	if cerr != nil {
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
@@ -907,6 +919,7 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 		return ctrl.Result{}, err
 	}
 	r.recordLatestRun(ctx, run, false)
+	r.teardownServices(ctx, run)
 	return ctrl.Result{}, nil
 }
 

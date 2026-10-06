@@ -57,6 +57,7 @@ const (
 	ReasonMissingResult       = "MissingResult"
 	ReasonMalformedResult     = "MalformedResult"
 	ReasonUnschedulable       = "Unschedulable"
+	ReasonServiceNotReady     = "ServiceNotReady"
 )
 
 // IsTerminalPhase reports whether a Phase means "done, no more transitions".

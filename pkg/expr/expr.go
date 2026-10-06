@@ -94,6 +94,10 @@ type Scope struct {
 
 	// TestName is Test.metadata.name — surfaced as {{ test.name }}.
 	TestName string
+
+	// Services maps each spec.services name to its DNS name —
+	// {{ services.<name> }}.
+	Services map[string]string
 }
 
 // Error is returned from Eval on any resolution failure. Fields are exported
@@ -313,6 +317,17 @@ func resolveRef(raw string, scope Scope, line, col int) (string, error) {
 			}
 		}
 		return v, nil
+	case "services":
+		v, ok := scope.Services[key]
+		if !ok {
+			return "", &Error{
+				Line:    line,
+				Col:     col,
+				Ref:     raw,
+				Message: fmt.Sprintf("unknown service %q (declare it in spec.services)", key),
+			}
+		}
+		return v, nil
 	case "run", "test":
 		return "", &Error{
 			Line:    line,
@@ -325,7 +340,7 @@ func resolveRef(raw string, scope Scope, line, col int) (string, error) {
 			Line:    line,
 			Col:     col,
 			Ref:     raw,
-			Message: fmt.Sprintf("unknown namespace %q (allowed: config, env, run, test)", ns),
+			Message: fmt.Sprintf("unknown namespace %q (allowed: config, env, run, test, services)", ns),
 		}
 	}
 }

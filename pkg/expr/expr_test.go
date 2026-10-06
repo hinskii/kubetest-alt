@@ -18,6 +18,7 @@ package expr
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -300,4 +301,16 @@ func TestCoerceParam_ErrorNamesTheParam(t *testing.T) {
 	_, err := CoerceParam("vus", "5.5", Parameter{Type: "integer"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `"vus"`, "error must name the offending param")
+}
+
+func TestEval_Services(t *testing.T) {
+	scope := Scope{Services: map[string]string{"db": "run-db.team-a.svc"}}
+	got, err := Eval("postgres://{{ services.db }}:5432/app", scope)
+	if err != nil || got != "postgres://run-db.team-a.svc:5432/app" {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	_, err = Eval("{{ services.cache }}", scope)
+	if err == nil || !strings.Contains(err.Error(), `unknown service "cache"`) {
+		t.Fatalf("want unknown service error, got %v", err)
+	}
 }

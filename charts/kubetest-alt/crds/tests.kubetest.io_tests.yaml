@@ -4468,12 +4468,31 @@ spec:
               services:
                 additionalProperties:
                   description: |-
-                    ServiceSpec is a sidecar-like dependent service. Detailed fields land with the
-                    services runtime (post-v1); step 02 keeps the shape minimal but present so
-                    GitOps manifests can reference it.
+                    ServiceSpec is a dependency the test needs running — a database, a mock
+                    server, a browser grid. The operator starts it before the test as Pods
+                    <run>-<name>-<i> behind a headless Service <run>-<name>, waits until
+                    every replica is Ready, runs the test, and removes them when the run
+                    ends. The test reaches it at {{ services.<name> }} (also env
+                    KUBETEST_SERVICE_<NAME>_HOST): <run>-<name>.<namespace>.svc, resolving
+                    to every ready replica; replica i is <run>-<name>-<i>.<run>-<name>.<namespace>.svc.
+                    The replicas use the Test's spec.pod (annotations, service account,
+                    scheduling, security context).
                   properties:
+                    args:
+                      items:
+                        type: string
+                      type: array
+                    command:
+                      description: Command / Args override the image's entrypoint
+                        / cmd.
+                      items:
+                        type: string
+                      type: array
                     count:
+                      description: Count is the number of identical replicas (default
+                        1).
                       format: int32
+                      minimum: 1
                       type: integer
                     env:
                       items:
@@ -4635,20 +4654,28 @@ spec:
                     image:
                       type: string
                     logs:
+                      description: |-
+                        Logs stores each replica's log next to the run's
+                        (runs/<ns>/<uid>/services/<name>-<i>/logs/).
                       type: boolean
                     matrix:
                       additionalProperties:
                         items:
                           type: string
                         type: array
+                      description: |-
+                        Matrix starts one replica per combination of the values (× Count);
+                        replica i gets env KUBETEST_MATRIX_<KEY> with its value.
                       type: object
                     maxCount:
+                      description: MaxCount is not supported for services (the webhook
+                        refuses it).
                       format: int32
                       type: integer
                     readinessProbe:
                       description: |-
-                        Probe describes a health check to be performed against a container to determine whether it is
-                        alive or ready to receive traffic.
+                        ReadinessProbe decides when a replica is ready; without one a replica
+                        is ready once its container runs.
                       properties:
                         exec:
                           description: Exec specifies a command to execute in the
@@ -4799,19 +4826,86 @@ spec:
                           format: int32
                           type: integer
                       type: object
+                    resources:
+                      description: ResourceRequirements describes the compute resource
+                        requirements.
+                      properties:
+                        claims:
+                          description: |-
+                            Claims lists the names of resources, defined in spec.resourceClaims,
+                            that are used by this container.
+
+                            This field depends on the
+                            DynamicResourceAllocation feature gate.
+
+                            This field is immutable. It can only be set for containers.
+                          items:
+                            description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                            properties:
+                              name:
+                                description: |-
+                                  Name must match the name of one entry in pod.spec.resourceClaims of
+                                  the Pod where this field is used. It makes that resource available
+                                  inside a container.
+                                type: string
+                              request:
+                                description: |-
+                                  Request is the name chosen for a request in the referenced claim.
+                                  If empty, everything from the claim is made available, otherwise
+                                  only the result of this request.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          type: array
+                          x-kubernetes-list-map-keys:
+                          - name
+                          x-kubernetes-list-type: map
+                        limits:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          description: |-
+                            Limits describes the maximum amount of compute resources allowed.
+                            More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                          type: object
+                        requests:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          description: |-
+                            Requests describes the minimum amount of compute resources required.
+                            If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                            otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                            More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                          type: object
+                      type: object
                     restartPolicy:
-                      description: |-
-                        RestartPolicy describes how the container should be restarted.
-                        Only one of the following restart policies may be specified.
-                        If none of the following policies is specified, the default one
-                        is RestartPolicyAlways.
+                      description: RestartPolicy of the replica pods (default Always).
+                      enum:
+                      - Always
+                      - OnFailure
+                      - Never
                       type: string
                     shards:
                       additionalProperties:
                         type: string
+                      description: Shards is not supported for services (the webhook
+                        refuses it).
                       type: object
                     timeout:
+                      description: |-
+                        Timeout bounds the wait for every replica to be ready (default 5m);
+                        past it the run ends as error (ServiceNotReady).
                       type: string
+                  required:
+                  - image
                   type: object
                 type: object
               steps:

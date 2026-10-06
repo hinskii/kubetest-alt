@@ -20,6 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -177,6 +180,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateRetry("spec.retry", spec.Retry); err != nil {
 		return err
 	}
+	if err := validateServices(spec.Services); err != nil {
+		return err
+	}
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
 	}
@@ -262,6 +268,61 @@ func validateStep(idx int, s *testsv1alpha1.Step) error {
 		}
 	}
 	return validateRetry(fmt.Sprintf("spec.steps[%d].retry", idx), s.Retry)
+}
+
+// MaxServiceReplicas caps the pods one run's services may start (count ×
+// matrix combinations, summed over services).
+const MaxServiceReplicas = 20
+
+var (
+	serviceNameRE = regexp.MustCompile(`^[a-z]([-a-z0-9]{0,30}[a-z0-9])?$`)
+	matrixKeyRE   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+)
+
+// validateServices checks spec.services: names usable in DNS and env var
+// names, an image each, and only the fields the services runtime honors.
+func validateServices(services map[string]testsv1alpha1.ServiceSpec) error {
+	total := 0
+	for _, name := range slices.Sorted(maps.Keys(services)) {
+		svc := services[name]
+		at := "spec.services." + name
+		if !serviceNameRE.MatchString(name) {
+			return fmt.Errorf("%s: service name must be a DNS label of at most 32 characters (lowercase letters, digits, '-'), starting with a letter", at)
+		}
+		if svc.Image == "" {
+			return fmt.Errorf("%s.image is required", at)
+		}
+		if svc.MaxCount != nil {
+			return fmt.Errorf("%s.maxCount is not supported for services — use count", at)
+		}
+		if len(svc.Shards) > 0 {
+			return fmt.Errorf("%s.shards is not supported for services — use matrix or count", at)
+		}
+		if svc.Count != nil && *svc.Count < 1 {
+			return fmt.Errorf("%s.count must be >= 1", at)
+		}
+		replicas := 1
+		if svc.Count != nil {
+			replicas = int(*svc.Count)
+		}
+		for key, values := range svc.Matrix {
+			if !matrixKeyRE.MatchString(key) {
+				return fmt.Errorf("%s.matrix key %q must be an identifier ([A-Za-z_][A-Za-z0-9_]*)", at, key)
+			}
+			if len(values) == 0 {
+				return fmt.Errorf("%s.matrix.%s needs at least one value", at, key)
+			}
+			replicas *= len(values)
+		}
+		if svc.Timeout != nil && svc.Timeout.Duration < 0 {
+			return fmt.Errorf("%s.timeout must not be negative", at)
+		}
+		total += replicas
+		if total > MaxServiceReplicas {
+			return fmt.Errorf("spec.services start %d+ replicas; at most %d per run", total, MaxServiceReplicas)
+		}
+	}
+	return nil
 }
 
 // conditionPassed is the "until the run passes" condition (steps[].condition,

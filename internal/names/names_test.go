@@ -45,3 +45,15 @@ func TestBounded(t *testing.T) {
 	assert.NotContains(t, Bounded(dashy), "---")
 	assert.Empty(t, validation.IsDNS1123Label(Bounded(dashy)))
 }
+
+func TestServiceNames(t *testing.T) {
+	assert.Equal(t, "nightly-db", ServiceName("nightly", "db"))
+	assert.Equal(t, "s-1759752000-db", ServiceName("1759752000", "db"), "must start with a letter")
+	assert.Equal(t, "run-v1-2-db", ServiceName("run.v1.2", "db"), "dots are not allowed in Service names")
+	long := ServiceName(strings.Repeat("r", 60), "postgres")
+	assert.Len(t, long, MaxLen)
+	assert.Empty(t, validation.IsDNS1035Label(long))
+	assert.Equal(t, "nightly-db-0", ServiceReplicaName("nightly-db", 0))
+	assert.Empty(t, validation.IsDNS1123Label(ServiceReplicaName(long, 12)))
+	assert.Equal(t, "nightly-db.team-a.svc", ServiceHost("nightly", "team-a", "db"))
+}

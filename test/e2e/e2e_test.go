@@ -58,6 +58,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
@@ -159,6 +160,13 @@ func TestE2E(t *testing.T) {
 		start := time.Now()
 		defer func() { t.Logf("SCENARIO_TIMING scenario=7 kind=retry duration=%s", time.Since(start)) }()
 		scenarioRetry(t, ctx, c)
+	})
+
+	// Step 19b: spec.services — a real dependency reached over DNS.
+	t.Run("Scenario8_ServiceReachedByTheTest", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=8 kind=services duration=%s", time.Since(start)) }()
+		scenarioServices(t, ctx, c)
 	})
 
 	// Post-scenario: /metrics from operator + apiserver. Asserts the
@@ -297,6 +305,50 @@ func scenarioRetry(t *testing.T, ctx context.Context, c client.Client) {
 		assert.Contains(t, logs, "kubetest: try 1/2 failed (exit code 1), retrying")
 		assert.Contains(t, logs, "second try")
 	}
+}
+
+// scenarioServices: nginx as spec.services.web (readiness on HTTP), a k6
+// test that must get 200 from it through KUBETEST_SERVICE_WEB_HOST; the
+// replica is gone once the run ends.
+func scenarioServices(t *testing.T, ctx context.Context, c client.Client) {
+	script := `import http from 'k6/http';
+import { check } from 'k6';
+export const options = { thresholds: { checks: ['rate==1.0'] } };
+export default function () {
+  const r = http.get('http://' + __ENV.KUBETEST_SERVICE_WEB_HOST + '/');
+  check(r, { 'web answers 200': (x) => x.status === 200 });
+}
+`
+	test := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-services", Namespace: workloadNS,
+			Labels: map[string]string{"kubetest.io/tool": "k6"}},
+		Spec: testsv1alpha1.TestSpec{
+			ConcurrencyPolicy: "Allow",
+			Container: testsv1alpha1.ContainerConfig{
+				Image: "grafana/k6:1.4.0", Command: []string{"k6"}, Args: []string{"run", "/data/repo/script.js"},
+			},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/script.js", Content: script}}},
+			Services: map[string]testsv1alpha1.ServiceSpec{"web": {
+				Image: "nginx:1.27-alpine",
+				ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{Path: "/", Port: intstr.FromInt32(80)},
+				}},
+			}},
+		},
+	}
+	require.NoError(t, c.Create(ctx, test))
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "e2e-services-run", Namespace: workloadNS},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: test.Name, Source: "api"},
+	}
+	require.NoError(t, c.Create(ctx, run))
+	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 4*time.Minute)
+	assert.Equal(t, testsv1alpha1.PhasePassed, final.Status.Phase, final.Status.Message)
+	assert.Eventually(t, func() bool {
+		var pod corev1.Pod
+		err := c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-services-run-web-0"}, &pod)
+		return apierrors.IsNotFound(err) || pod.DeletionTimestamp != nil
+	}, time.Minute, time.Second, "the service replica is removed when the run ends")
 }
 
 // readRunLogs reads a finished run's whole log over the apiserver's

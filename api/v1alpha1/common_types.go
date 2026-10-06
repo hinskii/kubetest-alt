@@ -210,28 +210,55 @@ type RetryPolicy struct {
 	Until string `json:"until,omitempty"`
 }
 
-// ServiceSpec is a sidecar-like dependent service. Detailed fields land with the
-// services runtime (post-v1); step 02 keeps the shape minimal but present so
-// GitOps manifests can reference it.
+// ServiceSpec is a dependency the test needs running — a database, a mock
+// server, a browser grid. The operator starts it before the test as Pods
+// <run>-<name>-<i> behind a headless Service <run>-<name>, waits until
+// every replica is Ready, runs the test, and removes them when the run
+// ends. The test reaches it at {{ services.<name> }} (also env
+// KUBETEST_SERVICE_<NAME>_HOST): <run>-<name>.<namespace>.svc, resolving
+// to every ready replica; replica i is <run>-<name>-<i>.<run>-<name>.<namespace>.svc.
+// The replicas use the Test's spec.pod (annotations, service account,
+// scheduling, security context).
 type ServiceSpec struct {
-	// +optional
+	// +required
 	Image string `json:"image,omitempty"`
+	// Command / Args override the image's entrypoint / cmd.
+	// +optional
+	Command []string `json:"command,omitempty"`
+	// +optional
+	Args []string `json:"args,omitempty"`
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+	// ReadinessProbe decides when a replica is ready; without one a replica
+	// is ready once its container runs.
+	// +optional
 	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
+	// Timeout bounds the wait for every replica to be ready (default 5m);
+	// past it the run ends as error (ServiceNotReady).
 	// +optional
 	Timeout *metav1.Duration `json:"timeout,omitempty"`
+	// Logs stores each replica's log next to the run's
+	// (runs/<ns>/<uid>/services/<name>-<i>/logs/).
 	// +optional
 	Logs bool `json:"logs,omitempty"`
+	// Count is the number of identical replicas (default 1).
+	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Count *int32 `json:"count,omitempty"`
+	// MaxCount is not supported for services (the webhook refuses it).
 	// +optional
 	MaxCount *int32 `json:"maxCount,omitempty"`
+	// Matrix starts one replica per combination of the values (× Count);
+	// replica i gets env KUBETEST_MATRIX_<KEY> with its value.
 	// +optional
 	Matrix map[string][]string `json:"matrix,omitempty"`
+	// Shards is not supported for services (the webhook refuses it).
 	// +optional
 	Shards map[string]string `json:"shards,omitempty"`
+	// RestartPolicy of the replica pods (default Always).
+	// +kubebuilder:validation:Enum=Always;OnFailure;Never
 	// +optional
 	RestartPolicy corev1.RestartPolicy `json:"restartPolicy,omitempty"`
 }

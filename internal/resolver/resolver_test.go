@@ -548,3 +548,27 @@ func TestMergeTemplates_MissingTemplate(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), `template "nope" not found`)
 }
+
+// {{ services.<name> }} resolves to the service's DNS name in the test's
+// invocation and in other services' settings; the cached Test is untouched.
+func TestResolve_ServiceHosts(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Config = map[string]testsv1alpha1.Parameter{"dbname": {Type: "string", Default: "app"}}
+	test.Spec.Container.Args = []string{"run", "-e", "DB=postgres://{{ services.db }}/{{ config.dbname }}", "s.js"}
+	test.Spec.Services = map[string]testsv1alpha1.ServiceSpec{
+		"db":  {Image: "postgres:17"},
+		"api": {Image: "mock", Args: []string{"--upstream={{ services.db }}"}, Env: []corev1.EnvVar{{Name: "DB", Value: "{{ services.db }}"}}},
+	}
+	original := test.DeepCopy()
+
+	spec, err := Resolve(test, mkRun(), MapStore{}, Options{})
+	require.NoError(t, err)
+	assert.Equal(t, "DB=postgres://sample-run-1-db.ns.svc/app", spec.Container.Args[2])
+	assert.Equal(t, []string{"--upstream=sample-run-1-db.ns.svc"}, spec.Services["api"].Args)
+	assert.Equal(t, "sample-run-1-db.ns.svc", spec.Services["api"].Env[0].Value)
+	assert.Equal(t, original, test, "resolution must not mutate the cached Test")
+
+	test.Spec.Container.Args = []string{"{{ services.cache }}"}
+	_, err = Resolve(test, mkRun(), MapStore{}, Options{})
+	require.ErrorContains(t, err, `unknown service "cache"`)
+}
