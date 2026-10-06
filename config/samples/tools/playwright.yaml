@@ -1,15 +1,22 @@
+# Sample playwright Test — runs the same project the catalog e2e verifies
+# (test/catalog/cases/playwright/repo), sparse-checked out of this repository. It talks to the
+# `target` service from target/target.yaml in the same namespace and
+# includes deliberate failures; expected phase: failed.
+# Swap content.git for your own repository to run real tests.
 apiVersion: tests.kubetest.io/v1alpha1
 kind: Test
 metadata:
   name: sample-playwright
-  namespace: default
 spec:
-  use: [playwright]
-  content:
-    git:
-      uri: https://github.com/kubetest-alt/example-tests.git
-      revision: main
   config:
     projectDir:
+      default: test/catalog/cases/playwright/repo
       type: string
-      default: "playwright"
+  content:
+    git:
+      paths:
+      - test/catalog/cases/playwright/repo
+      revision: main
+      uri: https://github.com/hinskii/kubetest-alt.git
+  use:
+  - playwright

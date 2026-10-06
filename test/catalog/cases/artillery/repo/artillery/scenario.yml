@@ -1,5 +1,5 @@
 config:
-  target: "http://target.kubetest-catalog.svc:8000"
+  target: "http://target:8000"
   phases:
     - duration: 3
       arrivalRate: 3

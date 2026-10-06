@@ -14,14 +14,14 @@
       </ThreadGroup>
       <hashTree>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="root">
-          <stringProp name="HTTPSampler.domain">target.kubetest-catalog.svc</stringProp>
+          <stringProp name="HTTPSampler.domain">target</stringProp>
           <stringProp name="HTTPSampler.port">8000</stringProp>
           <stringProp name="HTTPSampler.path">/</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>
         </HTTPSamplerProxy>
         <hashTree/>
         <HTTPSamplerProxy guiclass="HttpTestSampleGui" testclass="HTTPSamplerProxy" testname="missing">
-          <stringProp name="HTTPSampler.domain">target.kubetest-catalog.svc</stringProp>
+          <stringProp name="HTTPSampler.domain">target</stringProp>
           <stringProp name="HTTPSampler.port">8000</stringProp>
           <stringProp name="HTTPSampler.path">/missing</stringProp>
           <stringProp name="HTTPSampler.method">GET</stringProp>

@@ -1,0 +1,42 @@
+# The HTTP target every sample talks to (http://target:8000 — same
+# namespace): "/" answers 200 with a small page, anything else 404, so
+# each tool sees both passing and failing requests. The catalog e2e
+# (test/e2e/run.sh, E2E_SUITE=catalog) deploys the same thing.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: target-www
+data:
+  index.html: |
+    <!doctype html>
+    <html lang="en"><head><title>kubetest target</title></head>
+    <body><h1>ok</h1></body></html>
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: target
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: target}
+  template:
+    metadata:
+      labels: {app: target}
+    spec:
+      containers:
+        - name: http
+          image: python:3.13-alpine
+          command: ["python", "-m", "http.server", "8000", "--directory", "/www"]
+          ports: [{containerPort: 8000}]
+          readinessProbe: {tcpSocket: {port: 8000}, periodSeconds: 2}
+          volumeMounts: [{name: www, mountPath: /www}]
+      volumes: [{name: www, configMap: {name: target-www}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: target
+spec:
+  selector: {app: target}
+  ports: [{port: 8000, targetPort: 8000}]

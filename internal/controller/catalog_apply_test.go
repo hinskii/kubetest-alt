@@ -309,3 +309,45 @@ func TestCatalog_OutputPathsMatchWorkingDir(t *testing.T) {
 		}
 	}
 }
+
+// TestCatalog_SamplesRunTheCatalogProjects: every sample used to point at
+// github.com/kubetest-alt/example-tests, which never existed — no sample
+// could run. Each now sparse-checks out the project the catalog e2e
+// verifies (test/catalog/cases/<tool>/repo of this repo); every path-valued
+// parameter default must exist there, or the sample is broken again.
+func TestCatalog_SamplesRunTheCatalogProjects(t *testing.T) {
+	repoRoot, err := findRepoRoot()
+	require.NoError(t, err)
+	files, err := listYAML(filepath.Join(repoRoot, "config", "samples", "tools"))
+	require.NoError(t, err)
+	files = filterOutKustomization(files)
+
+	templates, err := listYAML(filepath.Join(repoRoot, "config", "templates"))
+	require.NoError(t, err)
+	assert.Len(t, files, len(templates), "one sample per catalog template")
+
+	for _, f := range files {
+		test, err := readTest(f)
+		require.NoError(t, err, f)
+		require.Len(t, test.Spec.Use, 1, f)
+		tool := test.Spec.Use[0]
+		project := "test/catalog/cases/" + tool + "/repo"
+
+		git := test.Spec.Content.Git
+		require.NotNil(t, git, "%s: sample must fetch its project from git", f)
+		assert.Equal(t, "https://github.com/hinskii/kubetest-alt.git", git.URI, f)
+		assert.Equal(t, []string{project}, git.Paths, f)
+		assert.DirExists(t, filepath.Join(repoRoot, project), f)
+
+		for name, p := range test.Spec.Config {
+			v := p.Default
+			if !strings.HasPrefix(v, "test/catalog/") {
+				continue // not a path (host, durations, counts, flags)
+			}
+			// Paths are relative to /data/repo == the repository root.
+			globless := strings.SplitN(v, "*", 2)[0]
+			_, err := os.Stat(filepath.Join(repoRoot, globless))
+			assert.NoError(t, err, "%s: config %s=%q must exist in the repo", filepath.Base(f), name, v)
+		}
+	}
+}

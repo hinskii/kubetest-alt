@@ -12,7 +12,7 @@
         <con:config method="GET" xsi:type="con:HttpRequest" name="GET root"
             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
           <con:settings/>
-          <con:endpoint>http://target.kubetest-catalog.svc:8000/</con:endpoint>
+          <con:endpoint>http://target:8000/</con:endpoint>
           <con:request/>
           <con:assertion type="Valid HTTP Status Codes" name="status 200">
             <con:configuration><codes>200</codes></con:configuration>
@@ -32,7 +32,7 @@
         <con:config method="GET" xsi:type="con:HttpRequest" name="GET missing"
             xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
           <con:settings/>
-          <con:endpoint>http://target.kubetest-catalog.svc:8000/missing</con:endpoint>
+          <con:endpoint>http://target:8000/missing</con:endpoint>
           <con:request/>
           <con:assertion type="Valid HTTP Status Codes" name="status 200">
             <con:configuration><codes>200</codes></con:configuration>

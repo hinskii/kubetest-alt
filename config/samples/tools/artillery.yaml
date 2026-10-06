@@ -1,20 +1,25 @@
+# Sample artillery Test — runs the same project the catalog e2e verifies
+# (test/catalog/cases/artillery/repo), sparse-checked out of this repository. It talks to the
+# `target` service from target/target.yaml in the same namespace and
+# includes deliberate failures; expected phase: passed.
+# Swap content.git for your own repository to run real tests.
 apiVersion: tests.kubetest.io/v1alpha1
 kind: Test
 metadata:
   name: sample-artillery
-  namespace: default
 spec:
-  use: [artillery]
+  config:
+    ensure:
+      default: "true"
+      type: string
+    scenario:
+      default: test/catalog/cases/artillery/repo/artillery/scenario.yml
+      type: string
   content:
     git:
-      uri: https://github.com/kubetest-alt/example-tests.git
+      paths:
+      - test/catalog/cases/artillery/repo
       revision: main
-  config:
-    scenario:
-      type: string
-      default: "artillery/scenario.yml"
-    # "true" acknowledges the "your scenario contains the ensure plugin"
-    # contract from the template. See config/templates/artillery.yaml.
-    ensure:
-      type: string
-      default: "true"
+      uri: https://github.com/hinskii/kubetest-alt.git
+  use:
+  - artillery

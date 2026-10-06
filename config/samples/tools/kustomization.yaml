@@ -1,39 +1,29 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# Apply-test entry point: `kubectl apply -k config/samples/tools/` applies
-# every catalog template + one Test per template. Real cluster only —
-# samples reference an example git repo (users swap the repo for their
-# own).
+# One sample Test per catalog template, plus the HTTP target they talk to.
+# Templates live outside this directory (kustomize refuses ../ paths), so:
+#
+#   kubectl apply -n <ns> -f config/templates/
+#   kubectl apply -n <ns> -k config/samples/tools/
+#   kubectl create -n <ns> -f - <<< '{"apiVersion":"tests.kubetest.io/v1alpha1","kind":"TestRun",
+#     "metadata":{"generateName":"sample-k6-"},"spec":{"testRef":"sample-k6"}}'
+#
+# Each sample sparse-checks out its project from test/catalog/cases/<tool>/repo
+# of this repository — the same projects the catalog e2e runs in CI.
 resources:
-  # Session A templates + samples
-  - ../../templates/k6.yaml
-  - ../../templates/cypress.yaml
-  - ../../templates/newman.yaml
-  - ../../templates/jmeter.yaml
-  - ../../templates/locust.yaml
-  - ../../templates/playwright.yaml
-  - ../../templates/pytest.yaml
-  - k6.yaml
+  - target/target.yaml
+  - artillery.yaml
+  - cucumber.yaml
   - cypress.yaml
-  - newman.yaml
-  - jmeter.yaml
-  - locust.yaml
-  - playwright.yaml
-  - pytest.yaml
-  # Session B templates + samples
-  - ../../templates/gatling.yaml
-  - ../../templates/gradle.yaml
-  - ../../templates/maven.yaml
-  - ../../templates/artillery.yaml
-  - ../../templates/soapui.yaml
-  - ../../templates/zap-baseline.yaml
-  - ../../templates/cucumber.yaml
-  - ../../templates/kubepug.yaml
   - gatling.yaml
   - gradle.yaml
+  - jmeter.yaml
+  - k6.yaml
+  - kubepug.yaml
+  - locust.yaml
   - maven.yaml
-  - artillery.yaml
+  - newman.yaml
+  - playwright.yaml
+  - pytest.yaml
   - soapui.yaml
   - zap-baseline.yaml
-  - cucumber.yaml
-  - kubepug.yaml

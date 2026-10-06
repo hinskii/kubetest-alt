@@ -3,7 +3,7 @@
     "name": "kubetest catalog",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [{"key": "target", "value": "http://target.kubetest-catalog.svc:8000"}],
+  "variable": [{"key": "target", "value": "http://target:8000"}],
   "item": [
     {
       "name": "root",
