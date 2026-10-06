@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // listTests returns every Test in the selected namespace (?namespace=, or
@@ -109,6 +110,7 @@ func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
+	s.recordAudit(r, apiclient.ActionTestCreate, t.Namespace, t.Name, nil)
 	writeJSON(w, http.StatusCreated, t)
 }
 
@@ -169,6 +171,7 @@ func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
+	s.recordAudit(r, apiclient.ActionTestUpdate, updated.Namespace, updated.Name, nil)
 	writeJSON(w, http.StatusOK, updated)
 }
 
@@ -199,5 +202,6 @@ func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
+	s.recordAudit(r, apiclient.ActionTestDelete, current.Namespace, current.Name, nil)
 	w.WriteHeader(http.StatusNoContent)
 }

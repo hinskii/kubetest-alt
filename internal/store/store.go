@@ -65,6 +65,17 @@ type RunStore interface {
 	// drops whole partitions instead). Returns ErrNotFound when no row
 	// matched, so callers can treat a repeat delete as already done.
 	Delete(ctx context.Context, uid string) error
+
+	// SetComment sets (c != nil) or clears (c == nil) the run's comment.
+	// Returns ErrNotFound when no row matched — live runs have no row yet.
+	SetComment(ctx context.Context, uid string, c *Comment) error
+}
+
+// Comment is a note on a run (one per run, replaced on edit).
+type Comment struct {
+	Text string    `json:"text"`
+	By   string    `json:"by,omitempty"`
+	At   time.Time `json:"at"`
 }
 
 // Row is the wire shape returned by List/Get. Mirrors the DB row 1:1 so
@@ -95,6 +106,8 @@ type Row struct {
 	Tool string `json:"tool,omitempty"`
 	// ParentRun is the composite parent's run name ("" for top-level).
 	ParentRun string `json:"parentRun,omitempty"`
+	// Comment is the run's note, if any.
+	Comment *Comment `json:"comment,omitempty"`
 }
 
 // TestCounts mirrors the CRD/executor shape for JUnit-derived counts.

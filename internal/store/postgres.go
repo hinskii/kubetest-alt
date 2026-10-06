@@ -159,15 +159,30 @@ func (p *Postgres) Delete(ctx context.Context, uid string) error {
 	return nil
 }
 
+// SetComment implements RunStore.
+func (p *Postgres) SetComment(ctx context.Context, uid string, c *Comment) error {
+	if _, err := uuid.Parse(uid); err != nil {
+		return ErrNotFound
+	}
+	var text, by, at any // all NULL clears the comment
+	if c != nil {
+		text, by, at = c.Text, nullIfEmpty(c.By), c.At
+	}
+	tag, err := p.pool.Exec(ctx,
+		`UPDATE test_runs SET comment = $2, comment_by = $3, comment_at = $4 WHERE uid = $1`,
+		uid, text, by, at)
+	if err != nil {
+		return fmt.Errorf("store: comment %s: %w", uid, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // List implements RunStore.
 func (p *Postgres) List(ctx context.Context, f Filter, page Page) ([]Row, error) {
-	limit := page.Limit
-	if limit <= 0 {
-		limit = DefaultPageLimit
-	}
-	if limit > MaxPageLimit {
-		limit = MaxPageLimit
-	}
+	limit := clampLimit(page.Limit)
 
 	// Keyset pagination: (finished_at DESC, uid DESC) is a unique ordering
 	// as long as (uid, finished_at) is the PK (uid alone is unique for
@@ -292,7 +307,8 @@ const selectCols = `
 	uid::text, name, namespace, test_ref, phase, source,
 	queued_at, started_at, finished_at, duration_ms,
 	resolved_spec, steps, metrics, test_counts, artifact_refs,
-	logs_ref, message, tags, config, tool, parent_run
+	logs_ref, message, tags, config, tool, parent_run,
+	comment, comment_by, comment_at
 `
 
 func scanRows(rows pgx.Rows) ([]Row, error) {
@@ -313,12 +329,16 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			cfgBytes   []byte
 			tool       *string
 			parentRun  *string
+			comment    *string
+			commentBy  *string
+			commentAt  *time.Time
 		)
 		if err := rows.Scan(
 			&r.UID, &r.Name, &r.Namespace, &r.TestRef, &r.Phase, &source,
 			&r.QueuedAt, &r.StartedAt, &r.FinishedAt, &duration,
 			&specBytes, &stepsBytes, &metricsB, &tcBytes, &arBytes,
 			&logsRef, &message, &tagsBytes, &cfgBytes, &tool, &parentRun,
+			&comment, &commentBy, &commentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -339,6 +359,12 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 		}
 		if parentRun != nil {
 			r.ParentRun = *parentRun
+		}
+		if comment != nil && commentAt != nil {
+			r.Comment = &Comment{Text: *comment, At: commentAt.UTC()}
+			if commentBy != nil {
+				r.Comment.By = *commentBy
+			}
 		}
 		// pgx returns timestamps in the session's timezone; force UTC so
 		// callers can compare against wall clocks without surprise.
@@ -408,6 +434,14 @@ func (p *Postgres) dropPartition(ctx context.Context, part Partition) error {
 // jsonbOrNil returns nil (Postgres NULL) for empty containers, else the
 // JSON-encoded bytes ready for a jsonb column. Keeps NULLs out of the
 // db-side data instead of empty {}/[] objects.
+// clampLimit applies DefaultPageLimit / MaxPageLimit.
+func clampLimit(limit int) int {
+	if limit <= 0 {
+		return DefaultPageLimit
+	}
+	return min(limit, MaxPageLimit)
+}
+
 func jsonbOrNil(v any) any {
 	switch vv := v.(type) {
 	case nil:

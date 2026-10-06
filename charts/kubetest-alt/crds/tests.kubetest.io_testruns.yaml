@@ -87,6 +87,14 @@ spec:
                   shape only; key existence is checked by the controller after resolving
                   the referenced Test.
                 type: object
+              notBefore:
+                description: |-
+                  NotBefore schedules the run: the controller keeps it queued until
+                  this time, then resolves the Test as it is THEN and starts it. Unset
+                  or in the past starts it now. A waiting run doesn't count against
+                  its Test's concurrencyPolicy. Cancel it by aborting it.
+                format: date-time
+                type: string
               pod:
                 description: |-
                   Per-run pod metadata overrides — merged onto Test.spec.pod at compile

@@ -82,6 +82,11 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
+	details := map[string]string{apiclient.AuditDetailTest: run.Spec.TestRef, apiclient.AuditDetailUID: string(run.UID)}
+	if run.Spec.NotBefore != nil {
+		details[apiclient.AuditDetailNotBefore] = run.Spec.NotBefore.UTC().Format(time.RFC3339)
+	}
+	s.recordAudit(r, apiclient.ActionRunCreate, run.Namespace, run.Name, details)
 	writeJSON(w, http.StatusCreated, run)
 }
 
@@ -106,10 +111,26 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ref.CR != nil {
-		writeJSON(w, http.StatusOK, runEnvelopeFromCR(ref.CR))
+		env := runEnvelopeFromCR(ref.CR)
+		env.Comment = s.historyComment(r.Context(), ref.CR)
+		writeJSON(w, http.StatusOK, env)
 		return
 	}
 	writeJSON(w, http.StatusOK, runEnvelopeFromRow(ref.Row))
+}
+
+// historyComment returns the comment of a finished run whose CR still
+// exists: comments live on the history row, which the CR doesn't carry.
+// Best effort — a missing row or store error just means no comment shown.
+func (s *Server) historyComment(ctx context.Context, cr *testsv1alpha1.TestRun) *apiclient.Comment {
+	if s.Store == nil || !controller.IsTerminalPhase(cr.Status.Phase) {
+		return nil
+	}
+	row, err := s.Store.Get(ctx, string(cr.UID))
+	if err != nil {
+		return nil
+	}
+	return apiComment(row.Comment)
 }
 
 // HeaderNextCursor carries the opaque cursor for the next page of
@@ -275,7 +296,13 @@ func (s *Server) mergeStoreRuns(ctx context.Context, lq listRunsQuery,
 		return false, err
 	}
 	for i := range rows {
-		if _, inCluster := finished[rows[i].UID]; inCluster || liveUIDs[rows[i].UID] {
+		if env, inCluster := finished[rows[i].UID]; inCluster {
+			// Cluster status wins, but the comment only exists in history.
+			env.Comment = apiComment(rows[i].Comment)
+			finished[rows[i].UID] = env
+			continue
+		}
+		if liveUIDs[rows[i].UID] {
 			continue
 		}
 		finished[rows[i].UID] = runEnvelopeFromRow(&rows[i])
@@ -366,6 +393,10 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 		Tags:       cr.Spec.Tags,
 		Abort:      cr.Spec.Abort,
 	}
+	if cr.Spec.NotBefore != nil {
+		t := cr.Spec.NotBefore.UTC()
+		e.NotBefore = &t
+	}
 	if cr.Status.ResolvedSpec != "" {
 		var spec testsv1alpha1.TestSpec
 		if err := json.Unmarshal([]byte(cr.Status.ResolvedSpec), &spec); err == nil {
@@ -434,6 +465,7 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		Config:     row.Config,
 		TestCounts: storeCounts(row.TestCounts),
 		Metrics:    row.Metrics,
+		Comment:    apiComment(row.Comment),
 	}
 	f := row.FinishedAt
 	e.FinishedAt = &f

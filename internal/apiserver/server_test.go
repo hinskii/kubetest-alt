@@ -89,8 +89,9 @@ func mkServer(t *testing.T, seed ...client.Object) (*Server, http.Handler) {
 // fakeRunStore is a hand-rolled RunReader — small enough to inline rather
 // than depending on a mocking framework.
 type fakeRunStore struct {
-	mu   sync.Mutex
-	rows map[string]store.Row // UID → row
+	mu    sync.Mutex
+	rows  map[string]store.Row // UID → row
+	audit []store.AuditEntry   // oldest first
 }
 
 func newFakeRunStore(rows ...store.Row) *fakeRunStore {

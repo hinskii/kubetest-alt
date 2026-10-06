@@ -31,6 +31,8 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // OpenAPISpec returns the full OpenAPI 3.1 document as a Go map. Serialized
@@ -169,6 +171,58 @@ func OpenAPISpec() map[string]any {
 					},
 				},
 				"parameters": []any{pathParam("id", "TestRun name."), namespaceParam()},
+			},
+			"/runs/{id}/comment": map[string]any{
+				"put": map[string]any{
+					"summary": "Set (replace) the comment of a finished run. The comment lives on the " +
+						"run-history row and is deleted with the run. Author from X-Kubetest-User.",
+					"requestBody": map[string]any{
+						"required": true,
+						"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{
+							"type":     "object",
+							"required": []string{"text"},
+							"properties": map[string]any{
+								"text": map[string]any{"type": "string", "minLength": 1, "maxLength": apiclient.MaxCommentLen},
+							},
+						}}},
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonRef("#/components/schemas/Comment")),
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"409": map[string]any{"description": "Run still live, or not in run history yet."},
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+				"delete": map[string]any{
+					"summary": "Remove the comment of a finished run. Idempotent.",
+					"responses": map[string]any{
+						"204": map[string]any{"description": "Removed (or there was none)."},
+						"404": errorSchema(),
+						"409": map[string]any{"description": "Run still live."},
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
+			},
+			"/audit": map[string]any{
+				"get": map[string]any{
+					"summary": "User actions recorded by this API server, newest first: runs created, " +
+						"aborted, deleted and commented; Tests created, updated, deleted. Actor from " +
+						"X-Kubetest-User. Paging: pass X-Next-Cursor as ?before=.",
+					"parameters": []any{
+						namespaceParam(),
+						queryParam("actor", "Only this actor."),
+						queryParam("action", "Only this action, e.g. run.delete."),
+						queryParam("before", "Entries with an id lower than this (X-Next-Cursor)."),
+						queryParam("limit", "Page size (default 50, max 500)."),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonArrayOf("#/components/schemas/AuditEntry")),
+						"400": errorSchema(),
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
 			},
 			"/runs/{id}/logs": map[string]any{
 				"get": map[string]any{
@@ -316,6 +370,33 @@ func OpenAPISpec() map[string]any {
 							"message":     map[string]any{"type": "string"},
 							"requestedBy": map[string]any{"type": "string"},
 						}},
+						"notBefore": map[string]any{
+							"type": "string", "format": "date-time",
+							"description": "Scheduled start (spec.notBefore); the run waits in queued until then.",
+						},
+						"comment": jsonRef("#/components/schemas/Comment"),
+					},
+				},
+				"Comment": map[string]any{
+					"type":     "object",
+					"required": []string{"text", "at"},
+					"properties": map[string]any{
+						"text": map[string]any{"type": "string"},
+						"by":   map[string]any{"type": "string"},
+						"at":   map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"AuditEntry": map[string]any{
+					"type":     "object",
+					"required": []string{"id", "at", "action"},
+					"properties": map[string]any{
+						"id":        map[string]any{"type": "integer"},
+						"at":        map[string]any{"type": "string", "format": "date-time"},
+						"actor":     map[string]any{"type": "string"},
+						"action":    map[string]any{"type": "string"},
+						"namespace": map[string]any{"type": "string"},
+						"target":    map[string]any{"type": "string"},
+						"details":   map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 					},
 				},
 				"Error": map[string]any{

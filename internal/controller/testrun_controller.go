@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -336,6 +337,9 @@ func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Setup path: first time we see this run, snapshot the Test spec, check
 	// concurrency, transition to queued.
 	if run.Status.ResolvedSpec == "" {
+		if res, waiting, err := r.waitForNotBefore(ctx, &run); waiting || err != nil {
+			return res, err
+		}
 		return r.setup(ctx, logger, &run)
 	}
 
@@ -350,6 +354,35 @@ func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// From here we expect either an existing Job or a not-yet-created one.
 	return r.observeOrCreateJob(ctx, logger, &run)
+}
+
+// waitForNotBefore holds a scheduled run in queued until spec.notBefore.
+// waiting=false means the time has come (or none was set): go on to setup.
+// Setup runs only after the wait, so the run resolves the Test as it is
+// when it starts, not when it was scheduled.
+func (r *TestRunReconciler) waitForNotBefore(ctx context.Context, run *testsv1alpha1.TestRun) (ctrl.Result, bool, error) {
+	now := r.Now()
+	if !waitingForSchedule(run, now.Time) {
+		return ctrl.Result{}, false, nil
+	}
+	msg := "scheduled: starts at " + run.Spec.NotBefore.UTC().Format(time.RFC3339)
+	if run.Status.Phase != testsv1alpha1.PhaseQueued || run.Status.Message != msg || run.Status.QueuedAt == nil {
+		run.Status.Phase = testsv1alpha1.PhaseQueued
+		run.Status.Message = msg
+		if run.Status.QueuedAt == nil {
+			run.Status.QueuedAt = &now
+		}
+		if err := r.Status().Update(ctx, run); err != nil {
+			return ctrl.Result{}, true, err
+		}
+	}
+	return ctrl.Result{RequeueAfter: run.Spec.NotBefore.Sub(now.Time)}, true, nil
+}
+
+// waitingForSchedule reports a run that hasn't been set up yet and whose
+// notBefore is still in the future.
+func waitingForSchedule(run *testsv1alpha1.TestRun, now time.Time) bool {
+	return run.Status.ResolvedSpec == "" && run.Spec.NotBefore != nil && now.Before(run.Spec.NotBefore.Time)
 }
 
 // isCompositeRun decodes the resolvedSpec snapshot and reports whether
@@ -430,6 +463,10 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	// A run scheduled for later is not running: it must neither block this
+	// one (Forbid) nor be aborted by it (Replace).
+	now := r.Now().Time
+	priors = slices.DeleteFunc(priors, func(p testsv1alpha1.TestRun) bool { return waitingForSchedule(&p, now) })
 	action := DecideConcurrency(priors, run, resolvedSpec.ConcurrencyPolicy)
 
 	switch action {

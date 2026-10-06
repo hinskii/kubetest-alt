@@ -142,13 +142,18 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 - Base layout, light/dark theme, English UI.
 - Unit tests (httptest fake apiserver), CI job, lint clean.
 
-### 18d2 — kubetest: state Control Center must not own
+### 18d2 — kubetest: state Control Center must not own ✅
 - Run store migration 0003: `comment`, `comment_by`, `comment_at` on runs
   (deleted with the run) + append-only `audit_log` (actor from
   `X-Kubetest-User`: run created/aborted/deleted, cleanup).
 - Apiserver: `PUT|DELETE /runs/{id}/comment`, `GET /audit`; apiclient methods.
-- `TestRun.spec.notBefore`: operator keeps the run `queued` until then
-  (one-shot schedules; cancel = delete the TestRun).
+- `TestRun.spec.notBefore`: operator keeps the run `queued` (no resolved
+  spec, no Job) until then, then resolves the Test as it is at start. A
+  waiting run is ignored by concurrencyPolicy (Forbid doesn't wait for it,
+  Replace doesn't abort it). Cancel = abort (recorded in history).
+- Comments only on finished runs (409 while live); audit is best-effort
+  (a failed audit write is logged, the action stands). Audit retention
+  lands with the retention job (fixes.md).
 
 ### 18e — Core views
 - Clusters → Tests list (label grouping, tool chip, last phase, gitops lock).

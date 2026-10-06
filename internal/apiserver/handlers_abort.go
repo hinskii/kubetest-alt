@@ -116,6 +116,11 @@ func (s *Server) abortRun(w http.ResponseWriter, r *http.Request) {
 			writeAPIError(w, err)
 			return
 		}
+		s.recordAudit(r, apiclient.ActionRunAbort, run.Namespace, run.Name,
+			map[string]string{
+				apiclient.AuditDetailUID: string(run.UID), apiclient.AuditDetailTest: run.Spec.TestRef,
+				apiclient.AuditDetailMessage: body.Message,
+			})
 	}
 	writeJSON(w, http.StatusAccepted, runEnvelopeFromCR(run))
 }

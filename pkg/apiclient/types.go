@@ -84,7 +84,59 @@ type Run struct {
 	Steps      map[string]StepResult `json:"steps,omitempty"`
 	// Abort is set once someone (or something) asked the run to stop.
 	Abort *testsv1alpha1.AbortRequest `json:"abort,omitempty"`
+	// NotBefore is when a scheduled run may start (TestRun.spec.notBefore).
+	NotBefore *time.Time `json:"notBefore,omitempty"`
+	// Comment is the run's note. Only finished runs (in run history) have one.
+	Comment *Comment `json:"comment,omitempty"`
 }
+
+// Comment is a note on a finished run. One per run; setting it again
+// replaces it.
+type Comment struct {
+	Text string    `json:"text"`
+	By   string    `json:"by,omitempty"`
+	At   time.Time `json:"at"`
+}
+
+// CommentOptions is the body of PUT /runs/{id}/comment.
+type CommentOptions struct {
+	Text string `json:"text"`
+}
+
+// MaxCommentLen bounds Comment.Text (characters).
+const MaxCommentLen = 500
+
+// AuditEntry is one user action recorded by the API server (GET /audit).
+type AuditEntry struct {
+	ID        int64             `json:"id"`
+	At        time.Time         `json:"at"`
+	Actor     string            `json:"actor,omitempty"`
+	Action    string            `json:"action"`
+	Namespace string            `json:"namespace,omitempty"`
+	Target    string            `json:"target,omitempty"`
+	Details   map[string]string `json:"details,omitempty"`
+}
+
+// Audit actions.
+const (
+	ActionRunCreate    = "run.create"
+	ActionRunAbort     = "run.abort"
+	ActionRunDelete    = "run.delete"
+	ActionRunComment   = "run.comment"
+	ActionRunUncomment = "run.uncomment"
+	ActionTestCreate   = "test.create"
+	ActionTestUpdate   = "test.update"
+	ActionTestDelete   = "test.delete"
+)
+
+// AuditEntry.Details keys.
+const (
+	AuditDetailUID       = "uid"
+	AuditDetailTest      = "test"
+	AuditDetailMessage   = "message"
+	AuditDetailText      = "text"
+	AuditDetailNotBefore = "notBefore"
+)
 
 // Origins of a Run.
 const (

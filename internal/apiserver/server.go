@@ -78,6 +78,14 @@ type Server struct {
 	// of archived runs 503.
 	Deleter RunDeleter
 
+	// Commenter sets run comments (PUT/DELETE /runs/{id}/comment). Nil
+	// makes those endpoints 503.
+	Commenter RunCommenter
+
+	// Audit records user actions and serves GET /audit. Nil records
+	// nothing and makes GET /audit 503.
+	Audit AuditLog
+
 	// Templates resolves spec.use for GET /tests/{name}/resolved. Nil uses
 	// K8sClient (the production path).
 	Templates resolver.TemplateStore
@@ -109,6 +117,17 @@ type Server struct {
 	// unit tests so the OpenAPI golden stays stable — cmd/apiserver
 	// wires it for production.
 	MetricsHandler http.Handler
+}
+
+// RunCommenter is store.RunStore's comment write path.
+type RunCommenter interface {
+	SetComment(ctx context.Context, uid string, c *store.Comment) error
+}
+
+// AuditLog is the store's audit surface.
+type AuditLog interface {
+	AppendAudit(ctx context.Context, e store.AuditEntry) error
+	ListAudit(ctx context.Context, f store.AuditFilter, limit int) ([]store.AuditEntry, error)
 }
 
 // RunReader is the read-only surface of store.RunStore the apiserver needs.
@@ -150,6 +169,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runs", s.listRuns)
 	mux.HandleFunc("GET /runs/{id}", s.getRun)
 	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
+	mux.HandleFunc("PUT /runs/{id}/comment", s.putComment)
+	mux.HandleFunc("DELETE /runs/{id}/comment", s.deleteComment)
+
+	// Audit log of user actions.
+	mux.HandleFunc("GET /audit", s.listAudit)
 
 	// Logs + artifacts.
 	mux.HandleFunc("DELETE /runs/{id}", s.deleteRun)

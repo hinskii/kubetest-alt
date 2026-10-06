@@ -393,3 +393,85 @@ func TestIntegration_RetentionDrop(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, recent)
 }
+
+// TestIntegration_Comments covers migration 0003's comment columns: set,
+// edit, survive a re-save of the run (SaveFinished must not touch them),
+// clear, and go away with the run.
+func TestIntegration_Comments(t *testing.T) {
+	ctx := t.Context()
+	finished := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	p := NewPostgres(harness.pool)
+	require.NoError(t, p.EnsurePartitions(ctx, PartitionsToCreate(finished, 0, 0)))
+
+	uid := "aaaaaaaa-0000-0000-0000-0000000000e1"
+	run := newRun(uid, "commented", testsv1alpha1.PhaseFailed, finished)
+	require.NoError(t, p.SaveFinished(ctx, run))
+
+	at := time.Date(2026, 9, 8, 13, 0, 0, 0, time.UTC)
+	require.NoError(t, p.SetComment(ctx, uid, &Comment{Text: "flaky DNS", By: "alice@example.com", At: at}))
+	require.NoError(t, p.SaveFinished(ctx, run), "re-save (controller retry) keeps the comment")
+
+	got, err := p.Get(ctx, uid)
+	require.NoError(t, err)
+	assert.Equal(t, &Comment{Text: "flaky DNS", By: "alice@example.com", At: at}, got.Comment)
+
+	listed, err := p.List(ctx, Filter{TestRef: "commented"}, Page{})
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	assert.Equal(t, "flaky DNS", listed[0].Comment.Text)
+
+	require.NoError(t, p.SetComment(ctx, uid, nil))
+	got, err = p.Get(ctx, uid)
+	require.NoError(t, err)
+	assert.Nil(t, got.Comment)
+
+	assert.ErrorIs(t, p.SetComment(ctx, "aaaaaaaa-0000-0000-0000-0000000000e9", &Comment{Text: "x", At: at}), ErrNotFound)
+	assert.ErrorIs(t, p.SetComment(ctx, "not-a-uuid", nil), ErrNotFound)
+}
+
+func TestIntegration_Audit(t *testing.T) {
+	ctx := t.Context()
+	p := NewPostgres(harness.pool)
+	ns := "audit-" + time.Now().Format("150405.000000")
+
+	for i, e := range []AuditEntry{
+		{Actor: "alice@example.com", Action: "run.create", Namespace: ns, Target: "smoke-1", Details: map[string]string{"test": "smoke"}},
+		{Actor: "bob@example.com", Action: "run.abort", Namespace: ns, Target: "smoke-1"},
+		{Actor: "alice@example.com", Action: "run.delete", Namespace: ns, Target: "smoke-0"},
+	} {
+		e.At = time.Date(2026, 9, 9, 12, i, 0, 0, time.UTC)
+		require.NoError(t, p.AppendAudit(ctx, e))
+	}
+	require.NoError(t, p.AppendAudit(ctx, AuditEntry{Action: "run.create", Namespace: ns + "-other"}))
+
+	all, err := p.ListAudit(ctx, AuditFilter{Namespace: ns}, 0)
+	require.NoError(t, err)
+	require.Len(t, all, 3)
+	assert.Equal(t, []string{"run.delete", "run.abort", "run.create"},
+		[]string{all[0].Action, all[1].Action, all[2].Action}, "newest first")
+	assert.Equal(t, map[string]string{"test": "smoke"}, all[2].Details)
+	assert.Equal(t, time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC), all[2].At)
+
+	alice, err := p.ListAudit(ctx, AuditFilter{Namespace: ns, Actor: "alice@example.com"}, 0)
+	require.NoError(t, err)
+	assert.Len(t, alice, 2)
+
+	page1, err := p.ListAudit(ctx, AuditFilter{Namespace: ns}, 2)
+	require.NoError(t, err)
+	require.Len(t, page1, 2)
+	page2, err := p.ListAudit(ctx, AuditFilter{Namespace: ns, BeforeID: page1[1].ID}, 2)
+	require.NoError(t, err)
+	require.Len(t, page2, 1)
+	assert.Equal(t, "run.create", page2[0].Action)
+
+	aborts, err := p.ListAudit(ctx, AuditFilter{Action: "run.abort", Namespace: ns}, 0)
+	require.NoError(t, err)
+	assert.Len(t, aborts, 1)
+
+	// Default timestamp comes from the database.
+	require.NoError(t, p.AppendAudit(ctx, AuditEntry{Action: "test.delete", Namespace: ns + "-now"}))
+	now, err := p.ListAudit(ctx, AuditFilter{Namespace: ns + "-now"}, 0)
+	require.NoError(t, err)
+	require.Len(t, now, 1)
+	assert.WithinDuration(t, time.Now(), now[0].At, time.Minute)
+}

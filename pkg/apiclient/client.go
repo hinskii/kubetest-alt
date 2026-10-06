@@ -214,6 +214,68 @@ func (c *Client) DeleteRun(ctx context.Context, namespace, id string) error {
 	return resp.Body.Close()
 }
 
+// SetComment sets (replaces) the comment of a finished run, attributed to
+// the AsUser identity.
+func (c *Client) SetComment(ctx context.Context, namespace, id, text string) (*Comment, error) {
+	var out Comment
+	err := c.sendJSON(ctx, http.MethodPut, "/runs/"+url.PathEscape(id)+"/comment", ns(namespace),
+		CommentOptions{Text: text}, &out)
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteComment removes a run's comment (no error when there was none).
+func (c *Client) DeleteComment(ctx context.Context, namespace, id string) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/runs/"+url.PathEscape(id)+"/comment", ns(namespace), nil)
+	if err != nil {
+		return err
+	}
+	return resp.Body.Close()
+}
+
+// ---- Audit -----------------------------------------------------------------
+
+// ListAuditOptions filters GET /audit. Zero values are unset.
+type ListAuditOptions struct {
+	Namespace string
+	Actor     string
+	Action    string
+	Limit     int
+	Before    string // AuditPage.NextCursor of the previous page
+}
+
+// AuditPage is one page of audit entries, newest first. NextCursor is ""
+// on the last page.
+type AuditPage struct {
+	Entries    []AuditEntry
+	NextCursor string
+}
+
+// ListAudit returns one page of the audit log.
+func (c *Client) ListAudit(ctx context.Context, o ListAuditOptions) (*AuditPage, error) {
+	q := ns(o.Namespace)
+	for k, v := range map[string]string{"actor": o.Actor, "action": o.Action, "before": o.Before} {
+		if v != "" {
+			q.Set(k, v)
+		}
+	}
+	if o.Limit > 0 {
+		q.Set("limit", strconv.Itoa(o.Limit))
+	}
+	resp, err := c.do(ctx, http.MethodGet, "/audit", q, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	page := &AuditPage{NextCursor: resp.Header.Get(HeaderNextCursor)}
+	if err := json.NewDecoder(resp.Body).Decode(&page.Entries); err != nil {
+		return nil, fmt.Errorf("apiclient: decode audit: %w", err)
+	}
+	return page, nil
+}
+
 // ---- Logs + artifacts --------------------------------------------------
 
 // OpenLogs streams the run's stored log (text). Caller closes it.

@@ -54,6 +54,13 @@ type TestRunSpec struct {
 	// rejects clearing or changing it. No effect on an already-terminal run.
 	// +optional
 	Abort *AbortRequest `json:"abort,omitempty"`
+
+	// NotBefore schedules the run: the controller keeps it queued until
+	// this time, then resolves the Test as it is THEN and starts it. Unset
+	// or in the past starts it now. A waiting run doesn't count against
+	// its Test's concurrencyPolicy. Cancel it by aborting it.
+	// +optional
+	NotBefore *metav1.Time `json:"notBefore,omitempty"`
 }
 
 // Abort reasons. The reason is part of the run's final status message so

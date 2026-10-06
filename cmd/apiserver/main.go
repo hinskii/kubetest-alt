@@ -136,18 +136,29 @@ func main() {
 		setupLog.Info("--storage-type not set — /runs/*/logs and /runs/*/artifacts return 503")
 	}
 
-	// Postgres read wiring. Same shape as cmd/operator (§step-09), but
-	// read-only: apiserver never writes to the DB, only merges its rows
-	// into GET /runs and serves GET /runs/{uid} for archived rows.
+	// Postgres wiring. Same shape as cmd/operator (§step-09). The operator
+	// writes run rows; the apiserver reads them (GET /runs, archived
+	// GET /runs/{uid}) and writes only user state: deletes, comments and
+	// the audit log.
+	//
+	// Migrations run here too (advisory-locked, idempotent): a new API
+	// server reads columns a new migration adds, and must not depend on
+	// the operator's pod having started first.
 	var pgPool *pgxpool.Pool
 	if postgresDSN != "" {
-		pool, err := pgxpool.New(ctx, postgresDSN)
-		if err != nil {
+		migCtx, migCancel := context.WithTimeout(ctx, 60*time.Second)
+		migErr := store.ApplyMigrations(migCtx, postgresDSN)
+		migCancel()
+		if migErr != nil {
+			setupLog.Error(migErr, "Postgres migrations failed — /runs archive listing disabled")
+		} else if pool, err := pgxpool.New(ctx, postgresDSN); err != nil {
 			setupLog.Error(err, "pgxpool init failed — /runs archive listing disabled")
 		} else {
 			pg := store.NewPostgres(pool)
 			srv.Store = pg
 			srv.Deleter = pg
+			srv.Commenter = pg
+			srv.Audit = pg
 			pgPool = pool
 			setupLog.Info("Postgres run archive wired")
 		}

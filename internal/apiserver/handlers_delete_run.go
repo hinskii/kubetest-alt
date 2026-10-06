@@ -26,6 +26,7 @@ import (
 
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // RunDeleter removes archived run rows (store.Postgres implements it).
@@ -93,5 +94,6 @@ func (s *Server) deleteRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.recordAudit(r, apiclient.ActionRunDelete, ref.Namespace, ref.Name, map[string]string{apiclient.AuditDetailUID: ref.UID})
 	w.WriteHeader(http.StatusNoContent)
 }

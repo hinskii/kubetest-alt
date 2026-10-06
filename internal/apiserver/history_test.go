@@ -44,7 +44,7 @@ func mkStorageServer(t *testing.T, rows []store.Row, seed ...*testsv1alpha1.Test
 	up := storageFake()
 	rs := newFakeRunStore(rows...)
 	s.Downloader, s.Lister, s.Presigner, s.Remover = up, up, up, up
-	s.Store, s.Deleter = rs, rs
+	s.Store, s.Deleter, s.Commenter, s.Audit = rs, rs, rs, rs
 	return s, up, rs
 }
 

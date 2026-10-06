@@ -1,6 +1,60 @@
 {
   "components": {
     "schemas": {
+      "AuditEntry": {
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "id": {
+            "type": "integer"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "action"
+        ],
+        "type": "object"
+      },
+      "Comment": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "by": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text",
+          "at"
+        ],
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "message": {
@@ -37,6 +91,9 @@
             },
             "type": "object"
           },
+          "comment": {
+            "$ref": "#/components/schemas/Comment"
+          },
           "config": {
             "additionalProperties": {
               "type": "string"
@@ -64,6 +121,11 @@
             "type": "string"
           },
           "namespace": {
+            "type": "string"
+          },
+          "notBefore": {
+            "description": "Scheduled start (spec.notBefore); the run waits in queued until then.",
+            "format": "date-time",
             "type": "string"
           },
           "origin": {
@@ -183,6 +245,86 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/audit": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+            "in": "query",
+            "name": "namespace",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this actor.",
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only this action, e.g. run.delete.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Entries with an id lower than this (X-Next-Cursor).",
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size (default 50, max 500).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditEntry"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "User actions recorded by this API server, newest first: runs created, aborted, deleted and commented; Tests created, updated, deleted. Actor from X-Kubetest-User. Paging: pass X-Next-Cursor as ?before=."
+      }
+    },
     "/healthz": {
       "get": {
         "responses": {
@@ -769,6 +911,113 @@
           }
         }
       ]
+    },
+    "/runs/{id}/comment": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Removed (or there was none)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "description": "Run still live."
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "Remove the comment of a finished run. Idempotent."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "text": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comment"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "description": "Run still live, or not in run history yet."
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "Set (replace) the comment of a finished run. The comment lives on the run-history row and is deleted with the run. Author from X-Kubetest-User."
+      }
     },
     "/runs/{id}/logs": {
       "get": {
