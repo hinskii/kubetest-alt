@@ -12,6 +12,12 @@ retargeted from Testkube OSS agents to kubetest. The Django code is a
 - **Full replacement** — no Testkube code paths.
 - Must work for **every catalog tool**, not only k6.
 - **Everything in English** — UI strings, code, comments, docs.
+- **Control Center is stateless** (user, 2026-10-06; CLAUDE.md §0): no
+  database of its own. Comments and audit live in the kubetest run store
+  (apiserver endpoints, also usable from the CLI); one-shot scheduled runs
+  are a TestRun field the operator honors; analytics are computed from run
+  history. CC holds only rebuildable in-memory caches; preferences live in
+  the browser, sessions in oauth2-proxy.
 
 ---
 
@@ -41,16 +47,14 @@ browser ──oauth2-proxy──► control-center (Go, admin cluster)
 - `net/http` (Go 1.22+ mux patterns), `html/template` + `embed` for
   templates/static. No JS framework, no frontend build step; small vanilla
   JS for live logs / forms (same as the reference app).
-- Own Postgres (results archive, comments, schedules, audit log) via
-  `pgx` + `goose`, same conventions as `internal/store`.
+- No database (stateless, see Decisions).
 - Cluster auth providers: `gcp` (Workload Identity via
   `golang.org/x/oauth2/google`), `serviceaccount` (in-cluster),
   `kubeconfig` (local dev). TLS verified with the cluster CA (reference
   app had `verify_ssl=False`). Tokens cached until expiry (reference app
   minted N tokens per request).
-- Background work in-process: one-shot schedule runner + results importer
-  as goroutines; multi-replica safe via atomic `UPDATE … WHERE status=…`
-  claims (no CronJobs needed).
+- No background work in Control Center: schedules are TestRuns the
+  operator holds until `notBefore`; any number of replicas.
 - RBAC: viewer < developer < admin from oauth2-proxy email + config lists;
   local-dev override flag refused when `--env=production`.
 
@@ -131,12 +135,20 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 ### 18d — Control Center skeleton
 - `pkg/apiclient`: typed Go client for the kubetest apiserver (direct URL
   or via the K8s service proxy), built together with its first consumer.
-- `cmd/control-center/main.go`, `internal/controlcenter/{server,auth,clusters,store,views,jobs}`.
+- `cmd/control-center/main.go`, `internal/controlcenter/{config,server,auth,clusters,views}`.
 - Cluster registry from config file (YAML list, any number of clusters).
-- Postgres schema + goose migrations; healthz/readyz; Prometheus `/metrics`.
+- No database. healthz; readyz (local only — a down cluster must not take the UI down; cluster health is on the page and in `controlcenter_cluster_up`); Prometheus `/metrics`.
 - RBAC middleware + `requireRole`; CSRF protection on POST forms.
 - Base layout, light/dark theme, English UI.
 - Unit tests (httptest fake apiserver), CI job, lint clean.
+
+### 18d2 — kubetest: state Control Center must not own
+- Run store migration 0003: `comment`, `comment_by`, `comment_at` on runs
+  (deleted with the run) + append-only `audit_log` (actor from
+  `X-Kubetest-User`: run created/aborted/deleted, cleanup).
+- Apiserver: `PUT|DELETE /runs/{id}/comment`, `GET /audit`; apiclient methods.
+- `TestRun.spec.notBefore`: operator keeps the run `queued` until then
+  (one-shot schedules; cancel = delete the TestRun).
 
 ### 18e — Core views
 - Clusters → Tests list (label grouping, tool chip, last phase, gitops lock).
@@ -148,23 +160,20 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 - All phases: queued, running, paused, passed, failed, aborted, error.
 
 ### 18f — Analytics (generic)
-- `run_results` table: cluster, namespace, test, run_uid, run_name, tool,
-  phase, timestamps, duration_ms, config, test_counts, metrics (JSONB),
-  message, soft-delete fields.
-- Legacy import: one-off command reads the reference app's
-  `dashboard_k6_analytics_results` table (if present) and maps k6 fields
-  to the metric vocabulary, critical-path → test_counts;
-  `legacy_source=testkube`.
-- Import on terminal phase + periodic catch-up via `finishedAfter`
-  cursor; soft-deleted rows are never re-imported (unless `--force-deleted`).
+- Computed from kubetest run history (`GET /runs` with `metrics`,
+  `testCounts`, `config`) — no copy in Control Center.
+- Legacy import: one-off kubetest command reads the reference app's
+  `dashboard_k6_analytics_results` table (if present) and writes rows
+  into the kubetest run store (k6 fields → metric vocabulary,
+  critical-path → test_counts, tag `legacy-source=testkube`).
 - One comparison builder for table + Markdown export; columns = metric
   keys present on the selected runs.
 
 ### 18g — Schedules, cleanup, k6 extras
-- One-shot schedules (pending → running → completed|failed|cancelled,
-  stuck-running recovery, atomic claim). Recurring = kubetest
+- One-shot schedules = TestRun with `spec.notBefore` (18d2); list =
+  queued runs with a future notBefore. Recurring = kubetest
   `Test.spec.schedule` (editable only for `managed-by=ui`).
-- Cleanup policy → `DELETE /runs/{uid}`; audit log + no-bound guard kept.
+- Cleanup policy → `DELETE /runs/{uid}` (audited by kubetest); no-bound guard kept.
 - k6 live dashboard reverse proxy (`httputil.ReverseProxy` over the K8s
   pod proxy), only for `tool=k6`; includes the xk6-dashboard#258 shim.
 - Grafana link only when configured and tool=k6; compiler injects

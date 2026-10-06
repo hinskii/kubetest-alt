@@ -1,0 +1,22 @@
+{{define "layout"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{if .Title}}{{.Title}} · {{end}}Kubetest Control Center</title>
+  <script src="/static/theme.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/">Kubetest Control Center</a>
+    <div class="topbar-right">
+      {{with .User}}{{if .Email}}<span class="user" title="Role: {{.Role}}">{{.Email}} <span class="chip">{{.Role}}</span></span>{{else}}<span class="user muted">anonymous <span class="chip">{{.Role}}</span></span>{{end}}{{end}}
+      <button class="theme-toggle" type="button" id="theme-toggle" aria-label="Toggle dark mode">◐</button>
+    </div>
+  </header>
+  <main class="page">
+    {{template "content" .}}
+  </main>
+</body>
+</html>{{end}}

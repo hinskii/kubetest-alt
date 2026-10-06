@@ -1,0 +1,19 @@
+{{define "content"}}
+<h1>Clusters</h1>
+<p class="muted">Pick a cluster to see its tests and runs.</p>
+<div class="cards">
+  {{range .Data.Clusters}}
+  <a class="card" href="/clusters/{{.Name}}">
+    <div class="card-title">{{.DisplayName}}</div>
+    {{if .Err}}
+      <div class="status status-error" title="{{.Err}}">unreachable</div>
+      <div class="card-detail">{{.Err}}</div>
+    {{else}}
+      <div class="status status-passed">connected</div>
+    {{end}}
+  </a>
+  {{else}}
+  <p>No clusters configured.</p>
+  {{end}}
+</div>
+{{end}}
