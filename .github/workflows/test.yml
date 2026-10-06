@@ -24,9 +24,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Running Tests
+        # test-coverage runs `make test`, then enforces the per-package
+        # COVERAGE_PKGS floors (unenforced in CI until now).
         run: |
           go mod tidy
-          make test
+          make test-coverage
 
       - name: Build
         run: make build
