@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
@@ -41,15 +42,15 @@ func TestStorageResultReader_HappyPath(t *testing.T) {
 		Metrics:    map[string]float64{"p95_ms": 123.4, "rps": 5.6},
 		TestCounts: &executor.TestCounts{Total: 10, Passed: 9, Failed: 1},
 		Artifacts: []executor.ArtifactRef{
-			{Path: "results/junit.xml", Key: "run-42/results/junit.xml", SizeBytes: 512},
+			{Path: "results/junit.xml", Key: readerKeys("run-42").Artifact("results/junit.xml"), SizeBytes: 512},
 		},
 	}
 	b, _ := json.Marshal(er)
-	require.NoError(t, fake.Put(context.Background(), testReaderBucket, "run-42/result.json",
+	require.NoError(t, fake.Put(context.Background(), testReaderBucket, readerKeys("run-42").Result(),
 		strings.NewReader(string(b)), int64(len(b)), "application/json"))
 
 	r := NewStorageResultReader(fake, testReaderBucket)
-	got, err := r.Read(context.Background(), "run-42")
+	got, err := r.Read(context.Background(), readerRun("run-42"))
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
@@ -58,14 +59,14 @@ func TestStorageResultReader_HappyPath(t *testing.T) {
 	require.NotNil(t, got.TestCounts)
 	assert.Equal(t, 10, got.TestCounts.Total)
 	assert.Len(t, got.Artifacts, 1)
-	assert.Equal(t, "run-42/results/junit.xml", got.Artifacts[0].Key)
+	assert.Equal(t, readerKeys("run-42").Artifact("results/junit.xml"), got.Artifacts[0].Key)
 }
 
 // TestStorageResultReader_MissingReturnsErrResultNotFound: crash/OOM path.
 // Reconciler falls back to Pod terminated-state analysis (§15.2).
 func TestStorageResultReader_MissingReturnsErrResultNotFound(t *testing.T) {
 	r := NewStorageResultReader(storage.NewFake(), testReaderBucket)
-	_, err := r.Read(context.Background(), "no-such-run")
+	_, err := r.Read(context.Background(), readerRun("no-such-run"))
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, ErrResultNotFound))
 }
@@ -77,7 +78,7 @@ func TestStorageResultReader_TransientErrorBubbles(t *testing.T) {
 	fake.GetErrors = []error{errors.New("network hiccup")}
 
 	r := NewStorageResultReader(fake, testReaderBucket)
-	_, err := r.Read(context.Background(), "run-tx")
+	_, err := r.Read(context.Background(), readerRun("run-tx"))
 	require.Error(t, err)
 	assert.False(t, errors.Is(err, ErrResultNotFound), "transient error must NOT collapse into ErrResultNotFound")
 	assert.Contains(t, err.Error(), "network hiccup")
@@ -88,10 +89,10 @@ func TestStorageResultReader_TransientErrorBubbles(t *testing.T) {
 // write proper JSON, but that's a step-08 problem, not the reader's).
 func TestStorageResultReader_MalformedJSONFails(t *testing.T) {
 	fake := storage.NewFake()
-	require.NoError(t, fake.Put(context.Background(), testReaderBucket, "run-bad/result.json",
+	require.NoError(t, fake.Put(context.Background(), testReaderBucket, readerKeys("run-bad").Result(),
 		strings.NewReader("{not-json"), 9, "application/json"))
 	r := NewStorageResultReader(fake, testReaderBucket)
-	_, err := r.Read(context.Background(), "run-bad")
+	_, err := r.Read(context.Background(), readerRun("run-bad"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "parse")
 }
@@ -99,12 +100,38 @@ func TestStorageResultReader_MalformedJSONFails(t *testing.T) {
 func TestStorageResultReader_GuardRails(t *testing.T) {
 	t.Run("nil downloader", func(t *testing.T) {
 		r := &StorageResultReader{Bucket: testReaderBucket}
-		_, err := r.Read(context.Background(), "r")
+		_, err := r.Read(context.Background(), readerRun("r"))
 		require.Error(t, err)
 	})
 	t.Run("empty bucket", func(t *testing.T) {
 		r := &StorageResultReader{Downloader: storage.NewFake()}
-		_, err := r.Read(context.Background(), "r")
+		_, err := r.Read(context.Background(), readerRun("r"))
 		require.Error(t, err)
 	})
+}
+
+// readerRun builds a TestRun whose UID is derived from name, so tests can
+// plant objects at the exact keys the reader will look up.
+func readerRun(name string) *testsv1alpha1.TestRun {
+	run := &testsv1alpha1.TestRun{}
+	run.Namespace = "ns"
+	run.Name = name
+	run.UID = types.UID("uid-" + name)
+	return run
+}
+
+func readerKeys(name string) storage.RunKeys {
+	run := readerRun(name)
+	return storage.ForRun(run.Namespace, string(run.UID))
+}
+
+// A run without a UID has no safe key: the reader must refuse instead of
+// falling back to a name-only path another run could own.
+func TestStorageResultReader_RunWithoutUID(t *testing.T) {
+	r := NewStorageResultReader(storage.NewFake(), testReaderBucket)
+	run := readerRun("no-uid")
+	run.UID = ""
+	_, err := r.Read(context.Background(), run)
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrResultNotFound)
 }

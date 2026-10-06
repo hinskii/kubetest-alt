@@ -50,12 +50,13 @@ func OpenAPISpec() map[string]any {
 		},
 		"paths": map[string]any{
 			"/tests": map[string]any{
-				"get": routeOp("List Tests in the configured namespace.",
+				"get": routeOp("List Tests in ?namespace= (all namespaces when omitted on a cluster-wide server).",
 					nil, jsonArrayOf("#/components/schemas/Test"), errorResp()),
 				"post": routeOp(
 					"Create a Test. The server sets app.kubernetes.io/managed-by=ui; "+
 						"payloads spoofing any other value are rejected 400.",
 					jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()),
+				"parameters": []any{namespaceParam()},
 			},
 			"/tests/{name}": map[string]any{
 				"get":    routeOp("Get a Test by name.", nil, jsonRef("#/components/schemas/Test"), errorResp()),
@@ -63,6 +64,7 @@ func OpenAPISpec() map[string]any {
 				"delete": routeOp("Delete a Test. Blocked 409 for managed-by!=ui (§7).", nil, nil, errorResp()),
 				"parameters": []any{
 					pathParam("name", "Test name."),
+					namespaceParam(),
 				},
 			},
 			"/runs": map[string]any{
@@ -76,12 +78,13 @@ func OpenAPISpec() map[string]any {
 					"Merged list of active (cluster) and archived (store) runs, "+
 						"deduped by UID, sorted by startedAt DESC.",
 					nil, jsonArrayOf("#/components/schemas/RunEnvelope"), errorResp()),
+				"parameters": []any{namespaceParam()},
 			},
 			"/runs/{id}": map[string]any{
 				"get": routeOp(
 					"Get a single run by CR name (active) or UID (archived).",
 					nil, jsonRef("#/components/schemas/RunEnvelope"), errorResp()),
-				"parameters": []any{pathParam("id", "TestRun name (cluster) or UID (archive).")},
+				"parameters": []any{pathParam("id", "TestRun name (cluster) or UID (archive)."), namespaceParam()},
 			},
 			"/runs/{id}/logs": map[string]any{
 				"get": map[string]any{
@@ -90,10 +93,12 @@ func OpenAPISpec() map[string]any {
 						"close. Binary WS frames = raw log bytes.",
 					"responses": map[string]any{
 						"101": map[string]any{"description": "Switching Protocols (WebSocket)."},
+						"400": map[string]any{"description": "Namespace missing or outside the server's scope."},
+						"404": map[string]any{"description": "Run not found in the cluster or the archive."},
 						"503": map[string]any{"description": "Log storage not configured."},
 					},
 				},
-				"parameters": []any{pathParam("id", "TestRun name or UID.")},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
 			"/runs/{id}/artifacts/{path}": map[string]any{
 				"get": map[string]any{
@@ -108,12 +113,14 @@ func OpenAPISpec() map[string]any {
 							},
 						}),
 						"400": errorSchema(),
+						"404": errorSchema(),
 						"503": errorSchema(),
 					},
 				},
 				"parameters": []any{
 					pathParam("id", "TestRun name or UID."),
 					pathParam("path", "Relative artifact path (e.g. results/junit.xml)."),
+					namespaceParam(),
 				},
 			},
 			"/healthz": map[string]any{
@@ -248,6 +255,21 @@ func pathParam(name, description string) map[string]any {
 		"required":    true,
 		"description": description,
 		"schema":      map[string]any{"type": "string"},
+	}
+}
+
+// namespaceParam documents ?namespace=. Required for single-object routes
+// on a cluster-wide server; on a scoped server it may be omitted and must
+// equal the server's namespace when given.
+func namespaceParam() map[string]any {
+	return map[string]any{
+		"name":     QueryNamespace,
+		"in":       "query",
+		"required": false,
+		"description": "Target namespace. Required for single-object requests when the " +
+			"server runs cluster-wide; optional (and must match) when it is scoped. " +
+			"On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+		"schema": map[string]any{"type": "string"},
 	}
 }
 

@@ -24,13 +24,13 @@ limitations under the License.
 //
 // Assumptions the outer script (test/e2e/run.sh) sets up before this
 // binary runs:
-//   1. `kind create cluster` — a fresh cluster, KUBECONFIG points at it.
-//   2. Docker images built + `kind load` — operator, apiserver,
-//      content-fetcher, and the three tool-bundle images live inside
-//      the kind node so ImagePullPolicy=Never resolves.
-//   3. `helm install kt charts/kubetest-alt/ -n kubetest-alt --create-namespace`
-//      — operator + apiserver deployments running and Ready.
-//   4. `kubectl -n kubetest-alt rollout status` — same-namespace ready.
+//  1. `kind create cluster` — a fresh cluster, KUBECONFIG points at it.
+//  2. Docker images built + `kind load` — operator, apiserver,
+//     content-fetcher, and the three tool-bundle images live inside
+//     the kind node so ImagePullPolicy=Never resolves.
+//  3. `helm install kt charts/kubetest-alt/ -n kubetest-alt --create-namespace`
+//     — operator + apiserver deployments running and Ready.
+//  4. `kubectl -n kubetest-alt rollout status` — same-namespace ready.
 //
 // Everything from here on happens with a plain client-go / ctrl-runtime
 // client. Per-scenario timings recorded via t.Log so the report can
@@ -51,6 +51,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -206,8 +207,11 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 					// expand `{{ config.script }}` under /data/repo/ — inline
 					// content.files[] paths must land there too or the tool's
 					// argv points at a non-existent file.
-					Path:    "repo/script.js",
-					Content: "export default function() { /* pass */ }",
+					Path: "repo/script.js",
+					// sleep keeps the pod Running long enough for the
+					// operator to observe it and start the log tailer —
+					// the log assertion below needs streamed chunks.
+					Content: "import { sleep } from 'k6';\nexport default function() { sleep(5); }",
 				}},
 			},
 		},
@@ -229,6 +233,40 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 	final := waitForPhase(t, ctx, c, run.Name, testsv1alpha1.PhasePassed, 3*time.Minute)
 	assert.Equal(t, testsv1alpha1.PhasePassed, final.Status.Phase)
 	t.Logf("k6 run finished — durationMs=%d", final.Status.DurationMs)
+
+	// The operator's tailer wrote this run's log chunks; the apiserver must
+	// read them back from the same bucket + keys. This is the end-to-end
+	// guard for the operator/apiserver bucket mismatch (fixes.md #3) and
+	// for cluster-wide ?namespace= lookups (fixes.md #2).
+	if apiURL := os.Getenv("APISERVER_URL"); apiURL != "" {
+		logs := readRunLogs(t, ctx, apiURL, workloadNS, run.Name)
+		assert.Contains(t, logs, "script.js",
+			"k6 output streamed by the operator must be readable through the apiserver")
+	}
+}
+
+// readRunLogs reads a finished run's whole log over the apiserver's
+// WebSocket endpoint (the server closes the stream after the last chunk).
+func readRunLogs(t *testing.T, ctx context.Context, apiURL, ns, run string) string {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(strings.TrimRight(apiURL, "/"), "http") +
+		"/runs/" + run + "/logs?namespace=" + ns
+	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	conn, resp, err := websocket.Dial(readCtx, wsURL, nil)
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+	require.NoError(t, err, "dial %s", wsURL)
+	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
+	var b strings.Builder
+	for {
+		_, data, err := conn.Read(readCtx)
+		if err != nil {
+			return b.String()
+		}
+		b.Write(data)
+	}
 }
 
 // scenarioJMeterFailing: the flagship §15.2 assertion — JMeter exits 0
@@ -348,8 +386,8 @@ func scenarioGitOpsGuard(t *testing.T, ctx context.Context, c client.Client) {
 			Name:      "e2e-gitops",
 			Namespace: workloadNS,
 			Labels: map[string]string{
-				"kubetest.io/tool":              "k6",
-				"app.kubernetes.io/managed-by":  "gitops",
+				"kubetest.io/tool":             "k6",
+				"app.kubernetes.io/managed-by": "gitops",
 			},
 		},
 		Spec: testsv1alpha1.TestSpec{
@@ -363,7 +401,8 @@ func scenarioGitOpsGuard(t *testing.T, ctx context.Context, c client.Client) {
 	require.NoError(t, c.Create(ctx, test))
 
 	// PATCH via the apiserver — must 409.
-	url := fmt.Sprintf("%s/tests/%s", strings.TrimRight(apiURL, "/"), test.Name)
+	// The e2e apiserver runs cluster-wide (chart default) — name the namespace.
+	url := fmt.Sprintf("%s/tests/%s?namespace=%s", strings.TrimRight(apiURL, "/"), test.Name, workloadNS)
 	body := strings.NewReader(`{"spec":{"container":{"args":["run","edited.js"]}}}`)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, body)
 	require.NoError(t, err)
@@ -533,10 +572,10 @@ func scenarioCompositeSkipOnFail(t *testing.T, ctx context.Context, c client.Cli
 // metricsScrape hits /metrics on the operator's manager (via port-
 // forward, URL passed by run.sh as METRICS_OPERATOR_URL) and on the
 // apiserver's /metrics endpoint (METRICS_APISERVER_URL). Asserts:
-//   * both endpoints return 200 with prometheus text format
-//   * runs_total{tool="k6",phase="passed"} counter is >= 1 (proves
+//   - both endpoints return 200 with prometheus text format
+//   - runs_total{tool="k6",phase="passed"} counter is >= 1 (proves
 //     the metrics wiring from step 14 lit up in real cluster context)
-//   * webhook_deliveries_total series exists (may be zero if no
+//   - webhook_deliveries_total series exists (may be zero if no
 //     subscribers — step-14-plus deliverability is out of scope here)
 func metricsScrape(t *testing.T, ctx context.Context) {
 	opURL := os.Getenv("METRICS_OPERATOR_URL")

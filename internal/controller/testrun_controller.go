@@ -49,6 +49,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // TestRunReconciler owns the TestRun lifecycle: setup → snapshot + concurrency
@@ -159,13 +160,14 @@ type TestRunReconciler struct {
 // as an interface so envtest can inject a recorder — a real registry needs
 // a k8s LogSource that envtest doesn't provide.
 type LogRegistry interface {
-	// EnsureTailer starts a tailer for runID + pod, or no-ops if one already
-	// exists. Called on pod Running (may fire multiple times).
-	EnsureTailer(ctx context.Context, runID, namespace, podName string) error
+	// EnsureTailer starts a tailer for the run's pod, or no-ops if one
+	// already exists. id is tailerID(run); keys locates the run's log
+	// chunks. Called on pod Running (may fire multiple times).
+	EnsureTailer(ctx context.Context, id string, keys storage.RunKeys, namespace, podName string) error
 
-	// StopTailer stops and removes the tailer for runID. No-op if absent.
+	// StopTailer stops and removes the tailer for id. No-op if absent.
 	// Called on terminal transitions and finalize.
-	StopTailer(runID string)
+	StopTailer(id string)
 }
 
 // RunStorePersister is the reconciler-facing surface of store.Postgres.
@@ -577,7 +579,7 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 
 	switch conclusion {
 	case JobSucceeded, JobFailedConclusion:
-		result, err := r.Results.Read(ctx, run.Name)
+		result, err := r.Results.Read(ctx, run)
 		if err == nil && result != nil {
 			// Fold scraper output (metrics, JUnit counts, artifact refs)
 			// into TestRun.Status before the terminal transition writes it.
@@ -600,7 +602,8 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 			// block the reconcile — losing live logs is preferable to
 			// stalling the run's lifecycle (§15.4 durability trade-off).
 			if r.LogRegistry != nil && pod != nil {
-				if err := r.LogRegistry.EnsureTailer(ctx, run.Name, pod.Namespace, pod.Name); err != nil {
+				if err := r.LogRegistry.EnsureTailer(ctx, tailerID(run),
+					storage.ForRun(run.Namespace, string(run.UID)), pod.Namespace, pod.Name); err != nil {
 					log.FromContext(ctx).Error(err, "EnsureTailer failed",
 						"run", run.Name, "pod", pod.Name)
 				}
@@ -652,7 +655,7 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 	// (run, phase) via dispatchedRuns.
 	r.dispatchWebhooks(ctx, run)
 	if r.LogRegistry != nil {
-		r.LogRegistry.StopTailer(run.Name)
+		r.LogRegistry.StopTailer(tailerID(run))
 	}
 	if job != nil {
 		if err := deleteJobBackground(ctx, r.Client, job); err != nil {
@@ -885,7 +888,7 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 		return ctrl.Result{}, nil
 	}
 	if r.LogRegistry != nil {
-		r.LogRegistry.StopTailer(run.Name)
+		r.LogRegistry.StopTailer(tailerID(run))
 	}
 	// Drop the persisted-set entry so a future TestRun with the same name
 	// starts fresh, and the map stays bounded as runs are deleted. Reconcile's
@@ -905,4 +908,10 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// tailerID keys the log registry. Namespace-qualified so same-named runs in
+// different namespaces never share (or stop) each other's tailer.
+func tailerID(run *testsv1alpha1.TestRun) string {
+	return run.Namespace + "/" + run.Name
 }

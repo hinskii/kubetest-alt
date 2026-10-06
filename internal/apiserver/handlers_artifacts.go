@@ -26,8 +26,8 @@ import (
 // getRunArtifact returns a presigned URL the browser follows directly to
 // MinIO. Never streams bytes through the API server.
 //
-// The path segment ({path...} in the router) is joined onto <runID>/ to
-// form the object key. Path traversal is rejected: any segment starting
+// The path segment ({path...} in the router) becomes
+// storage.RunKeys.Artifact(path) for the resolved run (namespace + UID). Path traversal is rejected: any segment starting
 // with "..", an absolute "/", or an empty segment yields 400 (per
 // §step-10 test requirement).
 func (s *Server) getRunArtifact(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +38,7 @@ func (s *Server) getRunArtifact(w http.ResponseWriter, r *http.Request) {
 			"run id and artifact path are required")
 		return
 	}
-	if s.Presigner == nil || s.ArtifactsBucket == "" {
+	if s.Presigner == nil || s.Bucket == "" {
 		writeError(w, http.StatusServiceUnavailable, ReasonServiceUnavail,
 			"artifact storage is not configured")
 		return
@@ -47,9 +47,19 @@ func (s *Server) getRunArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, err.Error())
 		return
 	}
-	// Wrapper scraper (step 07) writes to <bucket>/<runID>/<relPath>.
-	key := runID + "/" + rawPath
-	url, err := s.Presigner.PresignGetURL(r.Context(), s.ArtifactsBucket, key, s.PresignedURLExpiry)
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	ref, err := s.findRun(r.Context(), ns, runID)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	// Wrapper scraper writes to storage.RunKeys.Artifact(relPath).
+	key := ref.keys().Artifact(rawPath)
+	url, err := s.Presigner.PresignGetURL(r.Context(), s.Bucket, key, s.PresignedURLExpiry)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ReasonInternal,
 			fmt.Sprintf("presign: %v", err))

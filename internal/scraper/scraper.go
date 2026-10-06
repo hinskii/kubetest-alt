@@ -80,8 +80,9 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 	if s.Bucket == "" {
 		return executor.ScrapeResult{}, errors.New("scraper: empty Bucket")
 	}
-	if spec.RunID == "" {
-		return executor.ScrapeResult{}, errors.New("scraper: empty RunID")
+	keys, err := storage.ParseRunKeys(spec.StoragePrefix)
+	if err != nil {
+		return executor.ScrapeResult{}, fmt.Errorf("scraper: %w", err)
 	}
 
 	result := executor.ScrapeResult{}
@@ -106,7 +107,7 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 			result.ScrapeError = appendMsg(result.ScrapeError, fmt.Sprintf("scrape cancelled: %v", ctx.Err()))
 			break
 		}
-		ref, err := s.uploadOne(ctx, spec.RunID, m)
+		ref, err := s.uploadOne(ctx, keys, m)
 		if err != nil {
 			uploadErrs = append(uploadErrs, fmt.Sprintf("%s: %v", m.RelPath, err))
 			continue
@@ -137,7 +138,7 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 // in ScrapeError without changing the run's Phase.
 //
 // ctx cancellation short-circuits the retry loop (SIGTERM should exit fast).
-func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (executor.ArtifactRef, error) {
+func (s *Scraper) uploadOne(ctx context.Context, keys storage.RunKeys, m GlobMatch) (executor.ArtifactRef, error) {
 	// #nosec G304 -- m.AbsPath came from ExpandGlobs which pinned matches under workingDir.
 	f, err := os.Open(m.AbsPath)
 	if err != nil {
@@ -154,7 +155,7 @@ func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (exe
 	// Sniff content-type once before any upload attempt (idempotent).
 	ct := detectContentType(m.RelPath, f)
 
-	key := runID + "/" + m.RelPath
+	key := keys.Artifact(m.RelPath)
 	var lastErr error
 	backoff := UploadBackoffBase
 	for attempt := 1; attempt <= MaxUploadAttempts; attempt++ {
@@ -188,15 +189,18 @@ func (s *Scraper) uploadOne(ctx context.Context, runID string, m GlobMatch) (exe
 }
 
 // UploadResult writes the wrapper's ExecutionResult as JSON to
-// <bucket>/<runID>/result.json. Called by the wrapper AFTER Scrape merges
+// <storagePrefix>result.json. Called by the wrapper AFTER Scrape merges
 // counts and refs into the result, so the object stored is what the operator
 // will read back.
-func (s *Scraper) UploadResult(ctx context.Context, runID string, payload []byte) error {
+func (s *Scraper) UploadResult(ctx context.Context, storagePrefix string, payload []byte) error {
 	if s.Uploader == nil {
 		return errors.New("scraper: nil Uploader")
 	}
-	key := runID + "/" + executor.ResultFileName
-	return s.Uploader.Put(ctx, s.Bucket, key, bytes.NewReader(payload), int64(len(payload)), "application/json")
+	keys, err := storage.ParseRunKeys(storagePrefix)
+	if err != nil {
+		return fmt.Errorf("scraper: %w", err)
+	}
+	return s.Uploader.Put(ctx, s.Bucket, keys.Result(), bytes.NewReader(payload), int64(len(payload)), "application/json")
 }
 
 // detectContentType prefers extension-based inference (stable, cheap) and

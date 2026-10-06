@@ -24,11 +24,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/hinskii/kubetest-alt/internal/logstream"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
-// chunkStream reads log chunks under logstream.LogPrefix(runID) in seq
+// chunkStream reads log chunks under Prefix (storage.RunKeys.Logs()) in seq
 // order and yields their bytes on out. If keepPolling is true, it re-lists
 // the prefix every pollInterval and streams any new chunks until either
 // the deadline expires (no new chunks appearing = run considered idle) or
@@ -47,7 +46,8 @@ type chunkStream struct {
 	Downloader storage.Downloader
 	Lister     storage.Lister
 	Bucket     string
-	RunID      string
+	// Prefix is the run's log prefix — storage.RunKeys.Logs().
+	Prefix string
 
 	// KeepPolling controls the "live tail" behaviour. False means "read
 	// what's there now, then EOF" (archived-run download). True means
@@ -91,7 +91,7 @@ func (c *chunkStream) stream(ctx context.Context, emit func([]byte) error) error
 		return errors.New("chunkStream: missing Downloader or Lister")
 	}
 
-	prefix := logstream.LogPrefix(c.RunID)
+	prefix := c.Prefix
 	sent := map[string]bool{} // keys we've already streamed
 	lastProgressAt := time.Now()
 	terminalSeen := false // set once by IsTerminal; triggers ONE final round

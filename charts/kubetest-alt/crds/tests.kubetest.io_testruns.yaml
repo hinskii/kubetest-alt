@@ -3235,7 +3235,9 @@ spec:
                     contentType:
                       type: string
                     key:
-                      description: Key is the object-store key ("<runID>/<Path>").
+                      description: |-
+                        Key is the object-store key
+                        ("runs/<namespace>/<runUID>/artifacts/<Path>").
                       type: string
                     path:
                       description: Path is the file path relative to the wrapper's

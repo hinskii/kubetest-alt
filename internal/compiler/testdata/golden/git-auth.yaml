@@ -119,6 +119,7 @@ data:
   request.json: |-
     {
       "runId": "sample-run",
+      "storagePrefix": "runs/kubetest-samples/00000000-0000-0000-0000-0000cafe0001/",
       "testRef": "sample",
       "dataDir": "/data",
       "args": [

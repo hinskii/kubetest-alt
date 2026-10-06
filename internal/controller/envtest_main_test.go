@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -47,6 +48,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // Shared envtest state — all envtest tests in this package plug into the
@@ -103,22 +105,23 @@ type RecordingLogRegistry struct {
 // "stop".
 type LogRegistryCall struct {
 	Kind      string // "ensure" | "stop"
-	RunID     string
+	ID        string // tailerID: "<namespace>/<name>"
+	Keys      storage.RunKeys
 	Namespace string
 	PodName   string
 }
 
-func (r *RecordingLogRegistry) EnsureTailer(_ context.Context, runID, ns, pod string) error {
+func (r *RecordingLogRegistry) EnsureTailer(_ context.Context, id string, keys storage.RunKeys, ns, pod string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, LogRegistryCall{Kind: "ensure", RunID: runID, Namespace: ns, PodName: pod})
+	r.calls = append(r.calls, LogRegistryCall{Kind: "ensure", ID: id, Keys: keys, Namespace: ns, PodName: pod})
 	return nil
 }
 
-func (r *RecordingLogRegistry) StopTailer(runID string) {
+func (r *RecordingLogRegistry) StopTailer(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, LogRegistryCall{Kind: "stop", RunID: runID})
+	r.calls = append(r.calls, LogRegistryCall{Kind: "stop", ID: id})
 }
 
 func (r *RecordingLogRegistry) Snapshot() []LogRegistryCall {
@@ -135,13 +138,13 @@ func (r *RecordingLogRegistry) Reset() {
 	r.calls = nil
 }
 
-// CallsForRun returns calls filtered to a specific runID.
-func (r *RecordingLogRegistry) CallsForRun(runID string) []LogRegistryCall {
+// CallsForRun returns calls for the run named runName (in any namespace).
+func (r *RecordingLogRegistry) CallsForRun(runName string) []LogRegistryCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	var out []LogRegistryCall
 	for _, c := range r.calls {
-		if c.RunID == runID {
+		if strings.HasSuffix(c.ID, "/"+runName) {
 			out = append(out, c)
 		}
 	}
@@ -254,7 +257,8 @@ func (f *FakeResultReader) Reset() {
 	f.errs = map[string]error{}
 }
 
-func (f *FakeResultReader) Read(_ context.Context, runID string) (*RunResult, error) {
+func (f *FakeResultReader) Read(_ context.Context, run *testsv1alpha1.TestRun) (*RunResult, error) {
+	runID := run.Name
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err, ok := f.errs[runID]; ok {

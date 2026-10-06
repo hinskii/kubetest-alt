@@ -549,7 +549,7 @@ for the curated template list.
 - **Init container** (`content-fetcher`): clones git (sparse), unpacks tarballs, writes inline files → shared `emptyDir` at `/data`. Analog of `testkube-executor-init`. **[SRC]**
 - **Main container**: the tool wrapper. Shares `/data`.
 - **Artifact scraping**: prefer a **post-step scrape in the wrapper** (glob → MinIO) for single-pod runs. For distributed runs (JMeter slaves) needing shared storage, use a `ReadWriteMany` PVC (NFS) — exactly Testkube's distributed-JMeter pattern. **[DOC]** Provide `--artifact-sidecar` mode (scraper as sidecar container) for tools that write continuously.
-- **Log streaming**: operator watches pod, tails logs via k8s client **from pod start** and flushes to MinIO continuously (kubelet log rotation — see §15), fans out to (a) websocket subscribers (live GUI) and (b) MinIO `kubetest-logs/<runID>/`. Keep a small ring-buffer in the API server for reconnects. (Testkube uses websockets for live UI logs + MinIO bucket `testkube-logs`; a NATS log-server exists but we don't need NATS — direct k8s tail + websocket is simpler.) **[SRC for buckets; INFER for exact TK protocol]**
+- **Log streaming**: operator watches pod, tails logs via k8s client **from pod start** and flushes to MinIO continuously (kubelet log rotation — see §15), fans out to (a) websocket subscribers (live GUI) and (b) MinIO `runs/<namespace>/<runUID>/logs/` (one bucket for logs, artifacts and `result.json`; layout owned by `pkg/storage.RunKeys`). Keep a small ring-buffer in the API server for reconnects. (Testkube uses websockets for live UI logs + MinIO bucket `testkube-logs`; a NATS log-server exists but we don't need NATS — direct k8s tail + websocket is simpler.) **[SRC for buckets; INFER for exact TK protocol]**
 
 ---
 

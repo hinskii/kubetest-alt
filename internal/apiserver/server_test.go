@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -44,8 +45,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
-	"github.com/hinskii/kubetest-alt/internal/logstream"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // TestMain runs goleak after all tests. Any WS handler that leaves a
@@ -77,10 +78,9 @@ func mkServer(t *testing.T, seed ...client.Object) (*Server, http.Handler) {
 	sch := newTestScheme(t)
 	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(seed...).Build()
 	s := &Server{
-		K8sClient:       c,
-		Namespace:       "default",
-		LogsBucket:      "kubetest-logs",
-		ArtifactsBucket: "kubetest-artifacts",
+		K8sClient: c,
+		Namespace: "default",
+		Bucket:    testBucket,
 	}
 	return s, s.Handler()
 }
@@ -413,7 +413,7 @@ func TestRuns_GetByNameThenUID(t *testing.T) {
 	s, _ := mkServer(t, cr)
 	finishedAt := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	s.Store = newFakeRunStore(store.Row{
-		UID:        "archive-only-uid",
+		UID:        testUID("archived"),
 		Name:       "archived",
 		Namespace:  "default",
 		Phase:      "passed",
@@ -428,15 +428,20 @@ func TestRuns_GetByNameThenUID(t *testing.T) {
 	assert.Equal(t, "cluster", body["origin"])
 
 	// by store UID
-	rec, body = doRequest(t, h, "GET", "/runs/archive-only-uid", nil)
+	rec, body = doRequest(t, h, "GET", "/runs/"+testUID("archived"), nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "passed", body["phase"])
 	assert.Equal(t, "archive", body["origin"])
 
-	// neither → 404
+	// neither → 404 (a non-UUID id must not reach the uuid-typed store
+	// column, which used to surface as a 500)
 	rec, body = doRequest(t, h, "GET", "/runs/missing", nil)
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, ReasonNotFound, body["reason"])
+
+	// unknown but well-formed UUID → 404 too
+	rec, _ = doRequest(t, h, "GET", "/runs/"+testUID("never-existed"), nil)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
 }
 
 // -----------------------------------------------------------------------------
@@ -465,23 +470,28 @@ func TestLogs_ArchivedRun_StreamsAllChunks(t *testing.T) {
 	uploader := storageFake()
 	// Seed chunks directly via the fake's Put — that's the same shape the
 	// operator's logstream would produce.
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("archived-run", 0), "AAA")
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("archived-run", 1), "BBB")
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("archived-run", 2), "CCC")
+	seedChunk(t, uploader, runKeys("archived-run").LogChunk(0), "AAA")
+	seedChunk(t, uploader, runKeys("archived-run").LogChunk(1), "BBB")
+	seedChunk(t, uploader, runKeys("archived-run").LogChunk(2), "CCC")
 
 	s := &Server{
-		K8sClient:       c,
-		Namespace:       "default",
-		Downloader:      uploader,
-		Lister:          uploader,
-		LogsBucket:      "kubetest-logs",
+		K8sClient:  c,
+		Namespace:  "default",
+		Downloader: uploader,
+		Lister:     uploader,
+		Bucket:     testBucket,
+		Store: newFakeRunStore(store.Row{
+			UID: testUID("archived-run"), Name: "archived-run", Namespace: "default",
+			Phase: "passed", FinishedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		}),
 		LogPollInterval: 10 * time.Millisecond,
 		LogPollDeadline: 100 * time.Millisecond,
 	}
 	srv := httptest.NewServer(s.Handler())
 	defer srv.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/runs/archived-run/logs"
+	// Archived runs are addressed by UID (the CR is gone).
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/runs/" + testUID("archived-run") + "/logs"
 	conn, _, err := websocket.Dial(t.Context(), wsURL, nil)
 	require.NoError(t, err)
 	defer func() { _ = conn.Close(websocket.StatusNormalClosure, "") }()
@@ -502,19 +512,19 @@ func TestLogs_LiveRun_StreamsNewChunksAsTheyAppear(t *testing.T) {
 	sch := newTestScheme(t)
 	// CR present, non-terminal phase → live mode (KeepPolling=true).
 	cr := &testsv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{Name: "live-run", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "live-run", Namespace: "default", UID: types.UID(testUID("live-run"))},
 		Status:     testsv1alpha1.TestRunStatus{Phase: "running"},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(cr).Build()
 	uploader := storageFake()
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("live-run", 0), "one")
+	seedChunk(t, uploader, runKeys("live-run").LogChunk(0), "one")
 
 	s := &Server{
 		K8sClient:       c,
 		Namespace:       "default",
 		Downloader:      uploader,
 		Lister:          uploader,
-		LogsBucket:      "kubetest-logs",
+		Bucket:          testBucket,
 		LogPollInterval: 20 * time.Millisecond,
 		LogPollDeadline: 200 * time.Millisecond, // short so the test exits fast
 	}
@@ -533,7 +543,7 @@ func TestLogs_LiveRun_StreamsNewChunksAsTheyAppear(t *testing.T) {
 
 	// Simulate a new chunk landing in MinIO — the handler should pick it
 	// up on the next poll tick.
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("live-run", 1), "two")
+	seedChunk(t, uploader, runKeys("live-run").LogChunk(1), "two")
 
 	_, data, err = conn.Read(t.Context())
 	require.NoError(t, err)
@@ -557,7 +567,7 @@ func TestLogs_LiveRun_StreamsNewChunksAsTheyAppear(t *testing.T) {
 func TestLogs_LiveToTerminal_StreamsFinalChunksAndCloses(t *testing.T) {
 	sch := newTestScheme(t)
 	cr := &testsv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{Name: "flip-run", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "flip-run", Namespace: "default", UID: types.UID(testUID("flip-run"))},
 		Status:     testsv1alpha1.TestRunStatus{Phase: "running"},
 	}
 	c := fake.NewClientBuilder().
@@ -566,14 +576,14 @@ func TestLogs_LiveToTerminal_StreamsFinalChunksAndCloses(t *testing.T) {
 		WithStatusSubresource(cr).
 		Build()
 	uploader := storageFake()
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("flip-run", 0), "one")
+	seedChunk(t, uploader, runKeys("flip-run").LogChunk(0), "one")
 
 	s := &Server{
 		K8sClient:       c,
 		Namespace:       "default",
 		Downloader:      uploader,
 		Lister:          uploader,
-		LogsBucket:      "kubetest-logs",
+		Bucket:          testBucket,
 		LogPollInterval: 20 * time.Millisecond,
 		// Deliberately LONG so the test proves we close via IsTerminal, not
 		// via the fallback deadline. If IsTerminal didn't work, the test
@@ -596,7 +606,7 @@ func TestLogs_LiveToTerminal_StreamsFinalChunksAndCloses(t *testing.T) {
 	// Simulate the operator's terminal transition — final chunk lands
 	// FIRST (matches the real operator: StopTailer's finalize flushes the
 	// pending buffer before status Update), then CR phase flips.
-	seedChunk(t, uploader, "kubetest-logs", logstream.LogChunkKey("flip-run", 1), "final")
+	seedChunk(t, uploader, runKeys("flip-run").LogChunk(1), "final")
 	patch := cr.DeepCopy()
 	patch.Status.Phase = testsv1alpha1.PhasePassed
 	require.NoError(t, c.Status().Update(t.Context(), patch))
@@ -627,14 +637,14 @@ func TestLogs_ClientDisconnectMidStream_NoLeak(t *testing.T) {
 	// If the handler leaks a goroutine, TestMain's goleak trips.
 	sch := newTestScheme(t)
 	cr := &testsv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{Name: "hangup-run", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "hangup-run", Namespace: "default", UID: types.UID(testUID("hangup-run"))},
 		Status:     testsv1alpha1.TestRunStatus{Phase: "running"},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(cr).Build()
 	uploader := storageFake()
 	for i := range 5 {
-		seedChunk(t, uploader, "kubetest-logs",
-			logstream.LogChunkKey("hangup-run", uint64(i)),
+		seedChunk(t, uploader,
+			runKeys("hangup-run").LogChunk(uint64(i)),
 			strings.Repeat("x", 100))
 	}
 	s := &Server{
@@ -642,7 +652,7 @@ func TestLogs_ClientDisconnectMidStream_NoLeak(t *testing.T) {
 		Namespace:       "default",
 		Downloader:      uploader,
 		Lister:          uploader,
-		LogsBucket:      "kubetest-logs",
+		Bucket:          testBucket,
 		LogPollInterval: 10 * time.Millisecond,
 		LogPollDeadline: 50 * time.Millisecond,
 	}
@@ -670,13 +680,16 @@ func TestLogs_ClientDisconnectMidStream_NoLeak(t *testing.T) {
 
 func TestArtifacts_ReturnsPresignedURL(t *testing.T) {
 	sch := newTestScheme(t)
-	c := fake.NewClientBuilder().WithScheme(sch).Build()
+	cr := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "run-1", Namespace: "default", UID: types.UID(testUID("run-1"))},
+	}
+	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(cr).Build()
 	up := storageFake()
 	s := &Server{
 		K8sClient:          c,
 		Namespace:          "default",
 		Presigner:          up,
-		ArtifactsBucket:    "kubetest-artifacts",
+		Bucket:             testBucket,
 		PresignedURLExpiry: 5 * time.Minute,
 	}
 	h := s.Handler()
@@ -684,7 +697,9 @@ func TestArtifacts_ReturnsPresignedURL(t *testing.T) {
 	rec, body := doRequest(t, h, "GET",
 		"/runs/run-1/artifacts/results/junit.xml", nil)
 	require.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, body["url"], "fake://kubetest-artifacts/run-1/results/junit.xml")
+	// Key comes from namespace + UID — never the run name — and sits in the
+	// artifacts/ subtree so it can't shadow result.json.
+	assert.Contains(t, body["url"], "fake://"+testBucket+"/"+runKeys("run-1").Artifact("results/junit.xml"))
 	assert.Equal(t, float64(300), body["expiresIn"])
 }
 
@@ -700,10 +715,10 @@ func TestArtifacts_PathTraversalRejected(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(sch).Build()
 	up := storageFake()
 	s := &Server{
-		K8sClient:       c,
-		Namespace:       "default",
-		Presigner:       up,
-		ArtifactsBucket: "kubetest-artifacts",
+		K8sClient: c,
+		Namespace: "default",
+		Presigner: up,
+		Bucket:    testBucket,
 	}
 	h := s.Handler()
 
@@ -1059,10 +1074,26 @@ func itoa(n int64) string {
 	return sign + string(buf[i:])
 }
 
-// seedChunk writes body under "kubetest-logs"/key on the fake uploader.
-// The bucket is fixed because every logstream chunk lives there in
-// production — parameterizing didn't add value and tripped unparam.
-func seedChunk(t *testing.T, up *fakeUploaderDownloader, _bucket, key, body string) {
+// seedChunk writes body at key in testBucket — the same single bucket the
+// operator writes to and the Server reads from. (It used to hard-code a
+// separate "kubetest-logs" bucket, which is how the operator/apiserver
+// bucket mismatch in production went unnoticed by these tests.)
+func seedChunk(t *testing.T, up *fakeUploaderDownloader, key, body string) {
 	t.Helper()
-	up.put("kubetest-logs", key, []byte(body))
+	up.put(testBucket, key, []byte(body))
+}
+
+// testBucket is the single bucket every apiserver test reads from.
+const testBucket = "kubetest-artifacts"
+
+// testUID derives a stable, valid UUID from a name so tests can address
+// archived runs by UID and seed objects at the keys the server computes.
+func testUID(name string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name)).String()
+}
+
+// runKeys is where the operator writes objects for the run `name` in the
+// "default" namespace.
+func runKeys(name string) storage.RunKeys {
+	return storage.ForRun("default", testUID(name))
 }

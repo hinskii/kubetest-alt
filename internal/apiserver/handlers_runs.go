@@ -25,7 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -51,9 +50,12 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run.Spec.Source = "ui"
-	if run.Namespace == "" {
-		run.Namespace = s.Namespace
+	ns, err := s.targetNamespace(r, run.Namespace)
+	if err != nil {
+		writeLookupError(w, err)
+		return
 	}
+	run.Namespace = ns
 	if err := s.K8sClient.Create(r.Context(), &run); err != nil {
 		writeAPIError(w, err)
 		return
@@ -70,26 +72,22 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, "run id is required")
 		return
 	}
-	// Try cluster first — an active/recent run lives here with the CR name
-	// as {id}. Store is UID-keyed so we skip it when id looks like a name.
-	var run testsv1alpha1.TestRun
-	err := s.K8sClient.Get(r.Context(),
-		types.NamespacedName{Namespace: s.Namespace, Name: id}, &run)
-	if err == nil {
-		writeJSON(w, http.StatusOK, runEnvelopeFromCR(&run))
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
 		return
 	}
-	// Not in cluster — try store by UID.
-	if s.Store == nil {
-		writeAPIError(w, err)
+	// Cluster first ({id} = CR name), then the store ({id} = run UID).
+	ref, err := s.findRun(r.Context(), ns, id)
+	if err != nil {
+		writeLookupError(w, err)
 		return
 	}
-	row, storeErr := s.Store.Get(r.Context(), id)
-	if storeErr != nil {
-		writeAPIError(w, storeErr) // ErrNotFound maps to 404
+	if ref.CR != nil {
+		writeJSON(w, http.StatusOK, runEnvelopeFromCR(ref.CR))
 		return
 	}
-	writeJSON(w, http.StatusOK, runEnvelopeFromRow(row))
+	writeJSON(w, http.StatusOK, runEnvelopeFromRow(ref.Row))
 }
 
 // listRuns merges cluster actives with store archive. Filters:
@@ -109,14 +107,19 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 	testRef := q.Get("test")
 	phase := q.Get("phase")
 	limit := parseLimitOrDefault(q.Get("limit"))
+	ns, err := s.listNamespace(r)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
 
 	byUID := map[string]runEnvelope{}
 
 	// Cluster side.
 	var live testsv1alpha1.TestRunList
 	listOpts := []client.ListOption{}
-	if s.Namespace != "" {
-		listOpts = append(listOpts, client.InNamespace(s.Namespace))
+	if ns != "" {
+		listOpts = append(listOpts, client.InNamespace(ns))
 	}
 	if err := s.K8sClient.List(r.Context(), &live, listOpts...); err != nil {
 		writeAPIError(w, err)
@@ -136,7 +139,7 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 
 	// Store side.
 	if s.Store != nil {
-		f := store.Filter{TestRef: testRef, Namespace: s.Namespace, Phase: phase}
+		f := store.Filter{TestRef: testRef, Namespace: ns, Phase: phase}
 		rows, err := s.Store.List(r.Context(), f, store.Page{Limit: limit})
 		if err != nil {
 			writeAPIError(w, err)

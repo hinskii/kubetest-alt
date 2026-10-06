@@ -16,15 +16,15 @@ limitations under the License.
 
 // Package logstream tails a pod's stdout, fans it out to subscribers, and
 // flushes chunks to object storage continuously. One Tailer per active run;
-// a Registry owns the map keyed by runID for the controller.
+// a Registry owns the map of active tailers for the controller.
 //
 // # Flush strategy: chunk-objects (not rolling rewrite)
 //
-// Chunks land at:
+// Chunks land at (pkg/storage.RunKeys.LogChunk):
 //
-//	<bucket>/kubetest-logs/<runID>/00000000.log
-//	<bucket>/kubetest-logs/<runID>/00000001.log
-//	<bucket>/kubetest-logs/<runID>/...
+//	<bucket>/runs/<namespace>/<runUID>/logs/00000000.log
+//	<bucket>/runs/<namespace>/<runUID>/logs/00000001.log
+//	<bucket>/runs/<namespace>/<runUID>/logs/...
 //
 // Zero-padded eight-digit suffixes so lexicographic listing reproduces
 // chronological order. We reject the "one growing object rewritten on each
@@ -53,7 +53,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -83,19 +82,12 @@ const (
 	ReasonUnsubscribed = "unsubscribed"
 )
 
-// LogChunkKey returns the object-store key for a given run + chunk sequence.
-// Exported so the API server can construct the same paths without importing
-// package internals. Prefix comes from LogPrefix so restart-wipe and
-// chunk-write always target the same path.
-func LogChunkKey(runID string, seq uint64) string {
-	return fmt.Sprintf("%s%08d.log", LogPrefix(runID), seq)
-}
-
-// Config is the Tailer constructor input. Zero fields pick defaults; RunID
+// Config is the Tailer constructor input. Zero fields pick defaults; Keys
 // and OpenSource are required.
 type Config struct {
-	// RunID becomes the key prefix in object storage.
-	RunID string
+	// Keys locates the run's subtree in object storage; chunks are written
+	// to Keys.LogChunk(seq).
+	Keys storage.RunKeys
 
 	// OpenSource returns a fresh follow-mode reader over the pod's stdout.
 	// The Tailer calls it at Start and again after each retriable read
@@ -517,7 +509,7 @@ func (t *Tailer) flushPending(ctx context.Context) {
 		return
 	}
 	body := append([]byte(nil), t.pending.Bytes()...)
-	key := LogChunkKey(t.cfg.RunID, t.chunkSeq)
+	key := t.cfg.Keys.LogChunk(t.chunkSeq)
 	if err := t.cfg.Uploader.Put(ctx, t.cfg.Bucket, key, bytes.NewReader(body),
 		int64(len(body)), "text/plain"); err == nil {
 		// Only count successful uploads — a failed Put doesn't move

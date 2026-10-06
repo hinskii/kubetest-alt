@@ -27,7 +27,8 @@ import (
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
-// Registry owns the set of active tailers keyed by runID. The controller's
+// Registry owns the set of active tailers keyed by an opaque tailer ID
+// (the controller uses "<namespace>/<name>"). The controller's
 // reconcile loop calls EnsureTailer on pod Running and StopTailer on
 // terminal phase — both are safe to call from multiple reconciles and
 // idempotent, which matters because controller-runtime reconciles are
@@ -44,7 +45,7 @@ import (
 // positions, producing a mixed prefix with duplicates and interleaved
 // bytes when the API server serves the log by lex-listing the prefix.
 //
-// We resolve this by wiping kubetest-logs/<runID>/ BEFORE the new Tailer
+// We resolve this by wiping the run's logs/ prefix BEFORE the new Tailer
 // starts. Fresh start, monotonic chunks. The alternative — resume from
 // seq K+1 — would require the Tailer to also skip already-flushed bytes
 // on the source side, and there is no way to correlate "MinIO chunk
@@ -63,7 +64,7 @@ type Registry struct {
 	remover  storage.Remover
 	bucket   string
 
-	// TailerConfig is a template applied to every EnsureTailer call. RunID +
+	// TailerConfig is a template applied to every EnsureTailer call. Keys +
 	// OpenSource are filled in by EnsureTailer; other fields flow through.
 	// Zero fields fall back to the Tailer's own defaults.
 	TailerConfig Config
@@ -89,23 +90,16 @@ func NewRegistry(source PodLogSource, uploader storage.Uploader, remover storage
 	}
 }
 
-// LogPrefix returns the object-store prefix for a run's log chunks — the
-// path we wipe on restart-resume and the path the API server lists to
-// serve a historical log. Ends in "/" so listing this prefix never picks
-// up a lookalike sibling (e.g. run "abc-decoy" vs "abc").
-func LogPrefix(runID string) string {
-	return "kubetest-logs/" + runID + "/"
-}
-
 // ErrRegistryClosed is returned by EnsureTailer after Shutdown.
 var ErrRegistryClosed = errors.New("logstream: registry closed")
 
 // EnsureTailer starts (or no-ops) a tailer for the given run + pod. Safe to
 // call from multiple reconciles; the second and later calls are cheap
 // map-lookups. Returns nil on success — callers that need the Tailer for
-// subscription (API server) use Get(runID) instead.
+// subscription use Get(id) instead. id is the map key; keys says where the
+// chunks go (pkg/storage.RunKeys — namespace + UID, never the bare name).
 //
-// On first creation for a given runID, wipes kubetest-logs/<runID>/ so a
+// On first creation for a given id, wipes keys.Logs() so a
 // restarted operator doesn't produce a mixed-boundary chunk prefix (see
 // package-level docstring). The wipe is best-effort: on Remover error we
 // log but continue — the tailer runs, some chunks may be duplicates, and
@@ -115,7 +109,10 @@ var ErrRegistryClosed = errors.New("logstream: registry closed")
 // per-request, we DO NOT pass it as the tailer's parent — the tailer must
 // outlive the reconcile. We use context.Background() and rely on
 // StopTailer / Shutdown for the tailer's lifecycle.
-func (r *Registry) EnsureTailer(ctx context.Context, runID, namespace, podName string) error {
+func (r *Registry) EnsureTailer(ctx context.Context, id string, keys storage.RunKeys, namespace, podName string) error {
+	if !keys.Valid() {
+		return errors.New("logstream: invalid storage keys")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -123,7 +120,7 @@ func (r *Registry) EnsureTailer(ctx context.Context, runID, namespace, podName s
 		return ErrRegistryClosed
 	}
 
-	if _, ok := r.tailers[runID]; ok {
+	if _, ok := r.tailers[id]; ok {
 		return nil
 	}
 
@@ -132,17 +129,17 @@ func (r *Registry) EnsureTailer(ctx context.Context, runID, namespace, podName s
 	// (map lookup above catches it), so a wipe here always targets crash-
 	// recovery leftovers, never in-progress writes.
 	if r.remover != nil && r.uploader != nil {
-		if err := r.remover.RemovePrefix(ctx, r.bucket, LogPrefix(runID)); err != nil {
+		if err := r.remover.RemovePrefix(ctx, r.bucket, keys.Logs()); err != nil {
 			// Log-and-continue: we've decided log durability is second to
 			// run durability. A failed wipe means the new tailer may
 			// produce a mixed prefix, but the run itself proceeds.
 			ctrlLog.Log.Info("logstream: RemovePrefix failed, continuing with fresh tailer",
-				"runID", runID, "error", err.Error())
+				"tailer", id, "error", err.Error())
 		}
 	}
 
 	cfg := r.TailerConfig
-	cfg.RunID = runID
+	cfg.Keys = keys
 	cfg.Uploader = r.uploader
 	if cfg.Bucket == "" {
 		cfg.Bucket = r.bucket
@@ -156,26 +153,25 @@ func (r *Registry) EnsureTailer(ctx context.Context, runID, namespace, podName s
 	}
 	t := New(cfg)
 	t.Start(context.Background())
-	r.tailers[runID] = t
+	r.tailers[id] = t
 	return nil
 }
 
-// Get returns the tailer for runID, or nil if none exists. Used by the
-// API server (step 10) to attach a subscriber to a live run.
-func (r *Registry) Get(runID string) *Tailer {
+// Get returns the tailer for id, or nil if none exists.
+func (r *Registry) Get(id string) *Tailer {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.tailers[runID]
+	return r.tailers[id]
 }
 
-// StopTailer stops and removes the tailer for runID. No-op if none exists.
+// StopTailer stops and removes the tailer for id. No-op if none exists.
 // Blocks until the tailer's run loop has flushed and exited so the caller
 // can be sure the final chunk has landed before proceeding.
-func (r *Registry) StopTailer(runID string) {
+func (r *Registry) StopTailer(id string) {
 	r.mu.Lock()
-	t := r.tailers[runID]
+	t := r.tailers[id]
 	if t != nil {
-		delete(r.tailers, runID)
+		delete(r.tailers, id)
 	}
 	r.mu.Unlock()
 
@@ -198,7 +194,7 @@ func (r *Registry) Shutdown() {
 	}
 }
 
-// Active returns the set of runIDs currently being tailed. Test/inspection
+// Active returns the IDs of the tailers currently running. Test/inspection
 // helper.
 func (r *Registry) Active() []string {
 	r.mu.Lock()

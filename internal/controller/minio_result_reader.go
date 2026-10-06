@@ -29,7 +29,8 @@ import (
 )
 
 // StorageResultReader fetches the wrapper's result.json from object storage
-// under the layout the scraper wrote: <bucket>/<runID>/result.json.
+// at storage.RunKeys.Result() for the run's namespace + UID — the same key
+// the wrapper's scraper wrote.
 //
 // Zero value isn't usable — always build via NewStorageResultReader.
 type StorageResultReader struct {
@@ -52,14 +53,18 @@ func NewStorageResultReader(d storage.Downloader, bucket string) *StorageResultR
 //     reconciler falls back to Pod terminated state (§15.2).
 //   - Transient errors bubble up unchanged; the reconciler treats them as
 //     retryable via FallbackRequeue.
-func (r *StorageResultReader) Read(ctx context.Context, runID string) (*RunResult, error) {
+func (r *StorageResultReader) Read(ctx context.Context, run *testsv1alpha1.TestRun) (*RunResult, error) {
 	if r.Downloader == nil {
 		return nil, errors.New("storage-result-reader: nil Downloader")
 	}
 	if r.Bucket == "" {
 		return nil, errors.New("storage-result-reader: empty Bucket")
 	}
-	key := runID + "/" + executor.ResultFileName
+	keys := storage.ForRun(run.Namespace, string(run.UID))
+	if !keys.Valid() {
+		return nil, fmt.Errorf("storage-result-reader: run %s/%s has no UID", run.Namespace, run.Name)
+	}
+	key := keys.Result()
 	rc, err := r.Downloader.Get(ctx, r.Bucket, key)
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {

@@ -25,7 +25,7 @@ import (
 )
 
 func TestNoResultReader_AlwaysNotFound(t *testing.T) {
-	r, err := NoResultReader{}.Read(context.Background(), "any-run")
+	r, err := NoResultReader{}.Read(context.Background(), readerRun("any-run"))
 	assert.Nil(t, r)
 	assert.True(t, errors.Is(err, ErrResultNotFound))
 }

@@ -110,7 +110,10 @@ apiserver:
     limits:
       cpu: 250m
       memory: 256Mi
-  # Extra flags appended to the apiserver's argv (--namespace, etc.).
+  # Restrict the apiserver to one namespace. Empty (default) = cluster-wide:
+  # callers name the namespace per request with ?namespace=.
+  namespace: ""
+  # Extra flags appended to the apiserver's argv.
   extraArgs: []
 
 # MinIO wiring. When endpoint is empty AND minio.enabled=false, the
@@ -120,6 +123,8 @@ apiserver:
 minio:
   enabled: false
   # These flow into --minio-endpoint / --minio-bucket / --minio-secret-name.
+  # One bucket for logs, artifacts and results, shared by the operator and
+  # the apiserver (objects live under runs/<namespace>/<runUID>/).
   endpoint: ""
   bucket: "kubetest-artifacts"
   secretName: ""      # Secret in the run's namespace with S3 creds

@@ -36,7 +36,7 @@ type fakeScraper struct {
 	uploadCalls    atomic.Int32
 	returnResult   ScrapeResult
 	returnErr      error
-	uploadedRunID  string
+	uploadedPrefix string
 	uploadedResult []byte
 }
 
@@ -44,20 +44,20 @@ func (f *fakeScraper) Scrape(_ context.Context, _ string, spec ScrapeSpec) (Scra
 	f.scrapeCalls.Add(1)
 	res := f.returnResult
 	if len(res.Artifacts) == 0 {
-		res.Artifacts = []ArtifactRef{{Path: "example.txt", Key: spec.RunID + "/example.txt"}}
+		res.Artifacts = []ArtifactRef{{Path: "example.txt", Key: spec.StoragePrefix + "artifacts/example.txt"}}
 	}
 	return res, f.returnErr
 }
 
-func (f *fakeScraper) UploadResult(_ context.Context, runID string, payload []byte) error {
+func (f *fakeScraper) UploadResult(_ context.Context, storagePrefix string, payload []byte) error {
 	f.uploadCalls.Add(1)
-	f.uploadedRunID = runID
+	f.uploadedPrefix = storagePrefix
 	f.uploadedResult = append([]byte(nil), payload...)
 	return nil
 }
 
 // TestScrape_RunsAfterToolExit_HappyPath: scrape fires once with the
-// correct RunID + Paths after the tool exits. Uploaded result carries
+// correct StoragePrefix + Paths after the tool exits. Uploaded result carries
 // scrape output.
 func TestScrape_RunsAfterToolExit_HappyPath(t *testing.T) {
 	fake := &fakeScraper{
@@ -68,6 +68,7 @@ func TestScrape_RunsAfterToolExit_HappyPath(t *testing.T) {
 	}
 	req := ExecutionRequest{
 		RunID:          "run-1",
+		StoragePrefix:  "runs/ns/run-1/",
 		WorkingDir:     t.TempDir(),
 		Args:           []string{"/bin/true"},
 		Artifacts:      ArtifactSpec{Paths: []string{"results/**"}},
@@ -86,7 +87,7 @@ func TestScrape_RunsAfterToolExit_HappyPath(t *testing.T) {
 
 	assert.Equal(t, int32(1), fake.scrapeCalls.Load(), "scrape ran exactly once")
 	assert.Equal(t, int32(1), fake.uploadCalls.Load(), "UploadResult ran exactly once")
-	assert.Equal(t, "run-1", fake.uploadedRunID)
+	assert.Equal(t, "runs/ns/run-1/", fake.uploadedPrefix)
 
 	var got ExecutionResult
 	require.NoError(t, json.Unmarshal(fake.uploadedResult, &got))
@@ -102,6 +103,7 @@ func TestScrape_StillRunsOnSignal(t *testing.T) {
 	fake := &fakeScraper{}
 	req := ExecutionRequest{
 		RunID:          "sig-run",
+		StoragePrefix:  "runs/ns/sig-run/",
 		WorkingDir:     t.TempDir(),
 		Args:           []string{"/bin/true"},
 		TimeoutSeconds: 60,
@@ -138,6 +140,7 @@ func TestScrape_JUnitVerdictCountsWinOverScraperCounts(t *testing.T) {
 	}
 	req := ExecutionRequest{
 		RunID:          "junit-run",
+		StoragePrefix:  "runs/ns/junit-run/",
 		WorkingDir:     t.TempDir(),
 		Args:           []string{"/bin/true"},
 		Verdict:        VerdictSpec{From: VerdictFromJUnit},
@@ -168,6 +171,7 @@ func TestScrape_JUnitVerdictCountsWinOverScraperCounts(t *testing.T) {
 func TestScrape_NilSkipsCleanly(t *testing.T) {
 	req := ExecutionRequest{
 		RunID:          "no-scraper",
+		StoragePrefix:  "runs/ns/no-scraper/",
 		Args:           []string{"/bin/true"},
 		TimeoutSeconds: 30,
 	}
@@ -183,4 +187,29 @@ func TestScrape_NilSkipsCleanly(t *testing.T) {
 	got := readResult(t, e.ResultDir)
 	assert.Equal(t, PhasePassed, got.Phase)
 	assert.Nil(t, got.Artifacts)
+}
+
+// TestScrape_NoStoragePrefixSkipsUpload: a request without StoragePrefix
+// (no MinIO configured, or a run without a UID) must not upload result.json
+// under some fallback key, but must still write it locally.
+func TestScrape_NoStoragePrefixSkipsUpload(t *testing.T) {
+	fake := &fakeScraper{}
+	req := ExecutionRequest{
+		RunID:          "no-prefix",
+		WorkingDir:     t.TempDir(),
+		Args:           []string{"/bin/true"},
+		TimeoutSeconds: 30,
+	}
+	e := &Entry{
+		Exec:        shExit(0, nil),
+		Stdout:      io.Discard,
+		Stderr:      io.Discard,
+		Scraper:     fake,
+		RequestPath: writeRequest(t, req),
+		ResultDir:   t.TempDir(),
+		Loader:      &bytes.Buffer{},
+	}
+	require.NoError(t, e.Execute(context.Background()))
+	assert.Equal(t, int32(0), fake.uploadCalls.Load(), "no prefix → no result upload")
+	assert.Equal(t, PhasePassed, readResult(t, e.ResultDir).Phase)
 }

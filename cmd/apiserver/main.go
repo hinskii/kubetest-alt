@@ -49,25 +49,23 @@ import (
 // things §step-10 mandates.
 func main() {
 	var (
-		listenAddr      string
-		namespace       string
-		minioEndpoint   string
-		logsBucket      string
-		artifactsBucket string
-		minioAccessKey  string
-		minioSecretKey  string
-		minioUseSSL     bool
-		postgresDSN     string
-		presignExpiry   time.Duration
+		listenAddr     string
+		namespace      string
+		minioEndpoint  string
+		bucket         string
+		minioAccessKey string
+		minioSecretKey string
+		minioUseSSL    bool
+		postgresDSN    string
+		presignExpiry  time.Duration
 	)
 	flag.StringVar(&listenAddr, "listen", ":8080", "HTTP listen address.")
-	flag.StringVar(&namespace, "namespace", "", "Namespace to serve. Empty = cluster-wide.")
+	flag.StringVar(&namespace, "namespace", "",
+		"Namespace to serve. Empty = cluster-wide (callers pass ?namespace= per request).")
 	flag.StringVar(&minioEndpoint, "minio-endpoint", "",
 		"MinIO/S3 endpoint (host:port). Empty disables logs+artifacts (health still up).")
-	flag.StringVar(&logsBucket, "minio-logs-bucket", "kubetest-logs",
-		"Bucket holding log chunks (kubetest-logs/<runID>/<8d>.log).")
-	flag.StringVar(&artifactsBucket, "minio-artifacts-bucket", "kubetest-artifacts",
-		"Bucket holding scraped artifacts (<runID>/<relpath>).")
+	flag.StringVar(&bucket, "minio-bucket", storage.DefaultBucket,
+		"Bucket the operator writes logs, artifacts and results to. Must match the operator's --minio-bucket.")
 	flag.StringVar(&minioAccessKey, "minio-access-key", "",
 		"MinIO access key (or $MINIO_ACCESS_KEY).")
 	flag.StringVar(&minioSecretKey, "minio-secret-key", "",
@@ -129,8 +127,7 @@ func main() {
 	srv := &apiserver.Server{
 		K8sClient:          cl.GetClient(),
 		Namespace:          namespace,
-		LogsBucket:         logsBucket,
-		ArtifactsBucket:    artifactsBucket,
+		Bucket:             bucket,
 		PresignedURLExpiry: presignExpiry,
 	}
 
@@ -139,7 +136,7 @@ func main() {
 	if minioEndpoint != "" {
 		mc, err := storage.NewMinIO(storage.Config{
 			Endpoint:  minioEndpoint,
-			Bucket:    artifactsBucket, // presigner uses per-call bucket; this is placeholder
+			Bucket:    bucket,
 			UseSSL:    minioUseSSL,
 			AccessKey: minioAccessKey,
 			SecretKey: minioSecretKey,

@@ -60,7 +60,9 @@ var ErrResultNotFound = errors.New("result: not found")
 // Interface exists so step 07 can drop in a MinIO/S3-backed implementation
 // without touching the reconciler.
 type ResultReader interface {
-	Read(ctx context.Context, runID string) (*RunResult, error)
+	// Read takes the whole run so implementations derive storage keys from
+	// namespace + UID (pkg/storage.RunKeys), never from the name alone.
+	Read(ctx context.Context, run *testsv1alpha1.TestRun) (*RunResult, error)
 }
 
 // NoResultReader always returns ErrResultNotFound. It's the default when the
@@ -70,6 +72,6 @@ type ResultReader interface {
 type NoResultReader struct{}
 
 // Read implements ResultReader.
-func (NoResultReader) Read(context.Context, string) (*RunResult, error) {
+func (NoResultReader) Read(context.Context, *testsv1alpha1.TestRun) (*RunResult, error) {
 	return nil, ErrResultNotFound
 }

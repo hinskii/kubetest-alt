@@ -190,6 +190,17 @@
         },
         "summary": "Merged list of active (cluster) and archived (store) runs, deduped by UID, sorted by startedAt DESC."
       },
+      "parameters": [
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
       "post": {
         "requestBody": {
           "content": {
@@ -341,6 +352,15 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ]
     },
@@ -371,6 +391,16 @@
             "description": "OK"
           },
           "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
             "content": {
               "application/json": {
                 "schema": {
@@ -411,6 +441,15 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
         }
       ]
     },
@@ -419,6 +458,12 @@
         "responses": {
           "101": {
             "description": "Switching Protocols (WebSocket)."
+          },
+          "400": {
+            "description": "Namespace missing or outside the server's scope."
+          },
+          "404": {
+            "description": "Run not found in the cluster or the archive."
           },
           "503": {
             "description": "Log storage not configured."
@@ -432,6 +477,15 @@
           "in": "path",
           "name": "id",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
           "schema": {
             "type": "string"
           }
@@ -508,8 +562,19 @@
             "description": "OK"
           }
         },
-        "summary": "List Tests in the configured namespace."
+        "summary": "List Tests in ?namespace= (all namespaces when omitted on a cluster-wide server)."
       },
+      "parameters": [
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
       "post": {
         "requestBody": {
           "content": {
@@ -706,6 +771,15 @@
           "in": "path",
           "name": "name",
           "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
           "schema": {
             "type": "string"
           }

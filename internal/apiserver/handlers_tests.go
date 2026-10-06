@@ -28,13 +28,18 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
 
-// listTests returns every Test in the configured namespace (or all
-// namespaces when Namespace is empty).
+// listTests returns every Test in the selected namespace (?namespace=, or
+// the server's scope), or across all namespaces on a cluster-wide server.
 func (s *Server) listTests(w http.ResponseWriter, r *http.Request) {
+	ns, err := s.listNamespace(r)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
 	var list testsv1alpha1.TestList
 	opts := []client.ListOption{}
-	if s.Namespace != "" {
-		opts = append(opts, client.InNamespace(s.Namespace))
+	if ns != "" {
+		opts = append(opts, client.InNamespace(ns))
 	}
 	if err := s.K8sClient.List(r.Context(), &list, opts...); err != nil {
 		writeAPIError(w, err)
@@ -50,8 +55,13 @@ func (s *Server) getTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, "test name is required")
 		return
 	}
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
 	var t testsv1alpha1.Test
-	if err := s.K8sClient.Get(r.Context(), types.NamespacedName{Namespace: s.Namespace, Name: name}, &t); err != nil {
+	if err := s.K8sClient.Get(r.Context(), types.NamespacedName{Namespace: ns, Name: name}, &t); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -63,8 +73,8 @@ func (s *Server) getTest(w http.ResponseWriter, r *http.Request) {
 //     managed-by=gitops in the payload is rejected 400 (§step-10 spoof
 //     guard). Users MUST NOT be able to create a "gitops-owned" Test via
 //     the GUI, otherwise the enforcement in §7 is trivially bypassed.
-//  2. Namespace comes from the server config, not the payload — the API
-//     server is namespace-scoped by construction.
+//  2. Namespace is resolved by targetNamespace: a scoped server refuses any
+//     other namespace; a cluster-wide one requires one to be named.
 func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 	var t testsv1alpha1.Test
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
@@ -83,9 +93,12 @@ func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 	}
 	t.Labels[LabelManagedBy] = ManagedByUI
 
-	if t.Namespace == "" {
-		t.Namespace = s.Namespace
+	ns, err := s.targetNamespace(r, t.Namespace)
+	if err != nil {
+		writeLookupError(w, err)
+		return
 	}
+	t.Namespace = ns
 	if err := s.K8sClient.Create(r.Context(), &t); err != nil {
 		writeAPIError(w, err)
 		return
@@ -101,9 +114,14 @@ func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, "test name is required")
 		return
 	}
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
 	var current testsv1alpha1.Test
 	if err := s.K8sClient.Get(r.Context(),
-		types.NamespacedName{Namespace: s.Namespace, Name: name}, &current); err != nil {
+		types.NamespacedName{Namespace: ns, Name: name}, &current); err != nil {
 		writeAPIError(w, err)
 		return
 	}
@@ -155,9 +173,14 @@ func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, "test name is required")
 		return
 	}
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
 	var current testsv1alpha1.Test
 	if err := s.K8sClient.Get(r.Context(),
-		types.NamespacedName{Namespace: s.Namespace, Name: name}, &current); err != nil {
+		types.NamespacedName{Namespace: ns, Name: name}, &current); err != nil {
 		writeAPIError(w, err)
 		return
 	}

@@ -168,7 +168,6 @@ spec:
               set -eux
               mc alias set local http://minio:9000 minioadmin minioadmin
               mc mb --ignore-existing local/kubetest-artifacts
-              mc mb --ignore-existing local/kubetest-logs
 EOF
 kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket --timeout=120s
 phase_end "minio_deploy"
@@ -189,7 +188,6 @@ if ! helm upgrade --install kt "$CHART_DIR" \
   --set "minio.endpoint=minio.${RELEASE_NS}.svc:9000" \
   --set minio.secretName=minio-creds \
   --set minio.bucket=kubetest-artifacts \
-  --set "apiserver.extraArgs={--namespace=kubetest-e2e}" \
   --wait --timeout=5m; then
   log "::error::helm install failed — dumping cluster state for diagnosis"
   kubectl -n "$RELEASE_NS" get pods,deploy,jobs -o wide || true

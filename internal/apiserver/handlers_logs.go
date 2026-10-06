@@ -45,23 +45,27 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, ReasonBadRequest, "run id is required")
 		return
 	}
-	if s.Downloader == nil || s.Lister == nil || s.LogsBucket == "" {
+	if s.Downloader == nil || s.Lister == nil || s.Bucket == "" {
 		writeError(w, http.StatusServiceUnavailable, ReasonServiceUnavail,
 			"log storage is not configured")
 		return
 	}
 
-	// Decide live vs archive by looking at the CR. Absent CR → archive.
-	keepPolling := false
-	var run testsv1alpha1.TestRun
-	err := s.K8sClient.Get(r.Context(),
-		types.NamespacedName{Namespace: s.Namespace, Name: id}, &run)
-	switch {
-	case err == nil && !controller.IsTerminalPhase(run.Status.Phase):
-		keepPolling = true
-	case err != nil:
-		// NotFound is fine — archived run, still serve.
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
 	}
+	// Resolve the run (CR by name, else archived row by UID) — the chunk
+	// prefix is derived from namespace + UID, so an unknown id is a 404
+	// rather than an empty stream.
+	ref, err := s.findRun(r.Context(), ns, id)
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	// Live vs archive: a CR in a non-terminal phase keeps the stream open.
+	keepPolling := ref.CR != nil && !controller.IsTerminalPhase(ref.CR.Status.Phase)
 
 	// isTerminal is checked once per poll round so a live→terminal transition
 	// on the CR closes the stream within one PollInterval of the phase flip,
@@ -79,7 +83,7 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 		defer cancel()
 		var cur testsv1alpha1.TestRun
 		if err := s.K8sClient.Get(checkCtx,
-			types.NamespacedName{Namespace: s.Namespace, Name: id}, &cur); err != nil {
+			types.NamespacedName{Namespace: ref.Namespace, Name: ref.Name}, &cur); err != nil {
 			if apierrors.IsNotFound(err) {
 				return true // CR gone → nothing more coming
 			}
@@ -108,8 +112,8 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 	stream := &chunkStream{
 		Downloader:   s.Downloader,
 		Lister:       s.Lister,
-		Bucket:       s.LogsBucket,
-		RunID:        id,
+		Bucket:       s.Bucket,
+		Prefix:       ref.keys().Logs(),
 		KeepPolling:  keepPolling,
 		PollInterval: s.LogPollInterval,
 		PollDeadline: s.LogPollDeadline,

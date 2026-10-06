@@ -26,14 +26,14 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           args:
             - --listen={{ printf ":%d" (int .Values.apiserver.service.port) }}
+            {{- with .Values.apiserver.namespace }}
+            - --namespace={{ . }}
+            {{- end }}
             {{- if .Values.minio.endpoint }}
             - --minio-endpoint={{ .Values.minio.endpoint }}
-            # apiserver splits artifacts + logs buckets (operator uses one
-            # --minio-bucket; they diverged in step 07/08). We pass the
-            # same value into both to preserve chart simplicity — flip to
-            # a values.minio.logsBucket if the two ever need separation.
-            - --minio-artifacts-bucket={{ .Values.minio.bucket }}
-            - --minio-logs-bucket=kubetest-logs
+            # Same value the operator gets: one bucket holds logs, artifacts
+            # and results; pkg/storage.RunKeys partitions it.
+            - --minio-bucket={{ .Values.minio.bucket }}
             {{- if .Values.minio.useSSL }}
             - --minio-use-ssl
             {{- end }}

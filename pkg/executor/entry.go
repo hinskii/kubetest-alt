@@ -157,10 +157,10 @@ func (e *Entry) Execute(ctx context.Context) error {
 	}
 
 	// Upload final result.json so the controller's ResultReader can fetch it.
-	if e.Scraper != nil && req.RunID != "" {
+	if e.Scraper != nil && req.StoragePrefix != "" {
 		payload, merr := marshalResult(result)
 		if merr == nil {
-			if uerr := e.Scraper.UploadResult(ctx, req.RunID, payload); uerr != nil {
+			if uerr := e.Scraper.UploadResult(ctx, req.StoragePrefix, payload); uerr != nil {
 				_, _ = fmt.Fprintf(e.Loader, "upload result.json: %v\n", uerr)
 			}
 		}
@@ -389,8 +389,8 @@ func (e *Entry) runScrape(ctx context.Context, req ExecutionRequest, result *Exe
 		defer cancel()
 	}
 	sr, err := e.Scraper.Scrape(scrapeCtx, workingDir, ScrapeSpec{
-		RunID: req.RunID,
-		Paths: req.Artifacts.Paths,
+		StoragePrefix: req.StoragePrefix,
+		Paths:         req.Artifacts.Paths,
 	})
 	if err != nil {
 		if result.ScrapeError == "" {

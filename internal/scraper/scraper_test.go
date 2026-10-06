@@ -54,8 +54,8 @@ func TestScrape_HappyPathUploadsAllMatches(t *testing.T) {
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "run-1",
-		Paths: []string{"results/**"},
+		StoragePrefix: pfx("run-1"),
+		Paths:         []string{"results/**"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, res.ScrapeError)
@@ -64,7 +64,7 @@ func TestScrape_HappyPathUploadsAllMatches(t *testing.T) {
 	// Object keys carry the per-run prefix — that's what makes multi-tenant
 	// isolation work in a shared bucket.
 	assert.ElementsMatch(t,
-		[]string{"run-1/results/a.json", "run-1/results/b.txt"},
+		[]string{art("run-1", "results/a.json"), art("run-1", "results/b.txt")},
 		up.Keys(testBucket),
 	)
 }
@@ -74,8 +74,8 @@ func TestScrape_NoMatchesEmptyResult(t *testing.T) {
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{
-		RunID: "run-empty",
-		Paths: []string{"never/*"},
+		StoragePrefix: pfx("run-empty"),
+		Paths:         []string{"never/*"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, res.Artifacts)
@@ -95,8 +95,8 @@ func TestScrape_JUnitCountsMerged(t *testing.T) {
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "run-junit",
-		Paths: []string{"reports/*.xml"},
+		StoragePrefix: pfx("run-junit"),
+		Paths:         []string{"reports/*.xml"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res.TestCounts)
@@ -113,8 +113,8 @@ func TestScrape_NonJUnitXMLIgnored(t *testing.T) {
 
 	up := storage.NewFake()
 	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "run-mix",
-		Paths: []string{"**/*.xml"},
+		StoragePrefix: pfx("run-mix"),
+		Paths:         []string{"**/*.xml"},
 	})
 	require.NoError(t, err)
 	require.NotNil(t, res.TestCounts)
@@ -143,8 +143,8 @@ func TestScrape_UploaderPermanentFailureRecordsButDoesNotError(t *testing.T) {
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "run-fail",
-		Paths: []string{"**/*.txt"},
+		StoragePrefix: pfx("run-fail"),
+		Paths:         []string{"**/*.txt"},
 	})
 	require.NoError(t, err, "scrape MUST NOT bubble upload errors")
 	assert.Empty(t, res.Artifacts, "nothing uploaded successfully")
@@ -169,15 +169,15 @@ func TestScrape_RetryOnTransientErrorThenSuccess(t *testing.T) {
 
 	s := New(up, testBucket)
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "retry-run",
-		Paths: []string{"**/*.txt"},
+		StoragePrefix: pfx("retry-run"),
+		Paths:         []string{"**/*.txt"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, res.ScrapeError, "transient failure recovered → no error")
 	require.Len(t, res.Artifacts, 1)
 	assert.Equal(t, 2, up.PutCalls, "one failure + one success = 2 attempts")
 
-	got, ok := up.Object(testBucket, "retry-run/results/a.txt")
+	got, ok := up.Object(testBucket, art("retry-run", "results/a.txt"))
 	require.True(t, ok)
 	assert.Equal(t, "hello", string(got))
 }
@@ -197,7 +197,7 @@ func TestScrape_RetryGivesUpAfterMaxAttempts(t *testing.T) {
 		up.PutErrors = append(up.PutErrors, errors.New("permanent 500"))
 	}
 	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "gives-up", Paths: []string{"*.txt"},
+		StoragePrefix: pfx("gives-up"), Paths: []string{"*.txt"},
 	})
 	require.NoError(t, err)
 	assert.Empty(t, res.Artifacts)
@@ -207,7 +207,7 @@ func TestScrape_RetryGivesUpAfterMaxAttempts(t *testing.T) {
 
 // TestScrape_PerRunPrefixIsolation — plan step-07 mandate: "per-run prefix
 // isolation". Two runs, same bucket, colliding relative paths — objects
-// land under distinct <runID>/ prefixes, no collision. This is what makes
+// land under distinct runs/<ns>/<uid>/ prefixes, no collision. This is what makes
 // multi-tenant scraping on a shared bucket safe.
 func TestScrape_PerRunPrefixIsolation(t *testing.T) {
 	up := storage.NewFake()
@@ -216,26 +216,26 @@ func TestScrape_PerRunPrefixIsolation(t *testing.T) {
 	dir1 := t.TempDir()
 	writeFile(t, dir1, "results/summary.json", `{"run":"one"}`)
 	_, err := s.Scrape(context.Background(), dir1, executor.ScrapeSpec{
-		RunID: "run-alpha", Paths: []string{"**/*.json"},
+		StoragePrefix: pfx("run-alpha"), Paths: []string{"**/*.json"},
 	})
 	require.NoError(t, err)
 
 	dir2 := t.TempDir()
 	writeFile(t, dir2, "results/summary.json", `{"run":"two"}`)
 	_, err = s.Scrape(context.Background(), dir2, executor.ScrapeSpec{
-		RunID: "run-beta", Paths: []string{"**/*.json"},
+		StoragePrefix: pfx("run-beta"), Paths: []string{"**/*.json"},
 	})
 	require.NoError(t, err)
 
-	alpha, ok := up.Object(testBucket, "run-alpha/results/summary.json")
+	alpha, ok := up.Object(testBucket, art("run-alpha", "results/summary.json"))
 	require.True(t, ok)
 	assert.Equal(t, `{"run":"one"}`, string(alpha))
-	beta, ok := up.Object(testBucket, "run-beta/results/summary.json")
+	beta, ok := up.Object(testBucket, art("run-beta", "results/summary.json"))
 	require.True(t, ok)
 	assert.Equal(t, `{"run":"two"}`, string(beta))
 
 	assert.ElementsMatch(t,
-		[]string{"run-alpha/results/summary.json", "run-beta/results/summary.json"},
+		[]string{art("run-alpha", "results/summary.json"), art("run-beta", "results/summary.json")},
 		up.Keys(testBucket),
 	)
 }
@@ -261,8 +261,8 @@ func TestScrape_PartialFailure(t *testing.T) {
 	s := New(up, testBucket)
 
 	res, err := s.Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "run-partial",
-		Paths: []string{"*.txt"},
+		StoragePrefix: pfx("run-partial"),
+		Paths:         []string{"*.txt"},
 	})
 	require.NoError(t, err)
 	assert.Len(t, res.Artifacts, 1, "one file succeeded")
@@ -274,9 +274,9 @@ func TestScrape_UploadResult_UsesResultJSONKey(t *testing.T) {
 	s := New(up, testBucket)
 
 	payload := []byte(`{"phase":"passed"}`)
-	require.NoError(t, s.UploadResult(context.Background(), "run-x", payload))
+	require.NoError(t, s.UploadResult(context.Background(), pfx("run-x"), payload))
 
-	got, ok := up.Object(testBucket, "run-x/result.json")
+	got, ok := up.Object(testBucket, storage.ForRun(testNS, "run-x").Result())
 	require.True(t, ok, "result.json missing from fake")
 	assert.Equal(t, payload, got)
 }
@@ -287,15 +287,15 @@ func TestScrape_GuardRails(t *testing.T) {
 
 	t.Run("nil uploader", func(t *testing.T) {
 		bad := &Scraper{Bucket: testBucket}
-		_, err := bad.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{RunID: "r"})
+		_, err := bad.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{StoragePrefix: pfx("r")})
 		require.Error(t, err)
 	})
 	t.Run("empty bucket", func(t *testing.T) {
 		bad := &Scraper{Uploader: up}
-		_, err := bad.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{RunID: "r"})
+		_, err := bad.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{StoragePrefix: pfx("r")})
 		require.Error(t, err)
 	})
-	t.Run("empty runID", func(t *testing.T) {
+	t.Run("empty storage prefix", func(t *testing.T) {
 		_, err := s.Scrape(context.Background(), t.TempDir(), executor.ScrapeSpec{})
 		require.Error(t, err)
 	})
@@ -310,8 +310,8 @@ func TestScrape_ContentTypeInference(t *testing.T) {
 
 	up := storage.NewFake()
 	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "r",
-		Paths: []string{"*"},
+		StoragePrefix: pfx("r"),
+		Paths:         []string{"*"},
 	})
 	require.NoError(t, err)
 
@@ -349,8 +349,8 @@ func TestScrape_ContextCancelledMidLoop(t *testing.T) {
 	cancel() // cancel immediately — scrape body's ctx.Err() check trips on first iteration
 
 	res, err := s.Scrape(ctx, dir, executor.ScrapeSpec{
-		RunID: "cancelled",
-		Paths: []string{"results/*"},
+		StoragePrefix: pfx("cancelled"),
+		Paths:         []string{"results/*"},
 	})
 	require.NoError(t, err)
 	assert.Contains(t, res.ScrapeError, "cancelled")
@@ -371,8 +371,8 @@ func TestScrape_ContentTypeSniff_PrintableText(t *testing.T) {
 
 	up := storage.NewFake()
 	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "r",
-		Paths: []string{"readme"},
+		StoragePrefix: pfx("r"),
+		Paths:         []string{"readme"},
 	})
 	require.NoError(t, err)
 	require.Len(t, res.Artifacts, 1)
@@ -386,10 +386,19 @@ func TestScrape_ContentTypeSniff_EmptyFile(t *testing.T) {
 
 	up := storage.NewFake()
 	res, err := New(up, testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
-		RunID: "r",
-		Paths: []string{"empty"},
+		StoragePrefix: pfx("r"),
+		Paths:         []string{"empty"},
 	})
 	require.NoError(t, err)
 	require.Len(t, res.Artifacts, 1)
 	assert.Equal(t, "application/octet-stream", res.Artifacts[0].ContentType)
 }
+
+// testNS is the namespace every scraper test writes under.
+const testNS = "ns"
+
+// pfx is the storage prefix the compiler would hand the wrapper for runID.
+func pfx(runID string) string { return storage.ForRun(testNS, runID).Prefix() }
+
+// art is the object key an artifact at rel lands on for runID.
+func art(runID, rel string) string { return storage.ForRun(testNS, runID).Artifact(rel) }

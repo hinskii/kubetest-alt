@@ -70,13 +70,10 @@ type Server struct {
 	Lister     storage.Lister
 	Presigner  storage.Presigner
 
-	// LogsBucket is the bucket log chunks live in
-	// (kubetest-logs/<runID>/<8d>.log — see logstream.LogPrefix).
-	LogsBucket string
-
-	// ArtifactsBucket holds files uploaded by the wrapper's scraper
-	// (<runID>/<path> — see internal/scraper).
-	ArtifactsBucket string
+	// Bucket is the single object-store bucket the operator and wrapper
+	// write to. Keys inside it come from pkg/storage.RunKeys — the same
+	// function every writer uses, so readers cannot drift (fixes.md #3).
+	Bucket string
 
 	// PresignedURLExpiry bounds how long browsers can use a returned
 	// artifact URL. Default 15 minutes if zero.

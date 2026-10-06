@@ -28,6 +28,8 @@ import (
 	"testing"
 
 	"go.uber.org/goleak"
+
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // TestMain runs goleak after all tests to catch any goroutine that outlived
@@ -155,7 +157,7 @@ func drainAll(sub *Subscription) ([]byte, string) {
 func TestFanOut_ThreeSubscribers_ReceiveSameBytes(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID: "r1",
+		Keys: storage.ForRun("ns", "r1"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
 			return fr, nil
 		},
@@ -190,7 +192,7 @@ func TestFanOut_ThreeSubscribers_ReceiveSameBytes(t *testing.T) {
 func TestFanOut_LateJoiner_GetsReplayThenLive(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID:           "r1b",
+		Keys:            storage.ForRun("ns", "r1b"),
 		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 		RingBytes:       1024,
 		SubscriberQueue: 32,
@@ -242,7 +244,7 @@ func TestFanOut_LateJoiner_GetsReplayThenLive(t *testing.T) {
 func TestRing_OverflowKeepsNewestAndMarksReplay(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID: "r2",
+		Keys: storage.ForRun("ns", "r2"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
 			return fr, nil
 		},
@@ -292,7 +294,7 @@ func TestSlowClient_DroppedWithOverflowMarker(t *testing.T) {
 	const queue = 4
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID:           "r3",
+		Keys:            storage.ForRun("ns", "r3"),
 		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 		SubscriberQueue: queue,
 	})
@@ -342,7 +344,7 @@ func TestFlush_ChunkAtSizeThreshold(t *testing.T) {
 	fr := newFakeReader()
 	up := &captureUploader{}
 	tailer := New(Config{
-		RunID:      "r4a",
+		Keys:       storage.ForRun("ns", "r4a"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 		Uploader:   up,
 		Bucket:     "logs",
@@ -381,7 +383,7 @@ func TestFlush_ChunkAtSizeThreshold(t *testing.T) {
 	if string(bodies[1]) != "EFGH" {
 		t.Errorf("chunk 1 %q, want %q", bodies[1], "EFGH")
 	}
-	if keys[0] != LogChunkKey("r4a", 0) || keys[1] != LogChunkKey("r4a", 1) {
+	if keys[0] != storage.ForRun("ns", "r4a").LogChunk(0) || keys[1] != storage.ForRun("ns", "r4a").LogChunk(1) {
 		t.Errorf("chunk keys unexpected: %v", keys)
 	}
 }
@@ -391,7 +393,7 @@ func TestFlush_FinalFlushOnEOF(t *testing.T) {
 	fr := newFakeReader()
 	up := &captureUploader{}
 	tailer := New(Config{
-		RunID:      "r4b",
+		Keys:       storage.ForRun("ns", "r4b"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 		Uploader:   up,
 		Bucket:     "logs",
@@ -434,7 +436,7 @@ func TestReopen_DedupsAlreadyEmittedBytes(t *testing.T) {
 	var mu sync.Mutex
 
 	tailer := New(Config{
-		RunID: "r4c",
+		Keys: storage.ForRun("ns", "r4c"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -487,7 +489,7 @@ func TestReopen_DedupsAlreadyEmittedBytes(t *testing.T) {
 func TestConcurrent_SubscribeUnsubscribePublish(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID:           "r5",
+		Keys:            storage.ForRun("ns", "r5"),
 		OpenSource:      func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 		SubscriberQueue: 128,
 	})
@@ -541,10 +543,10 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 
 	ctx := t.Context()
 
-	if err := reg.EnsureTailer(ctx, "run-A", "ns", "pod-A"); err != nil {
+	if err := reg.EnsureTailer(ctx, "run-A", storage.ForRun("ns", "run-A"), "ns", "pod-A"); err != nil {
 		t.Fatalf("first EnsureTailer: %v", err)
 	}
-	if err := reg.EnsureTailer(ctx, "run-A", "ns", "pod-A"); err != nil {
+	if err := reg.EnsureTailer(ctx, "run-A", storage.ForRun("ns", "run-A"), "ns", "pod-A"); err != nil {
 		t.Fatalf("second EnsureTailer: %v", err)
 	}
 	a := reg.Get("run-A")
@@ -583,7 +585,7 @@ func TestRegistry_EnsureTailerIsIdempotent(t *testing.T) {
 
 	// Shutdown of empty registry is a no-op.
 	reg.Shutdown()
-	if err := reg.EnsureTailer(ctx, "run-B", "ns", "pod-B"); !errors.Is(err, ErrRegistryClosed) {
+	if err := reg.EnsureTailer(ctx, "run-B", storage.ForRun("ns", "run-B"), "ns", "pod-B"); !errors.Is(err, ErrRegistryClosed) {
 		t.Errorf("after Shutdown expected ErrRegistryClosed, got %v", err)
 	}
 }
@@ -594,10 +596,10 @@ func TestRegistry_ShutdownStopsAllTailers(t *testing.T) {
 	reg := NewRegistry(src, nil, nil, "")
 
 	ctx := t.Context()
-	if err := reg.EnsureTailer(ctx, "run-A", "ns", "pod-A"); err != nil {
+	if err := reg.EnsureTailer(ctx, "run-A", storage.ForRun("ns", "run-A"), "ns", "pod-A"); err != nil {
 		t.Fatalf("EnsureTailer A: %v", err)
 	}
-	if err := reg.EnsureTailer(ctx, "run-B", "ns", "pod-B"); err != nil {
+	if err := reg.EnsureTailer(ctx, "run-B", storage.ForRun("ns", "run-B"), "ns", "pod-B"); err != nil {
 		t.Fatalf("EnsureTailer B: %v", err)
 	}
 	tA := reg.Get("run-A")
@@ -623,7 +625,7 @@ func TestRegistry_ShutdownStopsAllTailers(t *testing.T) {
 func TestSubscribe_AfterStop_ReturnsClosed(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID:      "r8",
+		Keys:       storage.ForRun("ns", "r8"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 	})
 	tailer.Start(t.Context())
@@ -650,7 +652,7 @@ func TestSubscribe_AfterStop_ReturnsClosed(t *testing.T) {
 func TestUnsubscribe_ClosesWithReason(t *testing.T) {
 	fr := newFakeReader()
 	tailer := New(Config{
-		RunID:      "r9",
+		Keys:       storage.ForRun("ns", "r9"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) { return fr, nil },
 	})
 	tailer.Start(t.Context())
@@ -689,12 +691,12 @@ func TestRegistry_RestartResume_WipesStalePrefix(t *testing.T) {
 
 	// Simulate 3 stale chunks from the previous operator lifetime, plus a
 	// decoy under a lookalike sibling prefix that MUST survive the wipe.
-	up.preloadChunk(LogChunkKey("run-X", 0), []byte("OLD0"))
-	up.preloadChunk(LogChunkKey("run-X", 1), []byte("OLD1"))
-	up.preloadChunk(LogChunkKey("run-X", 2), []byte("OLD2"))
-	up.preloadChunk(LogPrefix("run-X-sibling")+"00000000.log", []byte("SIB"))
+	up.preloadChunk(storage.ForRun("ns", "run-X").LogChunk(0), []byte("OLD0"))
+	up.preloadChunk(storage.ForRun("ns", "run-X").LogChunk(1), []byte("OLD1"))
+	up.preloadChunk(storage.ForRun("ns", "run-X").LogChunk(2), []byte("OLD2"))
+	up.preloadChunk(storage.ForRun("ns", "run-X-sibling").Logs()+"00000000.log", []byte("SIB"))
 
-	if err := reg.EnsureTailer(t.Context(), "run-X", "ns", "pod-X"); err != nil {
+	if err := reg.EnsureTailer(t.Context(), "run-X", storage.ForRun("ns", "run-X"), "ns", "pod-X"); err != nil {
 		t.Fatalf("EnsureTailer: %v", err)
 	}
 	tailer := reg.Get("run-X")
@@ -703,8 +705,8 @@ func TestRegistry_RestartResume_WipesStalePrefix(t *testing.T) {
 	// Wipe recorded BEFORE any Put — that's the ordering guarantee the
 	// package doc promises.
 	wipes := up.removedPrefixes()
-	if len(wipes) != 1 || wipes[0] != LogPrefix("run-X") {
-		t.Fatalf("expected exactly one wipe of %q, got %v", LogPrefix("run-X"), wipes)
+	if len(wipes) != 1 || wipes[0] != storage.ForRun("ns", "run-X").Logs() {
+		t.Fatalf("expected exactly one wipe of %q, got %v", storage.ForRun("ns", "run-X").Logs(), wipes)
 	}
 
 	// Drive the new tailer to completion.
@@ -722,14 +724,14 @@ func TestRegistry_RestartResume_WipesStalePrefix(t *testing.T) {
 	// new tailer + the sibling decoy. No OLD* bytes anywhere.
 	keys, bodies := up.snapshot()
 	for i, k := range keys {
-		if strings.HasPrefix(k, LogPrefix("run-X")) {
+		if strings.HasPrefix(k, storage.ForRun("ns", "run-X").Logs()) {
 			if !strings.Contains(string(bodies[i]), "NEW") {
 				t.Errorf("stale content survived wipe: key=%s body=%q", k, bodies[i])
 			}
 		}
 	}
 	// Sibling decoy preserved.
-	if !slices.Contains(keys, LogPrefix("run-X-sibling")+"00000000.log") {
+	if !slices.Contains(keys, storage.ForRun("ns", "run-X-sibling").Logs()+"00000000.log") {
 		t.Errorf("sibling prefix was wiped — RemovePrefix over-matched: %v", keys)
 	}
 }
@@ -744,7 +746,7 @@ func TestRegistry_RestartResume_WipeErrorIsNonFatal(t *testing.T) {
 	up := &captureUploader{}
 	reg := NewRegistry(src, up, badRemover, "logs")
 
-	if err := reg.EnsureTailer(t.Context(), "run-Y", "ns", "pod-Y"); err != nil {
+	if err := reg.EnsureTailer(t.Context(), "run-Y", storage.ForRun("ns", "run-Y"), "ns", "pod-Y"); err != nil {
 		t.Fatalf("EnsureTailer must not fail on wipe error: %v", err)
 	}
 	if reg.Get("run-Y") == nil {
@@ -765,7 +767,7 @@ func TestRegistry_ConcurrentDoubleStop(t *testing.T) {
 	up := &captureUploader{}
 	reg := NewRegistry(src, up, up, "logs")
 
-	if err := reg.EnsureTailer(t.Context(), "run-DS", "ns", "pod-DS"); err != nil {
+	if err := reg.EnsureTailer(t.Context(), "run-DS", storage.ForRun("ns", "run-DS"), "ns", "pod-DS"); err != nil {
 		t.Fatalf("EnsureTailer: %v", err)
 	}
 	tailer := reg.Get("run-DS")
@@ -828,7 +830,7 @@ func readAll(ch <-chan Frame, want int) []byte {
 func TestReopen_BudgetExhausted(t *testing.T) {
 	openErr := errors.New("open failed")
 	tailer := New(Config{
-		RunID: "r10",
+		Keys: storage.ForRun("ns", "r10"),
 		OpenSource: func(_ context.Context) (io.ReadCloser, error) {
 			return nil, openErr
 		},
@@ -884,13 +886,19 @@ func TestRingBuffer_CapacityCoercion(t *testing.T) {
 	}
 }
 
-// R12 LogChunkKey format is stable.
-func TestLogChunkKey_Format(t *testing.T) {
-	if k := LogChunkKey("run-x", 0); k != "kubetest-logs/run-x/00000000.log" {
-		t.Errorf("chunk 0 key = %q", k)
+// R12 (chunk key format) moved to pkg/storage TestRunKeys_Layout — the
+// layout is owned there now.
+
+// R13 Registry rejects invalid storage keys rather than writing chunks to
+// an un-namespaced prefix.
+func TestRegistry_EnsureTailerRejectsInvalidKeys(t *testing.T) {
+	reg := NewRegistry(nil, nil, nil, "")
+	defer reg.Shutdown()
+	if err := reg.EnsureTailer(t.Context(), "ns/run", storage.ForRun("", "uid"), "ns", "pod"); err == nil {
+		t.Fatal("expected error for keys without namespace")
 	}
-	if k := LogChunkKey("run-x", 42); k != "kubetest-logs/run-x/00000042.log" {
-		t.Errorf("chunk 42 key = %q", k)
+	if len(reg.Active()) != 0 {
+		t.Errorf("no tailer should start on invalid keys, got %v", reg.Active())
 	}
 }
 

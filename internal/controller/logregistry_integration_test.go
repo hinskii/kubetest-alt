@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // TestReconcile_LogRegistry_LifecycleHooks asserts §12 log-lifecycle wiring:
@@ -70,14 +71,20 @@ func TestReconcile_LogRegistry_LifecycleHooks(t *testing.T) {
 
 	// Ensure was called at least once with correct args. Idempotency means
 	// the reconciler may call it more than once — that's fine and by design.
+	// Keys MUST come from namespace + UID: a name-only prefix is what let
+	// same-named runs in different namespaces overwrite each other's logs.
+	wantID := ns + "/" + run.Name
+	wantKeys := storage.ForRun(ns, string(run.UID))
+	require.True(t, wantKeys.Valid(), "created run must carry a UID")
 	assert.Eventually(t, func() bool {
 		for _, c := range fakeLogRegistry.CallsForRun(run.Name) {
-			if c.Kind == "ensure" && c.PodName == "log-run-pod" && c.Namespace == ns {
+			if c.Kind == "ensure" && c.PodName == "log-run-pod" && c.Namespace == ns &&
+				c.ID == wantID && c.Keys == wantKeys {
 				return true
 			}
 		}
 		return false
-	}, 2*time.Second, 50*time.Millisecond, "expected EnsureTailer for the running pod")
+	}, 2*time.Second, 50*time.Millisecond, "expected EnsureTailer for the running pod with UID-based keys")
 
 	// Preload the wrapper's verdict and complete the Job.
 	fakeResults.Set(run.Name, &RunResult{Phase: testsv1alpha1.PhasePassed})
@@ -86,10 +93,10 @@ func TestReconcile_LogRegistry_LifecycleHooks(t *testing.T) {
 	})
 	waitForPhase(t, ctx, runKey, testsv1alpha1.PhasePassed, 5*time.Second)
 
-	// StopTailer must have been called for this run.
+	// StopTailer must have been called for this run, with the same ID.
 	assert.Eventually(t, func() bool {
 		for _, c := range fakeLogRegistry.CallsForRun(run.Name) {
-			if c.Kind == "stop" {
+			if c.Kind == "stop" && c.ID == wantID {
 				return true
 			}
 		}

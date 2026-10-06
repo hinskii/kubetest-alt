@@ -33,7 +33,8 @@ import (
 const MaxMatchedFiles = 10000
 
 // GlobMatch describes one file that matched an artifacts.paths pattern.
-// RelPath is what becomes the object-store key suffix (<runID>/<RelPath>).
+// RelPath is what becomes the object-store key suffix
+// (storage.RunKeys.Artifact(RelPath)).
 type GlobMatch struct {
 	// AbsPath is the fully-qualified path on the wrapper's filesystem.
 	AbsPath string

@@ -29,7 +29,12 @@ package executor
 // runs Command/Args verbatim. Verdict semantics are declared per-Test via
 // the Verdict field.
 type ExecutionRequest struct {
-	RunID          string            `json:"runId"`
+	RunID string `json:"runId"`
+	// StoragePrefix is the run's object-store subtree
+	// (runs/<namespace>/<runUID>/ — see pkg/storage.RunKeys). The compiler
+	// computes it; the wrapper only validates and uses it. Empty disables
+	// artifact + result upload.
+	StoragePrefix  string            `json:"storagePrefix,omitempty"`
 	TestRef        string            `json:"testRef"`
 	DataDir        string            `json:"dataDir"`
 	WorkingDir     string            `json:"workingDir,omitempty"`
@@ -151,7 +156,8 @@ type ArtifactRef struct {
 	Path string `json:"path"`
 
 	// Key is the object-store key the operator/UI uses to fetch the file.
-	// Layout: "<runID>/<Path>". Bucket is implicit (operator config).
+	// Layout: pkg/storage.RunKeys.Artifact(Path) —
+	// "runs/<namespace>/<runUID>/artifacts/<Path>". Bucket is implicit.
 	Key string `json:"key"`
 
 	// SizeBytes is the uploaded size. Handy for UI listings; not enforced.

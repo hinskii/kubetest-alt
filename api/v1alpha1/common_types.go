@@ -167,7 +167,8 @@ type ArtifactSpec struct {
 type ArtifactRef struct {
 	// Path is the file path relative to the wrapper's working directory.
 	Path string `json:"path"`
-	// Key is the object-store key ("<runID>/<Path>").
+	// Key is the object-store key
+	// ("runs/<namespace>/<runUID>/artifacts/<Path>").
 	// +optional
 	Key string `json:"key,omitempty"`
 	// +optional

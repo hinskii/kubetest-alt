@@ -37,17 +37,18 @@ type Scraper interface {
 	Scrape(ctx context.Context, workingDir string, spec ScrapeSpec) (ScrapeResult, error)
 
 	// UploadResult persists the FINAL result.json to object storage under
-	// <runID>/result.json so the controller's ResultReader can fetch it.
+	// <storagePrefix>result.json so the controller's ResultReader can fetch it.
 	// Called by the wrapper's Entry AFTER Scrape returns and the result is
 	// finalized (Phase reclassified for signal/timeout, Scrape output merged).
-	UploadResult(ctx context.Context, runID string, payload []byte) error
+	UploadResult(ctx context.Context, storagePrefix string, payload []byte) error
 }
 
 // ScrapeSpec is the input to Scraper.Scrape. Small struct so extending
 // (e.g. per-run compress option) doesn't break every implementation.
 type ScrapeSpec struct {
-	// RunID becomes the object-store key prefix — <bucket>/<runID>/<file>.
-	RunID string
+	// StoragePrefix is the run's object-store subtree (pkg/storage.RunKeys);
+	// artifacts land under <StoragePrefix>artifacts/<relpath>.
+	StoragePrefix string
 
 	// Paths are the doublestar glob patterns from Test.spec.artifacts.paths.
 	// Empty = nothing to scrape (Scraper returns empty ScrapeResult, no error).

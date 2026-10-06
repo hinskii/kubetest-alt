@@ -33,6 +33,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
+	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // Filesystem contract with the /entry wrapper (step 05). These paths are the
@@ -186,7 +187,7 @@ type MinIOOptions struct {
 }
 
 // MinIODefaultBucket is what cmd/operator uses when --minio-bucket is empty.
-const MinIODefaultBucket = "kubetest-artifacts"
+const MinIODefaultBucket = storage.DefaultBucket
 
 // MinIO-facing env var names on the wrapper container. Public consts so the
 // wrapper (pkg/executor, internal/scraper) reads by the same names.
@@ -488,6 +489,7 @@ func buildRequestJSON(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun,
 	image string, command, args []string, timeoutSec int64) (string, error) {
 	req := executor.ExecutionRequest{
 		RunID:          run.Name,
+		StoragePrefix:  storage.ForRun(run.Namespace, string(run.UID)).Prefix(),
 		TestRef:        run.Spec.TestRef,
 		DataDir:        DataDirPath,
 		WorkingDir:     test.Spec.Container.WorkingDir,
