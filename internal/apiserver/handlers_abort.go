@@ -28,13 +28,16 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controller"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // HeaderUser carries the end user's identity from a trusted front end
 // (Control Center behind oauth2-proxy). The API server is only reachable
 // through the Kubernetes service proxy, so anyone able to set this header
 // already holds services/proxy RBAC on it — it is attribution, not authn.
-const HeaderUser = "X-Kubetest-User"
+const HeaderUser = apiclient.HeaderUser
+
+type abortRequestBody = apiclient.AbortOptions
 
 // maxUserLen mirrors the CRD limit on AbortRequest.requestedBy.
 const maxUserLen = 256
@@ -46,11 +49,6 @@ func requestUser(r *http.Request) string {
 		u = u[:maxUserLen]
 	}
 	return u
-}
-
-// abortRequestBody is the optional JSON body of POST /runs/{id}/abort.
-type abortRequestBody struct {
-	Message string `json:"message,omitempty"`
 }
 
 // maxAbortMessageLen mirrors the CRD limit on AbortRequest.message.

@@ -28,12 +28,13 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
 // QueryNamespace is the query parameter that selects a namespace when the
 // server runs cluster-wide.
-const QueryNamespace = "namespace"
+const QueryNamespace = apiclient.QueryNamespace
 
 // errBadRequest is a client error from request parsing (namespace
 // resolution, query parameters) — always 400.

@@ -24,26 +24,21 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
-
-// errorEnvelope is the wire shape for API errors. Small on purpose —
-// browsers surface `message`; `reason` is for programmatic UI decisions
-// (managed-by-gitops badge etc.).
-type errorEnvelope struct {
-	Reason  string `json:"reason,omitempty"`
-	Message string `json:"message"`
-}
 
 // Reason constants map to programmatic UI behavior. Kept as constants so
 // tests can assert without string comparison drift.
 const (
-	ReasonNotFound        = "NotFound"
-	ReasonBadRequest      = "BadRequest"
-	ReasonConflict        = "Conflict"
-	ReasonManagedByGitOps = "ManagedByGitOps"
-	ReasonInternal        = "Internal"
-	ReasonServiceUnavail  = "ServiceUnavailable"
+	ReasonNotFound        = apiclient.ReasonNotFound
+	ReasonBadRequest      = apiclient.ReasonBadRequest
+	ReasonConflict        = apiclient.ReasonConflict
+	ReasonManagedByGitOps = apiclient.ReasonManagedByGitOps
+	ReasonInternal        = apiclient.ReasonInternal
+	ReasonServiceUnavail  = apiclient.ReasonServiceUnavail
 )
+
+type errorEnvelope = apiclient.Error
 
 // writeError writes an error envelope with the given HTTP status.
 func writeError(w http.ResponseWriter, status int, reason, message string) {

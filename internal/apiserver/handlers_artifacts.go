@@ -25,15 +25,14 @@ import (
 	"path"
 	"strings"
 
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
-// artifactEntry is one row of GET /runs/{id}/artifacts.
-type artifactEntry struct {
-	Path        string `json:"path"`
-	SizeBytes   int64  `json:"sizeBytes,omitempty"`
-	ContentType string `json:"contentType,omitempty"`
-}
+type (
+	artifactEntry       = apiclient.Artifact
+	artifactURLResponse = apiclient.ArtifactURL
+)
 
 // runArtifacts returns the artifact list recorded on the run (CR status or
 // archived row). Order is the scraper's upload order.
@@ -190,13 +189,6 @@ func safeFilename(relPath string) string {
 		}
 		return r
 	}, path.Base(relPath))
-}
-
-// artifactURLResponse is the wire shape returned by
-// GET /runs/{id}/artifacts/{path}?presign=1.
-type artifactURLResponse struct {
-	URL       string `json:"url"`
-	ExpiresIn int    `json:"expiresIn"`
 }
 
 // validateArtifactPath rejects path-traversal attempts. Applied to the

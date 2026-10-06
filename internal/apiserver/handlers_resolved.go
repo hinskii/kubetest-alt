@@ -24,26 +24,10 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
-// resolvedTest is the wire shape of GET /tests/{name}/resolved: what a run
-// form needs before any values exist.
-type resolvedTest struct {
-	Name      string            `json:"name"`
-	Namespace string            `json:"namespace"`
-	Labels    map[string]string `json:"labels,omitempty"`
-	// Tool: the Test's kubetest.io/tool label, else its templates'.
-	Tool string `json:"tool,omitempty"`
-	// GitOpsLocked mirrors §7: the definition is read-only in the GUI
-	// (runs are still allowed).
-	GitOpsLocked bool `json:"gitopsLocked"`
-	// Templates is spec.use, in merge order.
-	Templates []string `json:"templates,omitempty"`
-	// Spec is the Test merged with its templates. Expressions are NOT
-	// evaluated and config is NOT resolved — spec.config is the full
-	// parameter schema, including parameters only a template declares.
-	Spec *testsv1alpha1.TestSpec `json:"spec"`
-}
+type resolvedTest = apiclient.ResolvedTest
 
 // templateStore returns the configured TemplateStore, defaulting to one
 // backed by the server's (cached) client.

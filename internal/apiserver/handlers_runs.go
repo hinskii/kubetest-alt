@@ -34,11 +34,18 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // TagCreatedBy records who started a run from the GUI (X-Kubetest-User).
 // Server-owned: a payload value is overwritten when the header is present.
-const TagCreatedBy = "kubetest.io/created-by"
+const TagCreatedBy = apiclient.TagCreatedBy
+
+// Wire types live in pkg/apiclient (one contract for server and client).
+type (
+	runEnvelope = apiclient.Run
+	stepResult  = apiclient.StepResult
+)
 
 // createRun creates a TestRun. Two invariants (§7):
 //  1. source is set to "ui" server-side; payload override rejected.
@@ -107,7 +114,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 
 // HeaderNextCursor carries the opaque cursor for the next page of
 // finished runs on GET /runs. Absent when there is no next page.
-const HeaderNextCursor = "X-Next-Cursor"
+const HeaderNextCursor = apiclient.HeaderNextCursor
 
 // listRuns returns runs newest-first:
 //
@@ -343,44 +350,6 @@ func decodeRunCursor(s string) (*runCursor, error) {
 	return &runCursor{FinishedAt: t.UTC(), UID: uid}, nil
 }
 
-// runEnvelope is the wire shape for /runs and /runs/{id}. Mirrors CR and
-// Row shapes just enough for the GUI without leaking either fully.
-type runEnvelope struct {
-	UID        string     `json:"uid"`
-	Name       string     `json:"name"`
-	Namespace  string     `json:"namespace"`
-	TestRef    string     `json:"testRef"`
-	Phase      string     `json:"phase"`
-	Source     string     `json:"source,omitempty"`
-	QueuedAt   *time.Time `json:"queuedAt,omitempty"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	DurationMs int64      `json:"durationMs,omitempty"`
-	Message    string     `json:"message,omitempty"`
-	// Origin flags "cluster" (still in etcd) vs "archive" (only in store).
-	// Archived runs can't be aborted.
-	Origin string `json:"origin"`
-
-	Tool      string            `json:"tool,omitempty"`
-	ParentRun string            `json:"parentRun,omitempty"`
-	Tags      map[string]string `json:"tags,omitempty"`
-	// Config is the effective parameter set (defaults + run overrides).
-	Config     map[string]string     `json:"config,omitempty"`
-	TestCounts *store.TestCounts     `json:"testCounts,omitempty"`
-	Metrics    map[string]float64    `json:"metrics,omitempty"`
-	Steps      map[string]stepResult `json:"steps,omitempty"`
-	// Abort is set once someone (or something) asked the run to stop.
-	Abort *testsv1alpha1.AbortRequest `json:"abort,omitempty"`
-}
-
-// stepResult is the wire shape of one composite step / child entry.
-type stepResult struct {
-	Phase      string     `json:"phase,omitempty"`
-	StartedAt  *time.Time `json:"startedAt,omitempty"`
-	FinishedAt *time.Time `json:"finishedAt,omitempty"`
-	Message    string     `json:"message,omitempty"`
-}
-
 func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 	e := runEnvelope{
 		UID:        string(cr.UID),
@@ -406,7 +375,7 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 		e.Config = store.EffectiveConfig(nil, cr.Spec.Config)
 	}
 	if tc := cr.Status.TestCounts; tc != nil {
-		e.TestCounts = &store.TestCounts{Total: tc.Total, Passed: tc.Passed, Failed: tc.Failed, Skipped: tc.Skipped}
+		e.TestCounts = &apiclient.TestCounts{Total: tc.Total, Passed: tc.Passed, Failed: tc.Failed, Skipped: tc.Skipped}
 	}
 	if len(cr.Status.Metrics) > 0 {
 		e.Metrics = map[string]float64{}
@@ -463,7 +432,7 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		ParentRun:  row.ParentRun,
 		Tags:       row.Tags,
 		Config:     row.Config,
-		TestCounts: row.TestCounts,
+		TestCounts: storeCounts(row.TestCounts),
 		Metrics:    row.Metrics,
 	}
 	f := row.FinishedAt
@@ -499,4 +468,11 @@ func parseLimitOrDefault(s string) int {
 		return 500
 	}
 	return n
+}
+
+func storeCounts(tc *store.TestCounts) *apiclient.TestCounts {
+	if tc == nil {
+		return nil
+	}
+	return &apiclient.TestCounts{Total: tc.Total, Passed: tc.Passed, Failed: tc.Failed, Skipped: tc.Skipped}
 }
