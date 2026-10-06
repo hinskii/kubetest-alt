@@ -150,6 +150,10 @@ type Parameter struct {
 	Enum []string `json:"enum,omitempty"`
 	// +optional
 	Pattern string `json:"pattern,omitempty"`
+	// Description is shown next to the parameter in run forms.
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Description string `json:"description,omitempty"`
 }
 
 // ArtifactSpec describes files to scrape after a run (globs via doublestar).

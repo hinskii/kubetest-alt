@@ -27,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -123,6 +124,8 @@ func (f *fakeRunStore) Delete(_ context.Context, uid string) error {
 func (f *fakeRunStore) List(_ context.Context, filter store.Filter, page store.Page) ([]store.Row, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Same semantics as store.Postgres.List: filters, (finished_at, uid)
+	// DESC order, keyset "strictly after" the cursor.
 	var out []store.Row
 	for _, r := range f.rows {
 		if filter.TestRef != "" && r.TestRef != filter.TestRef {
@@ -131,8 +134,30 @@ func (f *fakeRunStore) List(_ context.Context, filter store.Filter, page store.P
 		if filter.Phase != "" && r.Phase != filter.Phase {
 			continue
 		}
+		if filter.Source != "" && r.Source != filter.Source {
+			continue
+		}
+		if filter.Namespace != "" && r.Namespace != filter.Namespace {
+			continue
+		}
+		if filter.SinceInclusive != nil && r.FinishedAt.Before(*filter.SinceInclusive) {
+			continue
+		}
+		if page.AfterFinishedAt != nil && page.After != "" {
+			at := *page.AfterFinishedAt
+			strictlyAfter := r.FinishedAt.Before(at) || (r.FinishedAt.Equal(at) && r.UID < page.After)
+			if !strictlyAfter {
+				continue
+			}
+		}
 		out = append(out, r)
 	}
+	slices.SortFunc(out, func(a, b store.Row) int {
+		if c := b.FinishedAt.Compare(a.FinishedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.UID, a.UID)
+	})
 	if page.Limit > 0 && len(out) > page.Limit {
 		out = out[:page.Limit]
 	}
@@ -368,9 +393,9 @@ func TestRuns_FilterByTestAndPhase(t *testing.T) {
 	t1 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	s, _ := mkServer(t)
 	s.Store = newFakeRunStore(
-		store.Row{UID: "keep", TestRef: "match", Phase: "failed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
-		store.Row{UID: "drop-test", TestRef: "other", Phase: "failed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
-		store.Row{UID: "drop-phase", TestRef: "match", Phase: "passed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
+		store.Row{UID: "keep", Namespace: "default", TestRef: "match", Phase: "failed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
+		store.Row{UID: "drop-test", Namespace: "default", TestRef: "other", Phase: "failed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
+		store.Row{UID: "drop-phase", Namespace: "default", TestRef: "match", Phase: "passed", StartedAt: &t1, FinishedAt: t1.Add(time.Minute)},
 	)
 	h := s.Handler()
 

@@ -40,6 +40,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
@@ -76,6 +77,10 @@ type Server struct {
 	// Deleter removes archived rows on DELETE /runs/{id}. Nil makes deletes
 	// of archived runs 503.
 	Deleter RunDeleter
+
+	// Templates resolves spec.use for GET /tests/{name}/resolved. Nil uses
+	// K8sClient (the production path).
+	Templates resolver.TemplateStore
 
 	// Bucket is the single object-store bucket the operator and wrapper
 	// write to. Keys inside it come from pkg/storage.RunKeys — the same
@@ -136,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tests", s.listTests)
 	mux.HandleFunc("POST /tests", s.createTest)
 	mux.HandleFunc("GET /tests/{name}", s.getTest)
+	mux.HandleFunc("GET /tests/{name}/resolved", s.getResolvedTest)
 	mux.HandleFunc("PATCH /tests/{name}", s.patchTest)
 	mux.HandleFunc("DELETE /tests/{name}", s.deleteTest)
 

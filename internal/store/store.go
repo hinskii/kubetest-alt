@@ -88,6 +88,13 @@ type Row struct {
 	LogsRef      string             `json:"logsRef,omitempty"`
 	Message      string             `json:"message,omitempty"`
 	Tags         map[string]string  `json:"tags,omitempty"`
+	// Config is the effective parameter set the run used (defaults from
+	// the resolved spec overlaid with TestRun.spec.config).
+	Config map[string]string `json:"config,omitempty"`
+	// Tool is the run's kubetest.io/tool identity.
+	Tool string `json:"tool,omitempty"`
+	// ParentRun is the composite parent's run name ("" for top-level).
+	ParentRun string `json:"parentRun,omitempty"`
 }
 
 // TestCounts mirrors the CRD/executor shape for JUnit-derived counts.
@@ -111,6 +118,7 @@ type Filter struct {
 	TestRef   string
 	Namespace string
 	Phase     string
+	Source    string
 	// SinceInclusive / UntilExclusive bound finished_at.
 	SinceInclusive *time.Time
 	UntilExclusive *time.Time

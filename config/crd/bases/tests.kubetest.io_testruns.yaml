@@ -18,6 +18,9 @@ spec:
     - jsonPath: .spec.testRef
       name: Test
       type: string
+    - jsonPath: .status.tool
+      name: Tool
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -3451,6 +3454,13 @@ spec:
                 - skipped
                 - total
                 type: object
+              tool:
+                description: |-
+                  Tool is the run's kubetest.io/tool identity, captured with the
+                  resolvedSpec snapshot: the Test's label, else the last template in
+                  spec.use that carries one. Propagated to the Job/Pod labels, metrics
+                  and run history — the TestRun's own labels usually don't carry it.
+                type: string
             type: object
         required:
         - spec

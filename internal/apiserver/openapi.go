@@ -67,6 +67,32 @@ func OpenAPISpec() map[string]any {
 					namespaceParam(),
 				},
 			},
+			"/tests/{name}/resolved": map[string]any{
+				"get": map[string]any{
+					"summary": "The Test merged with its TestTemplates (spec.use), for building run " +
+						"forms: full parameter schema incl. template-only parameters, tool, GitOps lock. " +
+						"Expressions are not evaluated. 422 when a referenced template is missing.",
+					"responses": map[string]any{
+						"200": jsonResponse(map[string]any{
+							"type":     "object",
+							"required": []string{"name", "namespace", "gitopsLocked", "spec"},
+							"properties": map[string]any{
+								"name":         map[string]any{"type": "string"},
+								"namespace":    map[string]any{"type": "string"},
+								"labels":       map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+								"tool":         map[string]any{"type": "string"},
+								"gitopsLocked": map[string]any{"type": "boolean"},
+								"templates":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+								"spec":         map[string]any{"type": "object", "description": "Merged TestSpec."},
+							},
+						}),
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"422": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("name", "Test name."), namespaceParam()},
+			},
 			"/runs": map[string]any{
 				"post": routeOp(
 					"Create a TestRun. spec.source is set server-side to \"ui\" — "+
@@ -74,10 +100,32 @@ func OpenAPISpec() map[string]any {
 						"referenced Test's managed-by label (§7 lets GUI trigger runs "+
 						"on gitops-owned Tests).",
 					jsonRef("#/components/schemas/TestRun"), jsonRef("#/components/schemas/TestRun"), errorResp()),
-				"get": routeOp(
-					"Merged list of active (cluster) and archived (store) runs, "+
-						"deduped by UID, sorted by startedAt DESC.",
-					nil, jsonArrayOf("#/components/schemas/RunEnvelope"), errorResp()),
+				"get": map[string]any{
+					"summary": "Live runs first (first page only), then finished runs newest-first " +
+						"by (finishedAt, uid), keyset-paginated: pass X-Next-Cursor back as ?after=. " +
+						"Cluster and archive are merged and deduped by UID (cluster wins).",
+					"parameters": []any{
+						queryParam("test", "Filter by Test name."),
+						queryParam("phase", "Filter by phase."),
+						queryParam("source", "Filter by source (ui, api, cli, cron, trigger, gitops)."),
+						queryParam("limit", "Finished runs per page (default 50, max 500)."),
+						queryParam("after", "Opaque cursor from the previous page's X-Next-Cursor."),
+						queryParam("finishedAfter", "RFC 3339; only runs finished at or after it (excludes live runs)."),
+					},
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Runs.",
+							"headers": map[string]any{HeaderNextCursor: map[string]any{
+								"description": "Cursor for the next page; absent on the last page.",
+								"schema":      map[string]any{"type": "string"},
+							}},
+							"content": map[string]any{"application/json": map[string]any{
+								"schema": jsonArrayOf("#/components/schemas/RunEnvelope"),
+							}},
+						},
+						"400": errorSchema(),
+					},
+				},
 				"parameters": []any{namespaceParam()},
 			},
 			"/runs/{id}": map[string]any{
@@ -243,6 +291,31 @@ func OpenAPISpec() map[string]any {
 							"type": "string", "enum": []string{"cluster", "archive"},
 							"description": "Where the record came from — cluster runs are still mutable via kubectl; archive runs are read-only history.",
 						},
+						"tool":      map[string]any{"type": "string", "description": "kubetest.io/tool identity."},
+						"parentRun": map[string]any{"type": "string", "description": "Composite parent run name, if any."},
+						"tags":      map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+						"config": map[string]any{
+							"type": "object", "additionalProperties": map[string]any{"type": "string"},
+							"description": "Effective parameters: declared defaults overlaid with the run's overrides.",
+						},
+						"testCounts": map[string]any{"type": "object", "properties": map[string]any{
+							"total": map[string]any{"type": "integer"}, "passed": map[string]any{"type": "integer"},
+							"failed": map[string]any{"type": "integer"}, "skipped": map[string]any{"type": "integer"},
+						}},
+						"metrics": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}},
+						"steps": map[string]any{"type": "object", "additionalProperties": map[string]any{
+							"type": "object", "properties": map[string]any{
+								"phase":      map[string]any{"type": "string"},
+								"startedAt":  map[string]any{"type": "string", "format": "date-time"},
+								"finishedAt": map[string]any{"type": "string", "format": "date-time"},
+								"message":    map[string]any{"type": "string"},
+							},
+						}},
+						"abort": map[string]any{"type": "object", "properties": map[string]any{
+							"reason":      map[string]any{"type": "string", "enum": []string{"User", "Concurrency", "Parent"}},
+							"message":     map[string]any{"type": "string"},
+							"requestedBy": map[string]any{"type": "string"},
+						}},
 					},
 				},
 				"Error": map[string]any{
@@ -336,6 +409,13 @@ func pathParam(name, description string) map[string]any {
 		"required":    true,
 		"description": description,
 		"schema":      map[string]any{"type": "string"},
+	}
+}
+
+func queryParam(name, description string) map[string]any {
+	return map[string]any{
+		"name": name, "in": "query", "required": false,
+		"description": description, "schema": map[string]any{"type": "string"},
 	}
 }
 

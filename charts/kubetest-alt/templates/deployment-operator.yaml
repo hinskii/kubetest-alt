@@ -42,6 +42,12 @@ spec:
             {{- if .Values.minio.useSSL }}
             - --minio-use-ssl
             {{- end }}
+            {{- if .Values.operator.logs.enabled }}
+            # Pod-log streaming to MinIO (§12/§15.4). The binary defaults it
+            # off because standalone installs may lack pods/log RBAC; this
+            # chart grants that RBAC, so it's on whenever MinIO is.
+            - --logs-enabled
+            {{- end }}
             {{- end }}
             {{- if .Values.postgresql.dsn }}
             - --postgres-dsn={{ .Values.postgresql.dsn }}

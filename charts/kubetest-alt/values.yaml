@@ -87,8 +87,11 @@ operator:
     limits:
       cpu: 500m
       memory: 512Mi
+  # Stream pod logs to MinIO while runs execute (needs minio.endpoint).
+  # Without it, run logs are never stored — the GUI shows nothing.
+  logs:
+    enabled: true
   # Extra flags appended to the operator's argv. Common overrides:
-  #   - --logs-enabled       enable pod-log streaming to MinIO
   #   - --scheduler-tick-interval=15s
   #   - --trigger-gate-eval-interval=500ms
   extraArgs: []

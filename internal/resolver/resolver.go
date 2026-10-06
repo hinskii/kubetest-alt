@@ -93,26 +93,11 @@ func Resolve(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, store Templat
 		return nil, errors.New("nil TestRun")
 	}
 
-	// Deep-copy the Test so subsequent merges don't touch the input.
-	// TestSpec is a struct — the shallow copy at *test.Spec still shares
-	// slices and pointers. mergeSpec builds a fresh spec value from
-	// scratch so we don't rely on that behavior.
-	merged := &testsv1alpha1.TestSpec{}
-
-	// Step 1: merge templates in order.
-	for _, name := range test.Spec.Use {
-		tmpl, err := store.Get(test.Namespace, name)
-		if err != nil {
-			if errors.Is(err, ErrTemplateNotFound) {
-				return nil, fmt.Errorf("template %q not found in namespace %q", name, test.Namespace)
-			}
-			return nil, fmt.Errorf("fetch template %q: %w", name, err)
-		}
-		mergeTemplateInto(merged, &tmpl.Spec)
+	// Steps 1+2: templates in order, then the Test itself.
+	merged, _, err := MergeTemplates(test, store)
+	if err != nil {
+		return nil, err
 	}
-
-	// Step 2: Test overrides templates.
-	mergeTestInto(merged, &test.Spec)
 
 	// Step 3: config resolution + coercion.
 	resolvedConfig, err := ResolveConfig(merged.Config, run.Spec.Config)
@@ -141,6 +126,47 @@ func Resolve(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, store Templat
 
 	return merged, nil
 }
+
+// MergeTemplates returns a NEW *TestSpec with test.Spec.Use templates
+// merged in order (later wins) and the Test's own spec on top — Resolve's
+// steps 1 and 2, without config resolution or expression evaluation. That
+// is what a run form needs: the full parameter schema (including
+// parameters only a template declares) before any values exist; Resolve
+// would reject missing required parameters.
+//
+// tool is the kubetest.io/tool label: the Test's own, else the last
+// template in spec.use that carries one (matching later-wins merging).
+func MergeTemplates(test *testsv1alpha1.Test, store TemplateStore) (spec *testsv1alpha1.TestSpec, tool string, err error) {
+	if test == nil {
+		return nil, "", errors.New("nil Test")
+	}
+	// mergeTemplateInto/mergeTestInto build a fresh spec, so the inputs'
+	// shared slices and pointers are never written to.
+	merged := &testsv1alpha1.TestSpec{}
+	for _, name := range test.Spec.Use {
+		tmpl, err := store.Get(test.Namespace, name)
+		if err != nil {
+			if errors.Is(err, ErrTemplateNotFound) {
+				return nil, "", fmt.Errorf("template %q not found in namespace %q", name, test.Namespace)
+			}
+			return nil, "", fmt.Errorf("fetch template %q: %w", name, err)
+		}
+		mergeTemplateInto(merged, &tmpl.Spec)
+		if t := tmpl.Labels[LabelTool]; t != "" {
+			tool = t
+		}
+	}
+	mergeTestInto(merged, &test.Spec)
+	if t := test.Labels[LabelTool]; t != "" {
+		tool = t
+	}
+	return merged, tool, nil
+}
+
+// LabelTool is the tool-identity label (CLAUDE.md §3). Mirrors
+// compiler.LabelKubetestTool; duplicated to keep resolver free of the
+// compiler import.
+const LabelTool = "kubetest.io/tool"
 
 // ResolveConfig applies test defaults overlaid with run overrides, enforces
 // required-missing (no default), and coerces via expr.CoerceParam.

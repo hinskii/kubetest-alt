@@ -1,7 +1,9 @@
 {{/*
-API server ClusterRole. Narrower than the operator's — the API server
-only reads/writes CRs (backing GUI CRUD) and reads logs+artifacts from
-storage. It does NOT need Jobs / Pods write / Leases.
+API server ClusterRole — exactly what internal/apiserver uses, nothing
+more. Logs and artifacts come from object storage, so no pods/pods/log.
+No TestTriggers / Webhooks: the API server never touches them, and write
+access there would let any API caller rewire triggers or exfiltrate run
+events (fixes.md #1).
 */}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -11,19 +13,18 @@ metadata:
     {{- include "kubetest-alt.labels" . | nindent 4 }}
     app.kubernetes.io/component: apiserver
 rules:
-  # Tests + TestRuns: GUI CRUD (create/patch/delete) with §7 managed-by
-  # enforcement done in the apiserver code.
+  # Tests: GUI CRUD, with §7 managed-by enforcement in the API server.
   - apiGroups: ["tests.kubetest.io"]
-    resources: ["tests", "testruns", "testtemplates", "testtriggers", "webhooks"]
+    resources: ["tests"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # Read-only on Pods for pod-log endpoint fallback (websocket handler
-  # tails via K8s API when apiserver has no MinIO wiring configured).
-  - apiGroups: [""]
-    resources: ["pods"]
+  # TestRuns: start (create), abort (patch spec.abort), delete from history.
+  - apiGroups: ["tests.kubetest.io"]
+    resources: ["testruns"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  # TestTemplates: read-only, for GET /tests/{name}/resolved.
+  - apiGroups: ["tests.kubetest.io"]
+    resources: ["testtemplates"]
     verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods/log"]
-    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

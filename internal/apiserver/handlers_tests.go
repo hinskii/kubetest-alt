@@ -92,6 +92,12 @@ func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 		t.Labels = map[string]string{}
 	}
 	t.Labels[LabelManagedBy] = ManagedByUI
+	if u := requestUser(r); u != "" {
+		if t.Annotations == nil {
+			t.Annotations = map[string]string{}
+		}
+		t.Annotations[TagCreatedBy] = u
+	}
 
 	ns, err := s.targetNamespace(r, t.Namespace)
 	if err != nil {

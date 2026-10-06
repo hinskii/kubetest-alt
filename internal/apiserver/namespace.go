@@ -35,10 +35,11 @@ import (
 // server runs cluster-wide.
 const QueryNamespace = "namespace"
 
-// errNamespace is a client error from namespace resolution — always 400.
-type errNamespace struct{ msg string }
+// errBadRequest is a client error from request parsing (namespace
+// resolution, query parameters) — always 400.
+type errBadRequest struct{ msg string }
 
-func (e errNamespace) Error() string { return e.msg }
+func (e errBadRequest) Error() string { return e.msg }
 
 // targetNamespace resolves the namespace a single-object request (get,
 // create, patch, delete, logs, artifacts) acts on. Candidates are the
@@ -56,7 +57,7 @@ func (s *Server) targetNamespace(r *http.Request, payloadNS string) (string, err
 	if s.Namespace != "" {
 		for _, c := range []string{queryNS, payloadNS} {
 			if c != "" && c != s.Namespace {
-				return "", errNamespace{fmt.Sprintf(
+				return "", errBadRequest{fmt.Sprintf(
 					"this API server is scoped to namespace %q; got %q", s.Namespace, c)}
 			}
 		}
@@ -64,14 +65,14 @@ func (s *Server) targetNamespace(r *http.Request, payloadNS string) (string, err
 	}
 	switch {
 	case queryNS != "" && payloadNS != "" && queryNS != payloadNS:
-		return "", errNamespace{fmt.Sprintf(
+		return "", errBadRequest{fmt.Sprintf(
 			"?namespace=%q disagrees with metadata.namespace %q", queryNS, payloadNS)}
 	case queryNS != "":
 		return queryNS, nil
 	case payloadNS != "":
 		return payloadNS, nil
 	}
-	return "", errNamespace{"namespace is required: this API server is cluster-wide, pass ?namespace="}
+	return "", errBadRequest{"namespace is required: this API server is cluster-wide, pass ?namespace="}
 }
 
 // listNamespace resolves the namespace filter for list endpoints. Empty
@@ -79,7 +80,7 @@ func (s *Server) targetNamespace(r *http.Request, payloadNS string) (string, err
 func (s *Server) listNamespace(r *http.Request) (string, error) {
 	queryNS := r.URL.Query().Get(QueryNamespace)
 	if s.Namespace != "" && queryNS != "" && queryNS != s.Namespace {
-		return "", errNamespace{fmt.Sprintf(
+		return "", errBadRequest{fmt.Sprintf(
 			"this API server is scoped to namespace %q; got %q", s.Namespace, queryNS)}
 	}
 	if s.Namespace != "" {
@@ -141,10 +142,10 @@ func (s *Server) findRun(ctx context.Context, namespace, id string) (runRef, err
 // writeLookupError maps namespace/run-resolution errors to HTTP statuses
 // and defers everything else to writeAPIError.
 func writeLookupError(w http.ResponseWriter, err error) {
-	var nsErr errNamespace
+	var badReq errBadRequest
 	switch {
-	case errors.As(err, &nsErr):
-		writeError(w, http.StatusBadRequest, ReasonBadRequest, nsErr.Error())
+	case errors.As(err, &badReq):
+		writeError(w, http.StatusBadRequest, ReasonBadRequest, badReq.Error())
 	case errors.Is(err, errRunNotFound):
 		writeError(w, http.StatusNotFound, ReasonNotFound, err.Error())
 	default:

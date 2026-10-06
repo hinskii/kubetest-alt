@@ -209,6 +209,39 @@ func TestIntegration_Delete(t *testing.T) {
 	assert.ErrorIs(t, p.Delete(ctx, "not-a-uuid"), ErrNotFound)
 }
 
+// TestIntegration_RunContextColumns covers migration 0002: config, tool and
+// parent_run round-trip, step messages survive, and List filters by source.
+func TestIntegration_RunContextColumns(t *testing.T) {
+	ctx := t.Context()
+	finished := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	p := NewPostgres(harness.pool)
+	require.NoError(t, p.EnsurePartitions(ctx, PartitionsToCreate(finished, 0, 0)))
+
+	uid := "aaaaaaaa-0000-0000-0000-0000000000c1"
+	run := newRun(uid, "ctx-test", testsv1alpha1.PhaseFailed, finished)
+	run.Spec.Source = "ui"
+	run.Spec.Config = map[string]string{"vus": "50"}
+	run.Status.ResolvedSpec = `{"config":{"vus":{"type":"integer","default":"10"},"duration":{"type":"string","default":"1m"}}}`
+	run.Status.Tool = "k6"
+	run.Labels = map[string]string{LabelParentRun: "suite-run"}
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "failed", Message: "step timeout exceeded"}}
+	require.NoError(t, p.SaveFinished(ctx, run))
+
+	got, err := p.Get(ctx, uid)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"vus": "50", "duration": "1m"}, got.Config)
+	assert.Equal(t, "k6", got.Tool)
+	assert.Equal(t, "suite-run", got.ParentRun)
+	assert.Equal(t, "step timeout exceeded", got.Steps["s0"].(map[string]any)["message"])
+
+	ui, err := p.List(ctx, Filter{TestRef: "ctx-test", Source: "ui"}, Page{})
+	require.NoError(t, err)
+	require.Len(t, ui, 1)
+	none, err := p.List(ctx, Filter{TestRef: "ctx-test", Source: "cron"}, Page{})
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}
+
 // TestIntegration_ListFiltersAndKeysetPagination covers:
 //   - Filters by test_ref, namespace, phase, time range.
 //   - Keyset pagination is stable — page 2 doesn't repeat page 1 items

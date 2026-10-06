@@ -18,6 +18,32 @@
       },
       "RunEnvelope": {
         "properties": {
+          "abort": {
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "reason": {
+                "enum": [
+                  "User",
+                  "Concurrency",
+                  "Parent"
+                ],
+                "type": "string"
+              },
+              "requestedBy": {
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "config": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Effective parameters: declared defaults overlaid with the run's overrides.",
+            "type": "object"
+          },
           "durationMs": {
             "type": "integer"
           },
@@ -27,6 +53,12 @@
           },
           "message": {
             "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
           },
           "name": {
             "type": "string"
@@ -40,6 +72,10 @@
               "cluster",
               "archive"
             ],
+            "type": "string"
+          },
+          "parentRun": {
+            "description": "Composite parent run name, if any.",
             "type": "string"
           },
           "phase": {
@@ -56,7 +92,56 @@
             "format": "date-time",
             "type": "string"
           },
+          "steps": {
+            "additionalProperties": {
+              "properties": {
+                "finishedAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "object"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "testCounts": {
+            "properties": {
+              "failed": {
+                "type": "integer"
+              },
+              "passed": {
+                "type": "integer"
+              },
+              "skipped": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              }
+            },
+            "type": "object"
+          },
           "testRef": {
+            "type": "string"
+          },
+          "tool": {
+            "description": "kubetest.io/tool identity.",
             "type": "string"
           },
           "uid": {
@@ -120,6 +205,62 @@
     },
     "/runs": {
       "get": {
+        "parameters": [
+          {
+            "description": "Filter by Test name.",
+            "in": "query",
+            "name": "test",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by phase.",
+            "in": "query",
+            "name": "phase",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter by source (ui, api, cli, cron, trigger, gitops).",
+            "in": "query",
+            "name": "source",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Finished runs per page (default 50, max 500).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque cursor from the previous page's X-Next-Cursor.",
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "RFC 3339; only runs finished at or after it (excludes live runs).",
+            "in": "query",
+            "name": "finishedAfter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -132,20 +273,15 @@
                 }
               }
             },
-            "description": "OK"
-          },
-          "201": {
-            "content": {
-              "application/json": {
+            "description": "Runs.",
+            "headers": {
+              "X-Next-Cursor": {
+                "description": "Cursor for the next page; absent on the last page.",
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RunEnvelope"
-                  },
-                  "type": "array"
+                  "type": "string"
                 }
               }
-            },
-            "description": "OK"
+            }
           },
           "400": {
             "content": {
@@ -156,39 +292,9 @@
               }
             },
             "description": "OK"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "500": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "OK"
           }
         },
-        "summary": "Merged list of active (cluster) and archived (store) runs, deduped by UID, sorted by startedAt DESC."
+        "summary": "Live runs first (first page only), then finished runs newest-first by (finishedAt, uid), keyset-paginated: pass X-Next-Cursor back as ?after=. Cluster and archive are merged and deduped by UID (cluster wins)."
       },
       "parameters": [
         {
@@ -1138,6 +1244,109 @@
         },
         "summary": "Merge-patch a Test. Blocked 409 for managed-by!=ui (§7)."
       }
+    },
+    "/tests/{name}/resolved": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "gitopsLocked": {
+                      "type": "boolean"
+                    },
+                    "labels": {
+                      "additionalProperties": {
+                        "type": "string"
+                      },
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    },
+                    "spec": {
+                      "description": "Merged TestSpec.",
+                      "type": "object"
+                    },
+                    "templates": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "tool": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "namespace",
+                    "gitopsLocked",
+                    "spec"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The Test merged with its TestTemplates (spec.use), for building run forms: full parameter schema incl. template-only parameters, tool, GitOps lock. Expressions are not evaluated. 422 when a referenced template is missing."
+      },
+      "parameters": [
+        {
+          "description": "Test name.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     }
   }
 }

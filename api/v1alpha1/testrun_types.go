@@ -107,6 +107,13 @@ type TestRunStatus struct {
 	// +optional
 	JobName string `json:"jobName,omitempty"`
 
+	// Tool is the run's kubetest.io/tool identity, captured with the
+	// resolvedSpec snapshot: the Test's label, else the last template in
+	// spec.use that carries one. Propagated to the Job/Pod labels, metrics
+	// and run history — the TestRun's own labels usually don't carry it.
+	// +optional
+	Tool string `json:"tool,omitempty"`
+
 	// ResolvedSpec is a JSON snapshot of the Test spec taken at run start.
 	// Historical runs remain interpretable after the Test is edited (§15.5).
 	// +optional
@@ -145,6 +152,7 @@ type TestRunStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Test",type=string,JSONPath=`.spec.testRef`
+// +kubebuilder:printcolumn:name="Tool",type=string,JSONPath=`.status.tool`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Started",type=date,JSONPath=`.status.startedAt`
 

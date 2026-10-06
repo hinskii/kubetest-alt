@@ -444,6 +444,7 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		return ctrl.Result{}, fmt.Errorf("snapshot resolved spec: %w", err)
 	}
 	run.Status.ResolvedSpec = string(snap)
+	run.Status.Tool = r.toolFor(&test)
 	run.Status.Phase = testsv1alpha1.PhaseQueued
 	run.Status.Message = ""
 	if run.Status.QueuedAt == nil {
@@ -532,13 +533,19 @@ func (r *TestRunReconciler) createJob(ctx context.Context, logger interface{ Inf
 			ReasonCompileError, fmt.Sprintf("resolvedSpec unmarshal: %v", err))
 	}
 
-	// Reconstruct a minimal *Test for the compiler — only Spec is read from it.
+	// Reconstruct a minimal *Test for the compiler: Spec plus the tool
+	// label, which the compiler propagates onto the Job/Pod (fixes.md #3 —
+	// it used to be dropped here, so kubectl selectors by tool matched
+	// nothing).
 	testForCompile := &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.Spec.TestRef,
 			Namespace: run.Namespace,
 		},
 		Spec: testSpec,
+	}
+	if tool := runTool(run); tool != "" {
+		testForCompile.Labels = map[string]string{compiler.LabelKubetestTool: tool}
 	}
 	job, aux, cerr := compiler.Compile(testForCompile, run, r.CompilerOpts)
 	if cerr != nil {
@@ -628,7 +635,7 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 				// matching decrement fires in transitionTerminal for
 				// runs that went through this path.
 				metrics.ActiveRuns.
-					WithLabelValues(metrics.NormalizeTool(run.Labels[compiler.LabelKubetestTool])).
+					WithLabelValues(metrics.NormalizeTool(runTool(run))).
 					Inc()
 			}
 		}
@@ -716,11 +723,7 @@ func (r *TestRunReconciler) dispatchWebhooks(ctx context.Context, run *testsv1al
 		return
 	}
 	event := string(run.Status.Phase)
-	// Tool label propagates from resolved spec's labels via the compiler
-	// onto the Job/Pod; but the CR itself doesn't carry it. Best-effort
-	// lookup from run.Labels + resolvedSpec's implied tool for the
-	// payload. Empty string is fine — payload just doesn't include it.
-	tool := run.Labels[compiler.LabelKubetestTool]
+	tool := runTool(run)
 	payload := webhookdelivery.BuildPayload(event, run, tool, r.Now())
 	for i := range hooks.Items {
 		hook := &hooks.Items[i]
@@ -785,7 +788,7 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 	// If the run was Running before (StartedAt set) the ActiveRuns
 	// gauge decrements to match — otherwise it's a straight-to-error
 	// transition and the gauge was never incremented for this run.
-	tool := metrics.NormalizeTool(run.Labels[compiler.LabelKubetestTool])
+	tool := metrics.NormalizeTool(runTool(run))
 	source := metrics.NormalizeSource(run.Spec.Source)
 	metrics.RunsTotal.WithLabelValues(tool, string(phase), source).Inc()
 	if run.Status.StartedAt != nil && run.Status.Phase == testsv1alpha1.PhaseRunning {
@@ -978,4 +981,28 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 // different namespaces never share (or stop) each other's tailer.
 func tailerID(run *testsv1alpha1.TestRun) string {
 	return run.Namespace + "/" + run.Name
+}
+
+// runTool is the run's tool identity: status.tool (from the Test/templates
+// at setup), else a kubetest.io/tool label set on the TestRun itself.
+func runTool(run *testsv1alpha1.TestRun) string {
+	if run.Status.Tool != "" {
+		return run.Status.Tool
+	}
+	return run.Labels[compiler.LabelKubetestTool]
+}
+
+// toolFor derives the tool identity for a Test (its label, else its
+// templates'). Resolution already succeeded with the same templates by the
+// time this runs, so a lookup error only means "unknown tool".
+func (r *TestRunReconciler) toolFor(test *testsv1alpha1.Test) string {
+	store := r.TemplateStore
+	if store == nil {
+		store = resolver.MapStore{}
+	}
+	_, tool, err := resolver.MergeTemplates(test, store)
+	if err != nil {
+		return test.Labels[compiler.LabelKubetestTool]
+	}
+	return tool
 }

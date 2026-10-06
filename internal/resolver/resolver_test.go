@@ -492,3 +492,59 @@ func TestResolve_DoesNotMutateInputs(t *testing.T) {
 	assert.Nil(t, test.Spec.Pod, "resolver must not backfill Pod on the input Test")
 	assert.NotNil(t, tmpl.Spec.Pod, "template unchanged")
 }
+
+// --- MergeTemplates (run-form schema) ---------------------------------
+
+func TestMergeTemplates_ExposesTemplateOnlyParamsWithoutValues(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Use = []string{"k6"}
+	tmpl := &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "k6", Namespace: "ns", Labels: map[string]string{LabelTool: "k6"}},
+		Spec: testsv1alpha1.TestTemplateSpec{
+			Config: map[string]testsv1alpha1.Parameter{
+				// Required (no default) — Resolve would fail without a value;
+				// MergeTemplates must still return it for the form.
+				"script": {Type: "string", Description: "Path to the k6 script"},
+				"vus":    {Type: "integer", Default: "10"},
+			},
+		},
+	}
+	spec, tool, err := MergeTemplates(test, MapStore{"ns/k6": tmpl})
+	require.NoError(t, err)
+	assert.Equal(t, "k6", tool, "tool comes from the template when the Test has no label")
+	require.Contains(t, spec.Config, "script")
+	assert.Equal(t, "Path to the k6 script", spec.Config["script"].Description)
+	assert.Equal(t, "10", spec.Config["vus"].Default)
+
+	_, err = Resolve(test, mkRun(), MapStore{"ns/k6": tmpl}, Options{})
+	require.Error(t, err, "sanity: full resolution needs a value for the required param")
+}
+
+func TestMergeTemplates_TestToolLabelWins(t *testing.T) {
+	test := mkTestBase()
+	test.Labels = map[string]string{LabelTool: "custom"}
+	test.Spec.Use = []string{"k6"}
+	tmpl := &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "k6", Namespace: "ns", Labels: map[string]string{LabelTool: "k6"}},
+	}
+	_, tool, err := MergeTemplates(test, MapStore{"ns/k6": tmpl})
+	require.NoError(t, err)
+	assert.Equal(t, "custom", tool)
+}
+
+func TestMergeTemplates_LeavesExpressionsUnevaluated(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Container.Args = []string{"run", "{{ config.script }}"}
+	test.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string"}}
+	spec, _, err := MergeTemplates(test, MapStore{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"run", "{{ config.script }}"}, spec.Container.Args)
+}
+
+func TestMergeTemplates_MissingTemplate(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Use = []string{"nope"}
+	_, _, err := MergeTemplates(test, MapStore{})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `template "nope" not found`)
+}

@@ -95,7 +95,7 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 - Tests for every lookup path; e2e asserts operator-written logs are
   readable through the apiserver.
 
-### 18b — apiserver: endpoints Control Center needs + `pkg/apiclient`
+### 18b — apiserver: endpoints Control Center needs
 - `POST /runs/{name}/abort` (new `spec.abort`): controller kills Job,
   writes `aborted`, persists to Postgres, fires webhook.
 - `DELETE /runs/{uid}`: store row + MinIO prefix; refuses non-terminal.
@@ -104,7 +104,10 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 - `GET /runs`: `after` cursor, `source`, `finishedAfter`.
 - `X-Kubetest-User` → `kubetest.io/created-by` tag.
 - Apiserver ClusterRole narrowed (no templates/triggers/webhooks writes).
-- `pkg/apiclient`: typed Go client (direct URL or via K8s service proxy).
+- Done along the way: `status.tool` (fixes.md #3), run context in history
+  (effective config, tool, parent run — migration 0002), chart enables
+  `--logs-enabled` (logs were never stored on default installs), e2e
+  MinIO images moved to pinned Chainguard (upstream images removed).
 
 ### 18c — Metrics for every catalog tool
 | tool       | source            | metrics |
@@ -120,6 +123,8 @@ history. Minute grouping is dropped; composite Tests show parent + children.
 Stable metric-key vocabulary in `docs/metrics.md`; the GUI renders by key.
 
 ### 18d — Control Center skeleton
+- `pkg/apiclient`: typed Go client for the kubetest apiserver (direct URL
+  or via the K8s service proxy), built together with its first consumer.
 - `cmd/control-center/main.go`, `internal/controlcenter/{server,auth,clusters,store,views,jobs}`.
 - Cluster registry from config file (YAML list, any number of clusters).
 - Postgres schema + goose migrations; healthz/readyz; Prometheus `/metrics`.

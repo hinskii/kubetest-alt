@@ -272,3 +272,42 @@ func TestMetricParseWarning_Error(t *testing.T) {
 	assert.Contains(t, w.Error(), `"p95_ms"`)
 	assert.Contains(t, w.Error(), `"nope"`)
 }
+
+// Control Center compares runs by the parameters they ACTUALLY ran with —
+// declared defaults overlaid with the run's overrides — plus tool and
+// composite parent.
+func TestRowFromRun_RunContext(t *testing.T) {
+	run := mkTerminalRun(t)
+	run.Spec.Config = map[string]string{"vus": "50"}
+	run.Status.ResolvedSpec = `{"config":{"vus":{"type":"integer","default":"10"},` +
+		`"duration":{"type":"string","default":"1m"},"script":{"type":"string"}}}`
+	run.Status.Tool = "k6"
+	run.Labels = map[string]string{LabelParentRun: "nightly-suite-run"}
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{
+		"s0": {Phase: testsv1alpha1.StepPhaseFailed, Message: "step timeout exceeded"},
+	}
+
+	row, err := RowFromRun(run, nil)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"vus": "50", "duration": "1m"}, row.Config,
+		"override wins, defaults fill in, params without a default stay absent")
+	assert.Equal(t, "k6", row.Tool)
+	assert.Equal(t, "nightly-suite-run", row.ParentRun)
+	assert.Equal(t, "step timeout exceeded", row.Steps["s0"].(map[string]any)["message"])
+}
+
+func TestRowFromRun_ToolFallsBackToLabel(t *testing.T) {
+	run := mkTerminalRun(t)
+	run.Labels = map[string]string{LabelTool: "jmeter"}
+	row, err := RowFromRun(run, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "jmeter", row.Tool)
+}
+
+func TestEffectiveConfig(t *testing.T) {
+	assert.Nil(t, EffectiveConfig(nil, nil))
+	assert.Nil(t, EffectiveConfig(map[string]testsv1alpha1.Parameter{"x": {Type: "string"}}, nil),
+		"declared without default and not overridden → nothing to record")
+	assert.Equal(t, map[string]string{"extra": "1"},
+		EffectiveConfig(nil, map[string]string{"extra": "1"}))
+}

@@ -73,6 +73,7 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 	testCounts := jsonbOrNil(row.TestCounts)
 	artifacts := jsonbOrNil(row.ArtifactRefs)
 	tags := jsonbOrNil(row.Tags)
+	config := jsonbOrNil(row.Config)
 
 	// ON CONFLICT (uid, finished_at) is safe because uid is unique per run
 	// (Kubernetes UUID) and finished_at is stable once a run is terminal
@@ -82,12 +83,12 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			uid, name, namespace, test_ref, phase, source,
 			queued_at, started_at, finished_at, duration_ms,
 			resolved_spec, steps, metrics, test_counts, artifact_refs,
-			logs_ref, message, tags
+			logs_ref, message, tags, config, tool, parent_run
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
 			$11, $12, $13, $14, $15,
-			$16, $17, $18
+			$16, $17, $18, $19, $20, $21
 		)
 		ON CONFLICT (uid, finished_at) DO UPDATE SET
 			name          = EXCLUDED.name,
@@ -105,13 +106,17 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			artifact_refs = EXCLUDED.artifact_refs,
 			logs_ref      = EXCLUDED.logs_ref,
 			message       = EXCLUDED.message,
-			tags          = EXCLUDED.tags
+			tags          = EXCLUDED.tags,
+			config        = EXCLUDED.config,
+			tool          = EXCLUDED.tool,
+			parent_run    = EXCLUDED.parent_run
 	`
 	_, err = p.pool.Exec(ctx, stmt,
 		row.UID, row.Name, row.Namespace, row.TestRef, row.Phase, nullIfEmpty(row.Source),
 		row.QueuedAt, row.StartedAt, row.FinishedAt, nullIfZero(row.DurationMs),
 		resolvedSpec, steps, metrics, testCounts, artifacts,
 		nullIfEmpty(row.LogsRef), nullIfEmpty(row.Message), tags,
+		config, nullIfEmpty(row.Tool), nullIfEmpty(row.ParentRun),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert %s: %w", row.UID, err)
@@ -182,6 +187,10 @@ func (p *Postgres) List(ctx context.Context, f Filter, page Page) ([]Row, error)
 	if f.Phase != "" {
 		clauses = append(clauses, fmt.Sprintf(`phase = $%d`, len(args)+1))
 		args = append(args, f.Phase)
+	}
+	if f.Source != "" {
+		clauses = append(clauses, fmt.Sprintf(`source = $%d`, len(args)+1))
+		args = append(args, f.Source)
 	}
 	if f.SinceInclusive != nil {
 		clauses = append(clauses, fmt.Sprintf(`finished_at >= $%d`, len(args)+1))
@@ -283,7 +292,7 @@ const selectCols = `
 	uid::text, name, namespace, test_ref, phase, source,
 	queued_at, started_at, finished_at, duration_ms,
 	resolved_spec, steps, metrics, test_counts, artifact_refs,
-	logs_ref, message, tags
+	logs_ref, message, tags, config, tool, parent_run
 `
 
 func scanRows(rows pgx.Rows) ([]Row, error) {
@@ -301,12 +310,15 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			tcBytes    []byte
 			arBytes    []byte
 			tagsBytes  []byte
+			cfgBytes   []byte
+			tool       *string
+			parentRun  *string
 		)
 		if err := rows.Scan(
 			&r.UID, &r.Name, &r.Namespace, &r.TestRef, &r.Phase, &source,
 			&r.QueuedAt, &r.StartedAt, &r.FinishedAt, &duration,
 			&specBytes, &stepsBytes, &metricsB, &tcBytes, &arBytes,
-			&logsRef, &message, &tagsBytes,
+			&logsRef, &message, &tagsBytes, &cfgBytes, &tool, &parentRun,
 		); err != nil {
 			return nil, err
 		}
@@ -321,6 +333,12 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 		}
 		if duration != nil {
 			r.DurationMs = *duration
+		}
+		if tool != nil {
+			r.Tool = *tool
+		}
+		if parentRun != nil {
+			r.ParentRun = *parentRun
 		}
 		// pgx returns timestamps in the session's timezone; force UTC so
 		// callers can compare against wall clocks without surprise.
@@ -356,6 +374,9 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			}
 		}
 		if err := unmarshalJSONBIfPresent(tagsBytes, &r.Tags); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSONBIfPresent(cfgBytes, &r.Config); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

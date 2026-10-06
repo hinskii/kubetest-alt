@@ -82,6 +82,11 @@ spec:
                   properties:
                     default:
                       type: string
+                    description:
+                      description: Description is shown next to the parameter in run
+                        forms.
+                      maxLength: 1024
+                      type: string
                     enum:
                       items:
                         type: string

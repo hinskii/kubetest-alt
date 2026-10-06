@@ -17,7 +17,10 @@ limitations under the License.
 package apiserver
 
 import (
+	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -25,11 +28,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/store"
 )
+
+// TagCreatedBy records who started a run from the GUI (X-Kubetest-User).
+// Server-owned: a payload value is overwritten when the header is present.
+const TagCreatedBy = "kubetest.io/created-by"
 
 // createRun creates a TestRun. Two invariants (§7):
 //  1. source is set to "ui" server-side; payload override rejected.
@@ -50,6 +59,12 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run.Spec.Source = "ui"
+	if u := requestUser(r); u != "" {
+		if run.Spec.Tags == nil {
+			run.Spec.Tags = map[string]string{}
+		}
+		run.Spec.Tags[TagCreatedBy] = u
+	}
 	ns, err := s.targetNamespace(r, run.Namespace)
 	if err != nil {
 		writeLookupError(w, err)
@@ -90,100 +105,242 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runEnvelopeFromRow(ref.Row))
 }
 
-// listRuns merges cluster actives with store archive. Filters:
-//   - test=<name> narrows both sides.
-//   - phase=<phase> narrows both sides.
-//   - limit + cursor for keyset pagination (delegates to store; cluster is
-//     bounded to page size, order-stable via startedAt DESC).
+// HeaderNextCursor carries the opaque cursor for the next page of
+// finished runs on GET /runs. Absent when there is no next page.
+const HeaderNextCursor = "X-Next-Cursor"
+
+// listRuns returns runs newest-first:
 //
-// Merge rules (§step-10):
-//   - UID de-dupes: a run present in both cluster AND store (typical during
-//     the window between save and CR cleanup) appears exactly once, taking
-//     the CLUSTER's fresher status.
-//   - Ordering: startedAt DESC (nil StartedAt sinks to the end), tiebreak
-//     on UID for determinism.
+//  1. live runs (not yet terminal) — first page only, never paginated
+//     (bounded by what is in the cluster);
+//  2. finished runs ordered by (finishedAt, uid) DESC, keyset-paginated:
+//     pass the previous response's X-Next-Cursor as ?after=.
+//
+// Finished runs come from the store, merged with terminal CRs not yet (or
+// never) persisted; a run present in both appears once, with the
+// cluster's fresher status. The merge is exact: the store returns its top
+// `limit` rows after the cursor, the cluster's terminal CRs are filtered
+// by the same cursor, and the union is cut to `limit`.
+//
+// Filters: test, phase, source, namespace, finishedAfter (RFC 3339 —
+// finished runs only; used by Control Center's analytics catch-up).
 func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	testRef := q.Get("test")
-	phase := q.Get("phase")
-	limit := parseLimitOrDefault(q.Get("limit"))
-	ns, err := s.listNamespace(r)
+	lq, err := s.parseListRunsQuery(r)
 	if err != nil {
 		writeLookupError(w, err)
 		return
 	}
-
-	byUID := map[string]runEnvelope{}
-
-	// Cluster side.
-	var live testsv1alpha1.TestRunList
-	listOpts := []client.ListOption{}
-	if ns != "" {
-		listOpts = append(listOpts, client.InNamespace(ns))
-	}
-	if err := s.K8sClient.List(r.Context(), &live, listOpts...); err != nil {
+	liveOut, finished, liveUIDs, err := s.collectClusterRuns(r.Context(), lq)
+	if err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	for i := range live.Items {
-		cr := &live.Items[i]
-		if testRef != "" && cr.Spec.TestRef != testRef {
-			continue
+	storeFull, err := s.mergeStoreRuns(r.Context(), lq, finished, liveUIDs)
+	if err != nil {
+		writeAPIError(w, err)
+		return
+	}
+
+	slices.SortStableFunc(liveOut, func(a, b runEnvelope) int {
+		return compareNewestFirst(a.StartedAt, b.StartedAt, a.UID, b.UID)
+	})
+	finishedOut := make([]runEnvelope, 0, len(finished))
+	for _, e := range finished {
+		finishedOut = append(finishedOut, e)
+	}
+	slices.SortStableFunc(finishedOut, func(a, b runEnvelope) int {
+		return compareNewestFirst(a.FinishedAt, b.FinishedAt, a.UID, b.UID)
+	})
+	more := storeFull || len(finishedOut) > lq.limit
+	if len(finishedOut) > lq.limit {
+		finishedOut = finishedOut[:lq.limit]
+	}
+	if more && len(finishedOut) > 0 {
+		last := finishedOut[len(finishedOut)-1]
+		w.Header().Set(HeaderNextCursor, encodeRunCursor(*last.FinishedAt, last.UID))
+	}
+
+	out := append(liveOut, finishedOut...)
+	if out == nil {
+		out = []runEnvelope{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// listRunsQuery is the parsed GET /runs query.
+type listRunsQuery struct {
+	ns, testRef, phase, source string
+	limit                      int
+	finishedAfter              *time.Time
+	cursor                     *runCursor
+	wantLive, wantFinished     bool
+}
+
+// matches applies the test/phase/source filters to a CR.
+func (q listRunsQuery) matches(cr *testsv1alpha1.TestRun) bool {
+	return (q.testRef == "" || cr.Spec.TestRef == q.testRef) &&
+		(q.phase == "" || string(cr.Status.Phase) == q.phase) &&
+		(q.source == "" || cr.Spec.Source == q.source)
+}
+
+// parseListRunsQuery validates the query; errors are client errors (400).
+func (s *Server) parseListRunsQuery(r *http.Request) (listRunsQuery, error) {
+	q := r.URL.Query()
+	lq := listRunsQuery{
+		testRef: q.Get("test"),
+		phase:   q.Get("phase"),
+		source:  q.Get("source"),
+		limit:   parseLimitOrDefault(q.Get("limit")),
+	}
+	var err error
+	if lq.ns, err = s.listNamespace(r); err != nil {
+		return lq, err
+	}
+	if v := q.Get("finishedAfter"); v != "" {
+		t, err := time.Parse(time.RFC3339, v)
+		if err != nil {
+			return lq, errBadRequest{"finishedAfter: want RFC 3339"}
 		}
-		if phase != "" && string(cr.Status.Phase) != phase {
+		lq.finishedAfter = &t
+	}
+	if lq.cursor, err = decodeRunCursor(q.Get("after")); err != nil {
+		return lq, errBadRequest{err.Error()}
+	}
+	terminalPhase := lq.phase != "" && controller.IsTerminalPhase(testsv1alpha1.Phase(lq.phase))
+	lq.wantLive = lq.cursor == nil && lq.finishedAfter == nil && !terminalPhase
+	lq.wantFinished = lq.phase == "" || terminalPhase
+	return lq, nil
+}
+
+// collectClusterRuns splits matching CRs into live runs (first page only)
+// and finished runs past the cursor. liveUIDs lists every live run so the
+// store merge can skip rows whose CR the informer still shows as live.
+func (s *Server) collectClusterRuns(ctx context.Context, lq listRunsQuery) (
+	live []runEnvelope, finished map[string]runEnvelope, liveUIDs map[string]bool, err error) {
+	var list testsv1alpha1.TestRunList
+	opts := []client.ListOption{}
+	if lq.ns != "" {
+		opts = append(opts, client.InNamespace(lq.ns))
+	}
+	if err := s.K8sClient.List(ctx, &list, opts...); err != nil {
+		return nil, nil, nil, err
+	}
+	finished = map[string]runEnvelope{}
+	liveUIDs = map[string]bool{}
+	for i := range list.Items {
+		cr := &list.Items[i]
+		if !lq.matches(cr) {
 			continue
 		}
 		env := runEnvelopeFromCR(cr)
-		byUID[env.UID] = env
-	}
-
-	// Store side.
-	if s.Store != nil {
-		f := store.Filter{TestRef: testRef, Namespace: ns, Phase: phase}
-		rows, err := s.Store.List(r.Context(), f, store.Page{Limit: limit})
-		if err != nil {
-			writeAPIError(w, err)
-			return
-		}
-		for i := range rows {
-			row := &rows[i]
-			if _, ok := byUID[row.UID]; ok {
-				// Cluster wins — its status is fresher.
-				continue
+		if !controller.IsTerminalPhase(cr.Status.Phase) {
+			liveUIDs[env.UID] = true
+			if lq.wantLive {
+				live = append(live, env)
 			}
-			byUID[row.UID] = runEnvelopeFromRow(row)
+			continue
+		}
+		if lq.wantFinished && finishedAfterOK(env, lq.finishedAfter) && lq.cursor.before(env) {
+			finished[env.UID] = env
 		}
 	}
+	return live, finished, liveUIDs, nil
+}
 
-	// Materialize + sort.
-	out := make([]runEnvelope, 0, len(byUID))
-	for _, e := range byUID {
-		out = append(out, e)
+// mergeStoreRuns adds the store's next page of finished runs to finished,
+// skipping runs the cluster already provided (cluster wins — fresher).
+// storeFull reports a full page, i.e. there may be more.
+func (s *Server) mergeStoreRuns(ctx context.Context, lq listRunsQuery,
+	finished map[string]runEnvelope, liveUIDs map[string]bool) (storeFull bool, err error) {
+	if !lq.wantFinished || s.Store == nil {
+		return false, nil
 	}
-	slices.SortStableFunc(out, func(a, b runEnvelope) int {
-		// Deterministic sort: nil StartedAt sinks; newest StartedAt first;
-		// tiebreak on UID ascending.
-		la, lb := a.StartedAt, b.StartedAt
-		switch {
-		case la == nil && lb == nil:
-			return strings.Compare(a.UID, b.UID)
-		case la == nil:
-			return 1
-		case lb == nil:
-			return -1
-		}
-		switch {
-		case la.After(*lb):
-			return -1
-		case lb.After(*la):
-			return 1
-		}
-		return strings.Compare(a.UID, b.UID)
-	})
-	if len(out) > limit {
-		out = out[:limit]
+	f := store.Filter{
+		TestRef: lq.testRef, Namespace: lq.ns, Phase: lq.phase, Source: lq.source,
+		SinceInclusive: lq.finishedAfter,
 	}
-	writeJSON(w, http.StatusOK, out)
+	page := store.Page{Limit: lq.limit}
+	if lq.cursor != nil {
+		page.After, page.AfterFinishedAt = lq.cursor.UID, &lq.cursor.FinishedAt
+	}
+	rows, err := s.Store.List(ctx, f, page)
+	if err != nil {
+		return false, err
+	}
+	for i := range rows {
+		if _, inCluster := finished[rows[i].UID]; inCluster || liveUIDs[rows[i].UID] {
+			continue
+		}
+		finished[rows[i].UID] = runEnvelopeFromRow(&rows[i])
+	}
+	return len(rows) >= lq.limit, nil
+}
+
+// compareNewestFirst orders by time DESC (nil last), then uid DESC — the
+// same total order as the store's keyset (finished_at DESC, uid DESC).
+func compareNewestFirst(ta, tb *time.Time, ua, ub string) int {
+	switch {
+	case ta == nil && tb == nil:
+	case ta == nil:
+		return 1
+	case tb == nil:
+		return -1
+	case ta.After(*tb):
+		return -1
+	case tb.After(*ta):
+		return 1
+	}
+	return strings.Compare(ub, ua)
+}
+
+func finishedAfterOK(e runEnvelope, after *time.Time) bool {
+	return after == nil || (e.FinishedAt != nil && !e.FinishedAt.Before(*after))
+}
+
+// runCursor is the keyset position of the last finished run on a page.
+type runCursor struct {
+	FinishedAt time.Time
+	UID        string
+}
+
+// before reports whether e sorts strictly after the cursor position, i.e.
+// belongs on a later page. A nil cursor admits everything.
+func (c *runCursor) before(e runEnvelope) bool {
+	if c == nil {
+		return true
+	}
+	if e.FinishedAt == nil {
+		return false
+	}
+	ft := e.FinishedAt.UTC()
+	return ft.Before(c.FinishedAt) || (ft.Equal(c.FinishedAt) && e.UID < c.UID)
+}
+
+func encodeRunCursor(finishedAt time.Time, uid string) string {
+	raw := finishedAt.UTC().Format(time.RFC3339Nano) + "|" + uid
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeRunCursor(s string) (*runCursor, error) {
+	if s == "" {
+		return nil, nil
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return nil, errors.New("after: malformed cursor")
+	}
+	ts, uid, ok := strings.Cut(string(raw), "|")
+	if !ok {
+		return nil, errors.New("after: malformed cursor")
+	}
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		return nil, errors.New("after: malformed cursor")
+	}
+	if _, err := uuid.Parse(uid); err != nil {
+		return nil, errors.New("after: malformed cursor")
+	}
+	return &runCursor{FinishedAt: t.UTC(), UID: uid}, nil
 }
 
 // runEnvelope is the wire shape for /runs and /runs/{id}. Mirrors CR and
@@ -201,9 +358,27 @@ type runEnvelope struct {
 	DurationMs int64      `json:"durationMs,omitempty"`
 	Message    string     `json:"message,omitempty"`
 	// Origin flags "cluster" (still in etcd) vs "archive" (only in store).
-	// GUI shows a small badge when Origin=archive so users know clicking
-	// "Kill run" won't work.
+	// Archived runs can't be aborted.
 	Origin string `json:"origin"`
+
+	Tool      string            `json:"tool,omitempty"`
+	ParentRun string            `json:"parentRun,omitempty"`
+	Tags      map[string]string `json:"tags,omitempty"`
+	// Config is the effective parameter set (defaults + run overrides).
+	Config     map[string]string     `json:"config,omitempty"`
+	TestCounts *store.TestCounts     `json:"testCounts,omitempty"`
+	Metrics    map[string]float64    `json:"metrics,omitempty"`
+	Steps      map[string]stepResult `json:"steps,omitempty"`
+	// Abort is set once someone (or something) asked the run to stop.
+	Abort *testsv1alpha1.AbortRequest `json:"abort,omitempty"`
+}
+
+// stepResult is the wire shape of one composite step / child entry.
+type stepResult struct {
+	Phase      string     `json:"phase,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Message    string     `json:"message,omitempty"`
 }
 
 func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
@@ -217,6 +392,44 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 		DurationMs: cr.Status.DurationMs,
 		Message:    cr.Status.Message,
 		Origin:     "cluster",
+		Tool:       crTool(cr),
+		ParentRun:  cr.Labels[store.LabelParentRun],
+		Tags:       cr.Spec.Tags,
+		Abort:      cr.Spec.Abort,
+	}
+	if cr.Status.ResolvedSpec != "" {
+		var spec testsv1alpha1.TestSpec
+		if err := json.Unmarshal([]byte(cr.Status.ResolvedSpec), &spec); err == nil {
+			e.Config = store.EffectiveConfig(spec.Config, cr.Spec.Config)
+		}
+	} else {
+		e.Config = store.EffectiveConfig(nil, cr.Spec.Config)
+	}
+	if tc := cr.Status.TestCounts; tc != nil {
+		e.TestCounts = &store.TestCounts{Total: tc.Total, Passed: tc.Passed, Failed: tc.Failed, Skipped: tc.Skipped}
+	}
+	if len(cr.Status.Metrics) > 0 {
+		e.Metrics = map[string]float64{}
+		for k, v := range cr.Status.Metrics {
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				e.Metrics[k] = f
+			}
+		}
+	}
+	if len(cr.Status.Steps) > 0 {
+		e.Steps = make(map[string]stepResult, len(cr.Status.Steps))
+		for k, sr := range cr.Status.Steps {
+			out := stepResult{Phase: string(sr.Phase), Message: sr.Message}
+			if sr.StartedAt != nil {
+				t := sr.StartedAt.UTC()
+				out.StartedAt = &t
+			}
+			if sr.FinishedAt != nil {
+				t := sr.FinishedAt.UTC()
+				out.FinishedAt = &t
+			}
+			e.Steps[k] = out
+		}
 	}
 	if cr.Status.QueuedAt != nil {
 		t := cr.Status.QueuedAt.UTC()
@@ -246,10 +459,30 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		DurationMs: row.DurationMs,
 		Message:    row.Message,
 		Origin:     "archive",
+		Tool:       row.Tool,
+		ParentRun:  row.ParentRun,
+		Tags:       row.Tags,
+		Config:     row.Config,
+		TestCounts: row.TestCounts,
+		Metrics:    row.Metrics,
 	}
 	f := row.FinishedAt
 	e.FinishedAt = &f
+	if len(row.Steps) > 0 {
+		// Steps are stored as generic JSON; re-decode into the wire shape.
+		if b, err := json.Marshal(row.Steps); err == nil {
+			_ = json.Unmarshal(b, &e.Steps)
+		}
+	}
 	return e
+}
+
+// crTool mirrors the controller's runTool: status.tool, else the label.
+func crTool(cr *testsv1alpha1.TestRun) string {
+	if cr.Status.Tool != "" {
+		return cr.Status.Tool
+	}
+	return cr.Labels[store.LabelTool]
 }
 
 // parseLimitOrDefault clamps limit query param to a reasonable range. Zero

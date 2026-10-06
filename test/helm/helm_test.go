@@ -132,6 +132,24 @@ func TestHelmTemplate_MinioPostgresValues(t *testing.T) {
 	assert.Contains(t, got, "--minio-endpoint=minio.default.svc:9000")
 	assert.Contains(t, got, "--minio-secret-name=kubetest-minio-creds")
 	assert.Contains(t, got, "--postgres-dsn=postgres://user:pass@postgres.default.svc:5432/kubetest")
+	// Log streaming defaults ON with MinIO — it used to need a manual
+	// extraArg, so default installs never stored any run logs.
+	assert.Contains(t, got, "--logs-enabled")
+	// Operator and apiserver must read/write the same single bucket.
+	assert.Equal(t, 2, strings.Count(got, "--minio-bucket=kubetest-artifacts"),
+		"operator + apiserver both get --minio-bucket")
+}
+
+func TestHelmTemplate_LogsCanBeDisabled(t *testing.T) {
+	helm := helmBinary(t)
+	root := findRepoRoot(t)
+	// #nosec G204 -- helm resolved via LookPath; chartDir const.
+	out, err := exec.Command(helm, "template", "test", filepath.Join(root, chartDir),
+		"--set", "minio.endpoint=minio.default.svc:9000",
+		"--set", "operator.logs.enabled=false",
+	).CombinedOutput()
+	require.NoErrorf(t, err, "helm template failed:\n%s", string(out))
+	assert.NotContains(t, string(out), "--logs-enabled")
 }
 
 // TestHelmTemplate_RBACParity is the plan's exact requirement: the
@@ -237,4 +255,25 @@ func ruleKey(r rbacv1.PolicyRule) string {
 	return strings.Join(r.APIGroups, ",") + "|" +
 		strings.Join(r.Resources, ",") + "|" +
 		strings.Join(r.Verbs, ",")
+}
+
+// TestHelmTemplate_APIServerRoleIsNarrow pins fixes.md #1: the API server's
+// ClusterRole grants only what internal/apiserver uses. It used to grant
+// full CRUD on TestTriggers + Webhooks and read on pods/log — none of which
+// the server touches.
+func TestHelmTemplate_APIServerRoleIsNarrow(t *testing.T) {
+	helm := helmBinary(t)
+	root := findRepoRoot(t)
+	// #nosec G204 -- helm resolved via LookPath; chartDir const.
+	out, err := exec.Command(helm, "template", "test", filepath.Join(root, chartDir),
+		"--show-only", "templates/clusterrole-apiserver.yaml",
+	).CombinedOutput()
+	require.NoErrorf(t, err, "helm template failed:\n%s", string(out))
+	role := strings.SplitN(string(out), "\n---", 2)[0] // ClusterRole, not the binding
+	for _, forbidden := range []string{"testtriggers", "webhooks", "pods", "secrets", "jobs"} {
+		assert.NotContains(t, role, forbidden, "apiserver role must not mention %q", forbidden)
+	}
+	assert.Contains(t, role, `resources: ["testtemplates"]`)
+	assert.Regexp(t, `resources: \["testtemplates"\]\s+verbs: \["get", "list", "watch"\]`, role,
+		"templates are read-only")
 }

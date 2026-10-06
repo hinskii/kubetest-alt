@@ -80,6 +80,11 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 		LogsRef:    run.Status.LogsRef,
 		Message:    run.Status.Message,
 		Tags:       cloneStringMap(run.Spec.Tags),
+		Tool:       run.Status.Tool,
+		ParentRun:  run.Labels[LabelParentRun],
+	}
+	if r.Tool == "" {
+		r.Tool = run.Labels[LabelTool]
 	}
 	if run.Status.QueuedAt != nil {
 		t := run.Status.QueuedAt.UTC()
@@ -121,6 +126,9 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 			if s.FinishedAt != nil {
 				m["finishedAt"] = s.FinishedAt.UTC()
 			}
+			if s.Message != "" {
+				m["message"] = s.Message
+			}
 			steps[name] = m
 		}
 		r.Steps = steps
@@ -132,6 +140,10 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 		var spec map[string]any
 		if err := json.Unmarshal([]byte(run.Status.ResolvedSpec), &spec); err == nil {
 			r.ResolvedSpec = spec
+		}
+		var typed testsv1alpha1.TestSpec
+		if err := json.Unmarshal([]byte(run.Status.ResolvedSpec), &typed); err == nil {
+			r.Config = EffectiveConfig(typed.Config, run.Spec.Config)
 		}
 		// Unparseable snapshot is silently ignored — the raw string still
 		// lives on the CRD for debugging; polluting the DB row with a raw
@@ -188,4 +200,33 @@ func IsTerminal(phase testsv1alpha1.Phase) bool {
 	default:
 		return false
 	}
+}
+
+// Labels read from the TestRun. Mirrors compiler.LabelKubetestTool /
+// compiler.LabelParentRun; duplicated so the store stays free of the
+// compiler import.
+const (
+	LabelTool      = "kubetest.io/tool"
+	LabelParentRun = "kubetest.io/parent-run"
+)
+
+// EffectiveConfig is what a run ran with: every declared parameter's
+// default, overlaid with the run's overrides. Values are the raw strings
+// (no type coercion — that already happened at resolve time). Nil when
+// nothing is declared or overridden.
+func EffectiveConfig(declared map[string]testsv1alpha1.Parameter, overrides map[string]string) map[string]string {
+	if len(declared) == 0 && len(overrides) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(declared)+len(overrides))
+	for k, p := range declared {
+		if p.Default != "" {
+			out[k] = p.Default
+		}
+	}
+	maps.Copy(out, overrides)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
