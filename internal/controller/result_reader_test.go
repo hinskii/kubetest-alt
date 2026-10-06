@@ -22,10 +22,29 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 func TestNoResultReader_AlwaysNotFound(t *testing.T) {
 	r, err := NoResultReader{}.Read(context.Background(), readerRun("any-run"))
 	assert.Nil(t, r)
 	assert.True(t, errors.Is(err, ErrResultNotFound))
+}
+
+func TestRequeueOnConflict(t *testing.T) {
+	conflict := apierrors.NewConflict(schema.GroupResource{Group: "tests.kubetest.io", Resource: "testruns"},
+		"r", errors.New("the object has been modified"))
+	res, err := requeueOnConflict(ctrl.Result{}, conflict)
+	assert.NoError(t, err, "conflicts are not reconcile errors")
+	assert.Equal(t, conflictRequeue, res.RequeueAfter)
+
+	other := errors.New("boom")
+	_, err = requeueOnConflict(ctrl.Result{}, other)
+	assert.ErrorIs(t, err, other, "other errors pass through")
+
+	res, err = requeueOnConflict(ctrl.Result{RequeueAfter: 3}, nil)
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{RequeueAfter: 3}, res)
 }

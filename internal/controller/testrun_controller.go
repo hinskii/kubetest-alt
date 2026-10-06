@@ -261,6 +261,27 @@ func (r *TestRunReconciler) mapPodToTestRun(_ context.Context, obj client.Object
 // running the same reconcile twice on the same state produces no additional
 // writes.
 func (r *TestRunReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	return requeueOnConflict(r.reconcile(ctx, req))
+}
+
+// conflictRequeue is how soon a reconcile that lost a write race retries.
+const conflictRequeue = 200 * time.Millisecond
+
+// requeueOnConflict turns an optimistic-concurrency conflict ("the object
+// has been modified") into a plain requeue. Conflicts are expected — a
+// child's status write or our own previous update bumps resourceVersion
+// between read and write — and the next reconcile re-reads the object.
+// Returning them as errors made controller-runtime log "Reconciler error"
+// at ERROR level, which the e2e's zero-error-log check (rightly) flags
+// (seen on composite runs: e2e-comp-run, 2026-08-21 and 2026-10-06).
+func requeueOnConflict(res ctrl.Result, err error) (ctrl.Result, error) {
+	if err != nil && apierrors.IsConflict(err) {
+		return ctrl.Result{RequeueAfter: conflictRequeue}, nil
+	}
+	return res, err
+}
+
+func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx).WithValues("testrun", req.NamespacedName)
 
 	var run testsv1alpha1.TestRun
