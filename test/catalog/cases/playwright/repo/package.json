@@ -1,0 +1,7 @@
+{
+  "name": "catalog-playwright",
+  "private": true,
+  "devDependencies": {
+    "@playwright/test": "1.56.0"
+  }
+}

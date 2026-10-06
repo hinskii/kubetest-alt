@@ -1,0 +1,6 @@
+config: {}
+expect:
+  phase: failed            # one spec fails on purpose
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["results/junit.xml"]
+timeout: 15m

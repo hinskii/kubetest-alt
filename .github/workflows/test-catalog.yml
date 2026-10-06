@@ -48,11 +48,14 @@ jobs:
           - cucumber
           - cypress
           - gatling
+          - gradle
           - jmeter
           - k6
           - kubepug
           - locust
+          - maven
           - newman
+          - playwright
           - pytest
           - soapui
           - zap-baseline

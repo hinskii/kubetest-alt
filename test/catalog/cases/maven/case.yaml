@@ -1,0 +1,7 @@
+config:
+  projectDir: app
+expect:
+  phase: failed            # one JUnit test fails on purpose
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["target/surefire-reports/*.xml"]
+timeout: 15m

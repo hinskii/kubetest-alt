@@ -1,0 +1,7 @@
+config:
+  projectDir: app
+expect:
+  phase: failed            # one JUnit test fails on purpose
+  testCounts: {total: 2, failed: 1}
+  artifacts: ["build/test-results/**/*.xml"]
+timeout: 15m

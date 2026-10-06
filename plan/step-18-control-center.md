@@ -117,8 +117,8 @@ history. Minute grouping is dropped; composite Tests show parent + children.
   metrics — the wrapper never called a parser after step 11.
 - Parsers tested on real tool output (`hack/report-fixtures.sh`).
 - **Catalog e2e** (`test/catalog`, `.github/workflows/test-catalog.yml`):
-  all 12 templates without their own workingDir — artillery, cucumber,
-  cypress, gatling, jmeter, k6, kubepug, locust, newman, pytest, soapui,
+  all 15 templates — artillery, cucumber, cypress, gatling, gradle,
+  jmeter, k6, kubepug, locust, maven, newman, playwright, pytest, soapui,
   zap-baseline — run for real on kind with in-repo projects; verdict,
   JUnit counts, metrics and artifacts asserted per tool.
 - Bugs it found and fixed: artifact globs of 12 templates never matched
@@ -127,8 +127,6 @@ history. Minute grouping is dropped; composite Tests show parent + children.
   resolved against the wrong dir; zap needs `/zap/wrk` mounted; JUnit
   verdict and JUnit counts used different file discovery; sample repo
   referenced by `config/samples/tools` doesn't exist (follow-up).
-- Not yet in the catalog e2e: gradle, maven, playwright (they set
-  `workingDir` and need dependency downloads) — follow-up.
 
 ### 18d — Control Center skeleton
 - `pkg/apiclient`: typed Go client for the kubetest apiserver (direct URL
