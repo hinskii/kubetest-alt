@@ -60,6 +60,11 @@ type RunStore interface {
 	// finished_at (DESC), with stable pagination via keyset semantics
 	// (Page.After). Stable across concurrent inserts.
 	List(ctx context.Context, f Filter, p Page) ([]Row, error)
+
+	// Delete removes the row for a UID (user-driven cleanup; retention
+	// drops whole partitions instead). Returns ErrNotFound when no row
+	// matched, so callers can treat a repeat delete as already done.
+	Delete(ctx context.Context, uid string) error
 }
 
 // Row is the wire shape returned by List/Get. Mirrors the DB row 1:1 so

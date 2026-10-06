@@ -84,6 +84,18 @@ func OpenAPISpec() map[string]any {
 				"get": routeOp(
 					"Get a single run by CR name (active) or UID (archived).",
 					nil, jsonRef("#/components/schemas/RunEnvelope"), errorResp()),
+				"delete": map[string]any{
+					"summary": "Delete a finished run from history: its objects (logs, artifacts, " +
+						"result.json), its CR if present, and its store row. 409 while the run is live " +
+						"(abort it first). Idempotent per step; safe to retry.",
+					"responses": map[string]any{
+						"204": map[string]any{"description": "Deleted."},
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"409": errorSchema(),
+						"503": errorSchema(),
+					},
+				},
 				"parameters": []any{pathParam("id", "TestRun name (cluster) or UID (archive)."), namespaceParam()},
 			},
 			"/runs/{id}/abort": map[string]any{
@@ -124,18 +136,63 @@ func OpenAPISpec() map[string]any {
 				},
 				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
-			"/runs/{id}/artifacts/{path}": map[string]any{
+			"/runs/{id}/logs.txt": map[string]any{
 				"get": map[string]any{
-					"summary": "Presigned MinIO URL for an artifact. Path traversal (../, absolute paths, backslashes) rejected 400.",
+					"summary": "The run's whole stored log as text/plain (live runs: what has been " +
+						"flushed so far, no follow). ?download=1 adds Content-Disposition: attachment.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Log text.", "content": map[string]any{
+							"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}},
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"503": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
+			},
+			"/runs/{id}/artifacts": map[string]any{
+				"get": map[string]any{
+					"summary": "List the run's artifacts (recorded refs; falls back to listing the " +
+						"run's artifacts/ prefix when none were recorded).",
 					"responses": map[string]any{
 						"200": jsonResponse(map[string]any{
-							"type":     "object",
-							"required": []string{"url", "expiresIn"},
-							"properties": map[string]any{
-								"url":       map[string]any{"type": "string", "format": "uri"},
-								"expiresIn": map[string]any{"type": "integer"},
+							"type": "array",
+							"items": map[string]any{
+								"type":     "object",
+								"required": []string{"path"},
+								"properties": map[string]any{
+									"path":        map[string]any{"type": "string"},
+									"sizeBytes":   map[string]any{"type": "integer"},
+									"contentType": map[string]any{"type": "string"},
+								},
 							},
 						}),
+						"400": errorSchema(),
+						"404": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
+			},
+			"/runs/{id}/artifacts/{path}": map[string]any{
+				"get": map[string]any{
+					"summary": "Stream an artifact's bytes (default; served with nosniff + CSP sandbox, " +
+						"?download=1 for attachment), or with ?presign=1 return a presigned object-store " +
+						"URL. Path traversal (../, absolute paths, backslashes) rejected 400.",
+					"responses": map[string]any{
+						"200": map[string]any{
+							"description": "Artifact bytes, or {url, expiresIn} with ?presign=1.",
+							"content": map[string]any{
+								"application/octet-stream": map[string]any{"schema": map[string]any{"type": "string", "format": "binary"}},
+								"application/json": map[string]any{"schema": map[string]any{
+									"type":     "object",
+									"required": []string{"url", "expiresIn"},
+									"properties": map[string]any{
+										"url":       map[string]any{"type": "string", "format": "uri"},
+										"expiresIn": map[string]any{"type": "integer"},
+									},
+								}},
+							},
+						},
 						"400": errorSchema(),
 						"404": errorSchema(),
 						"503": errorSchema(),

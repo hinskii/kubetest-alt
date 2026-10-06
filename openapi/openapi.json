@@ -278,6 +278,54 @@
       }
     },
     "/runs/{id}": {
+      "delete": {
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Delete a finished run from history: its objects (logs, artifacts, result.json), its CR if present, and its store row. 409 while the run is live (abort it first). Idempotent per step; safe to retry."
+      },
       "get": {
         "responses": {
           "200": {
@@ -447,6 +495,80 @@
         "summary": "Abort a live run. Sets spec.abort (reason User, requestedBy from the X-Kubetest-User header); the controller kills the Job, records the run as aborted, persists it and fires webhooks. Idempotent. Allowed on runs of GitOps-managed Tests (runs are not definitions, §7)."
       }
     },
+    "/runs/{id}/artifacts": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "contentType": {
+                        "type": "string"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "sizeBytes": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "path"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "List the run's artifacts (recorded refs; falls back to listing the run's artifacts/ prefix when none were recorded)."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/runs/{id}/artifacts/{path}": {
       "get": {
         "responses": {
@@ -469,9 +591,15 @@
                   ],
                   "type": "object"
                 }
+              },
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "OK"
+            "description": "Artifact bytes, or {url, expiresIn} with ?presign=1."
           },
           "400": {
             "content": {
@@ -504,7 +632,7 @@
             "description": "OK"
           }
         },
-        "summary": "Presigned MinIO URL for an artifact. Path traversal (../, absolute paths, backslashes) rejected 400."
+        "summary": "Stream an artifact's bytes (default; served with nosniff + CSP sandbox, ?download=1 for attachment), or with ?presign=1 return a presigned object-store URL. Path traversal (../, absolute paths, backslashes) rejected 400."
       },
       "parameters": [
         {
@@ -553,6 +681,73 @@
           }
         },
         "summary": "Stream logs over WebSocket. Live runs poll the MinIO chunk prefix every ~1s; archived runs stream all chunks then close. Binary WS frames = raw log bytes."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/runs/{id}/logs.txt": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Log text."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The run's whole stored log as text/plain (live runs: what has been flushed so far, no follow). ?download=1 adds Content-Disposition: attachment."
       },
       "parameters": [
         {

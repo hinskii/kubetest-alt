@@ -110,6 +110,16 @@ func (f *fakeRunStore) Get(_ context.Context, uid string) (*store.Row, error) {
 	return &r, nil
 }
 
+func (f *fakeRunStore) Delete(_ context.Context, uid string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.rows[uid]; !ok {
+		return store.ErrNotFound
+	}
+	delete(f.rows, uid)
+	return nil
+}
+
 func (f *fakeRunStore) List(_ context.Context, filter store.Filter, page store.Page) ([]store.Row, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -695,7 +705,7 @@ func TestArtifacts_ReturnsPresignedURL(t *testing.T) {
 	h := s.Handler()
 
 	rec, body := doRequest(t, h, "GET",
-		"/runs/run-1/artifacts/results/junit.xml", nil)
+		"/runs/run-1/artifacts/results/junit.xml?presign=1", nil)
 	require.Equal(t, http.StatusOK, rec.Code)
 	// Key comes from namespace + UID — never the run name — and sits in the
 	// artifacts/ subtree so it can't shadow result.json.
@@ -1006,10 +1016,11 @@ type fakeUploaderDownloader struct {
 	objects map[string][]byte // key = "<bucket>/<key>"
 }
 
-func (f *fakeUploaderDownloader) put(bucket, key string, body []byte) {
+// put stores body at key in testBucket — the one bucket the Server reads.
+func (f *fakeUploaderDownloader) put(key string, body []byte) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.objects[bucket+"/"+key] = body
+	f.objects[testBucket+"/"+key] = body
 }
 
 func (f *fakeUploaderDownloader) Get(_ context.Context, bucket, key string) (io.ReadCloser, error) {
@@ -1017,7 +1028,7 @@ func (f *fakeUploaderDownloader) Get(_ context.Context, bucket, key string) (io.
 	defer f.mu.Unlock()
 	b, ok := f.objects[bucket+"/"+key]
 	if !ok {
-		return nil, io.EOF // any error is fine — chunkStream surfaces it
+		return nil, storage.ErrNotFound // same contract as pkg/storage.MinIO.Get
 	}
 	return io.NopCloser(bytes.NewReader(b)), nil
 }
@@ -1035,6 +1046,24 @@ func (f *fakeUploaderDownloader) List(_ context.Context, bucket, prefix string) 
 	// chunk_reader depends on sorted output.
 	sortStrings(out)
 	return out, nil
+}
+
+func (f *fakeUploaderDownloader) RemovePrefix(_ context.Context, bucket, prefix string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for k := range f.objects {
+		if strings.HasPrefix(k, bucket+"/"+prefix) {
+			delete(f.objects, k)
+		}
+	}
+	return nil
+}
+
+func (f *fakeUploaderDownloader) has(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.objects[testBucket+"/"+key]
+	return ok
 }
 
 func (f *fakeUploaderDownloader) PresignGetURL(_ context.Context, bucket, key string, expiry time.Duration) (string, error) {
@@ -1080,7 +1109,7 @@ func itoa(n int64) string {
 // bucket mismatch in production went unnoticed by these tests.)
 func seedChunk(t *testing.T, up *fakeUploaderDownloader, key, body string) {
 	t.Helper()
-	up.put(testBucket, key, []byte(body))
+	up.put(key, []byte(body))
 }
 
 // testBucket is the single bucket every apiserver test reads from.

@@ -147,6 +147,7 @@ func main() {
 			srv.Downloader = mc
 			srv.Lister = mc
 			srv.Presigner = mc
+			srv.Remover = mc
 			setupLog.Info("MinIO wired", "endpoint", minioEndpoint)
 		}
 	} else {
@@ -162,7 +163,9 @@ func main() {
 		if err != nil {
 			setupLog.Error(err, "pgxpool init failed — /runs archive listing disabled")
 		} else {
-			srv.Store = store.NewPostgres(pool)
+			pg := store.NewPostgres(pool)
+			srv.Store = pg
+			srv.Deleter = pg
 			pgPool = pool
 			setupLog.Info("Postgres run archive wired")
 		}

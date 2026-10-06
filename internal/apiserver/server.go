@@ -69,6 +69,13 @@ type Server struct {
 	Downloader storage.Downloader
 	Lister     storage.Lister
 	Presigner  storage.Presigner
+	// Remover deletes a run's objects on DELETE /runs/{id}. Nil skips
+	// object removal (no object storage configured → nothing to remove).
+	Remover storage.Remover
+
+	// Deleter removes archived rows on DELETE /runs/{id}. Nil makes deletes
+	// of archived runs 503.
+	Deleter RunDeleter
 
 	// Bucket is the single object-store bucket the operator and wrapper
 	// write to. Keys inside it come from pkg/storage.RunKeys — the same
@@ -139,7 +146,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
 
 	// Logs + artifacts.
+	mux.HandleFunc("DELETE /runs/{id}", s.deleteRun)
 	mux.HandleFunc("GET /runs/{id}/logs", s.getRunLogs)
+	mux.HandleFunc("GET /runs/{id}/logs.txt", s.getRunLogsText)
+	mux.HandleFunc("GET /runs/{id}/artifacts", s.listRunArtifacts)
 	mux.HandleFunc("GET /runs/{id}/artifacts/{path...}", s.getRunArtifact)
 
 	// OpenAPI spec — hand-served, source of truth is openapi.go.

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -134,6 +135,23 @@ func (p *Postgres) Get(ctx context.Context, uid string) (*Row, error) {
 		return nil, ErrNotFound
 	}
 	return &list[0], nil
+}
+
+// Delete implements RunStore. uid is also the partition key's companion
+// in the primary key, so the DELETE is routed across partitions by
+// Postgres; a malformed uid yields ErrNotFound rather than a cast error.
+func (p *Postgres) Delete(ctx context.Context, uid string) error {
+	if _, err := uuid.Parse(uid); err != nil {
+		return ErrNotFound
+	}
+	tag, err := p.pool.Exec(ctx, `DELETE FROM test_runs WHERE uid = $1`, uid)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // List implements RunStore.

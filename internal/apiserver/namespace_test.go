@@ -176,8 +176,8 @@ func TestLogs_SameRunNameInTwoNamespacesAreIsolated(t *testing.T) {
 	a, b := mk("team-a"), mk("team-b")
 	c := fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(a, b).Build()
 	up := storageFake()
-	up.put(testBucket, storage.ForRun("team-a", string(a.UID)).LogChunk(0), []byte("from-a"))
-	up.put(testBucket, storage.ForRun("team-b", string(b.UID)).LogChunk(0), []byte("from-b"))
+	up.put(storage.ForRun("team-a", string(a.UID)).LogChunk(0), []byte("from-a"))
+	up.put(storage.ForRun("team-b", string(b.UID)).LogChunk(0), []byte("from-b"))
 
 	s := &Server{
 		K8sClient: c, Downloader: up, Lister: up, Bucket: testBucket,

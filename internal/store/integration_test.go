@@ -189,6 +189,26 @@ func TestIntegration_IdempotentUpsertByUID(t *testing.T) {
 	assert.Equal(t, "second save (last-write-wins)", got.Message)
 }
 
+// TestIntegration_Delete covers user-driven cleanup: the row disappears,
+// a second delete reports ErrNotFound, and a malformed UID is ErrNotFound
+// (not a uuid cast error surfacing as a 500 in the API server).
+func TestIntegration_Delete(t *testing.T) {
+	ctx := t.Context()
+	finished := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	p := NewPostgres(harness.pool)
+	require.NoError(t, p.EnsurePartitions(ctx, PartitionsToCreate(finished, 0, 0)))
+
+	uid := "aaaaaaaa-0000-0000-0000-0000000000d1"
+	require.NoError(t, p.SaveFinished(ctx, newRun(uid, "to-delete", testsv1alpha1.PhasePassed, finished)))
+
+	require.NoError(t, p.Delete(ctx, uid))
+	_, err := p.Get(ctx, uid)
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	assert.ErrorIs(t, p.Delete(ctx, uid), ErrNotFound, "repeat delete")
+	assert.ErrorIs(t, p.Delete(ctx, "not-a-uuid"), ErrNotFound)
+}
+
 // TestIntegration_ListFiltersAndKeysetPagination covers:
 //   - Filters by test_ref, namespace, phase, time range.
 //   - Keyset pagination is stable — page 2 doesn't repeat page 1 items

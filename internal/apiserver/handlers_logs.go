@@ -19,6 +19,7 @@ package apiserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -134,5 +135,57 @@ func (s *Server) getRunLogs(w http.ResponseWriter, r *http.Request) {
 		// Best-effort close-frame with an error code; if the write fails
 		// (client already gone) the defer above still cleans up the conn.
 		_ = conn.Close(websocket.StatusInternalError, err.Error())
+	}
+}
+
+// getRunLogsText returns everything stored for the run's log so far as one
+// text/plain body — the non-streaming counterpart of the WebSocket
+// endpoint, for history pages and downloads. Live runs return what has
+// been flushed so far (no follow).
+func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
+	if s.Downloader == nil || s.Lister == nil || s.Bucket == "" {
+		writeError(w, http.StatusServiceUnavailable, ReasonServiceUnavail,
+			"log storage is not configured")
+		return
+	}
+	ns, err := s.targetNamespace(r, "")
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	ref, err := s.findRun(r.Context(), ns, r.PathValue("id"))
+	if err != nil {
+		writeLookupError(w, err)
+		return
+	}
+	h := w.Header()
+	h.Set("Content-Type", "text/plain; charset=utf-8")
+	h.Set("X-Content-Type-Options", "nosniff")
+	if r.URL.Query().Get("download") == "1" {
+		h.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", safeFilename(ref.Name+".log")))
+	}
+	stream := &chunkStream{
+		Downloader: s.Downloader,
+		Lister:     s.Lister,
+		Bucket:     s.Bucket,
+		Prefix:     ref.keys().Logs(),
+	}
+	wroteHeader := false
+	err = stream.stream(r.Context(), func(chunk []byte) error {
+		if !wroteHeader {
+			w.WriteHeader(http.StatusOK)
+			wroteHeader = true
+		}
+		if _, err := w.Write(chunk); err != nil {
+			return io.EOF // client went away
+		}
+		return nil
+	})
+	if err != nil && !wroteHeader {
+		writeError(w, http.StatusInternalServerError, ReasonInternal, fmt.Sprintf("read logs: %v", err))
+		return
+	}
+	if !wroteHeader {
+		w.WriteHeader(http.StatusOK) // no chunks yet: empty log, not an error
 	}
 }
