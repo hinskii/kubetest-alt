@@ -1491,7 +1491,7 @@
             "description": "OK"
           }
         },
-        "summary": "Merge-patch a Test. Blocked 409 for managed-by!=ui (§7)."
+        "summary": "JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by."
       }
     },
     "/tests/{name}/resolved": {

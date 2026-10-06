@@ -22,6 +22,8 @@ limitations under the License.
 // The label key follows the k8s convention app.kubernetes.io/managed-by.
 package apiserver
 
+import "fmt"
+
 // LabelManagedBy is the label the API server writes on Tests created via
 // POST /tests and inspects on Tests targeted by PATCH/DELETE. Value "ui"
 // on GUI-created objects; "gitops" (or any other value) marks it as
@@ -36,18 +38,25 @@ const LabelManagedBy = "app.kubernetes.io/managed-by"
 const ManagedByUI = "ui"
 
 // ManagedByGitOps is the value ArgoCD (or similar) is expected to set on
-// GitOps-owned Tests. Anything OTHER than "ui" is treated as
-// externally-owned — plan §7 explicitly allows this "missing label →
-// treat as ui" contract, and ANYTHING-ELSE is blocked.
+// GitOps-owned Tests. Any value other than "ui" locks the Test.
 const ManagedByGitOps = "gitops"
 
-// isManagedByGitOps returns true when the object's managed-by label is
-// set AND not equal to "ui". Missing label → false (treat as ui, per §7).
-// This is the sole rule the enforcement path depends on.
-func isManagedByGitOps(labels map[string]string) bool {
+// isLockedForUI reports whether the GUI must treat a Test as read-only
+// (§7). Only Tests the API server itself created (managed-by=ui) are
+// editable. A missing label means the Test came from somewhere else —
+// kubectl, or an ArgoCD app that doesn't set the label — and used to be
+// treated as GUI-owned, letting the GUI rewrite a definition git would
+// then fight over (fixes.md #22). Runs are allowed either way.
+func isLockedForUI(labels map[string]string) bool {
+	return labels[LabelManagedBy] != ManagedByUI
+}
+
+// lockedMessage explains a 409 on a locked Test.
+func lockedMessage(name string, labels map[string]string, verb string) string {
 	v, ok := labels[LabelManagedBy]
 	if !ok {
-		return false
+		return fmt.Sprintf("Test %q was not created through the API (no %s label) — %s it where it is defined (git or kubectl)",
+			name, LabelManagedBy, verb)
 	}
-	return v != ManagedByUI
+	return fmt.Sprintf("Test %q is managed by %s (%s=%s) — %s it in the source repo", name, v, LabelManagedBy, v, verb)
 }

@@ -106,3 +106,46 @@ func TestReconcile_MalformedResult_EndsAsError(t *testing.T) {
 	assert.Contains(t, final.Status.Message, ReasonMalformedResult)
 	assert.Contains(t, final.Status.Message, "unexpected EOF")
 }
+
+func latestRunOf(ctx context.Context, ns, test string) *testsv1alpha1.RunReference {
+	var t testsv1alpha1.Test
+	if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: test}, &t); err != nil {
+		return nil
+	}
+	return t.Status.LatestRun
+}
+
+// fixes.md #18: Test.status.latestRun follows the most recently started
+// run; an older run finishing later doesn't take it back.
+func TestReconcile_LatestRunOnTest(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, newTestFixture(ns, "latest")))
+	key := func(n string) client.ObjectKey { return client.ObjectKey{Namespace: ns, Name: n} }
+
+	require.NoError(t, k8sClient.Create(ctx, newRunFixture(ns, "latest-old", "latest")))
+	waitForJob(t, ctx, key("latest-old"), 5*time.Second)
+	assert.Eventually(t, func() bool {
+		lr := latestRunOf(ctx, ns, "latest")
+		return lr != nil && lr.Name == "latest-old"
+	}, 3*time.Second, 50*time.Millisecond)
+
+	require.NoError(t, k8sClient.Create(ctx, newRunFixture(ns, "latest-new", "latest")))
+	waitForJob(t, ctx, key("latest-new"), 5*time.Second)
+	fakeResults.Set("latest-new", &RunResult{Phase: testsv1alpha1.PhasePassed})
+	patchJobConditions(t, ctx, key("latest-new"), []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}})
+	waitForPhase(t, ctx, key("latest-new"), testsv1alpha1.PhasePassed, 5*time.Second)
+	assert.Eventually(t, func() bool {
+		lr := latestRunOf(ctx, ns, "latest")
+		return lr != nil && lr.Name == "latest-new" && lr.Phase == testsv1alpha1.PhasePassed && lr.FinishedAt != nil
+	}, 3*time.Second, 50*time.Millisecond)
+
+	fakeResults.Set("latest-old", &RunResult{Phase: testsv1alpha1.PhaseFailed})
+	patchJobConditions(t, ctx, key("latest-old"), []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}})
+	waitForPhase(t, ctx, key("latest-old"), testsv1alpha1.PhaseFailed, 5*time.Second)
+	assert.Never(t, func() bool {
+		lr := latestRunOf(ctx, ns, "latest")
+		return lr == nil || lr.Name != "latest-new"
+	}, time.Second, 100*time.Millisecond, "an older run finishing late must not overwrite latestRun")
+}

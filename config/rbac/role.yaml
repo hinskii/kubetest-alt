@@ -86,6 +86,7 @@ rules:
   - tests.kubetest.io
   resources:
   - testruns/status
+  - tests/status
   - testtriggers/status
   - webhooks/status
   verbs:

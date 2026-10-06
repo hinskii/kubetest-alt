@@ -63,7 +63,7 @@ func (s *Server) getResolvedTest(w http.ResponseWriter, r *http.Request) {
 		Namespace:    t.Namespace,
 		Labels:       t.Labels,
 		Tool:         tool,
-		GitOpsLocked: isManagedByGitOps(t.Labels),
+		GitOpsLocked: isLockedForUI(t.Labels),
 		Templates:    t.Spec.Use,
 		Spec:         spec,
 	})

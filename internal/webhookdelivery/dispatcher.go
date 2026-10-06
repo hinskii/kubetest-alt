@@ -259,11 +259,9 @@ func (d *Dispatcher) deliver(ctx context.Context, j Job) Outcome {
 	if timeout <= 0 {
 		timeout = time.Duration(DefaultTimeoutSeconds) * time.Second
 	}
-	// MaxRetries==0 is ambiguous in the CRD (unset int32 == 0 == "no
-	// retries"). Convention: caller passes MaxRetries<0 to mean "use
-	// default"; MaxRetries==0 means "no retries, one attempt".
-	// Controller wire-up substitutes DefaultMaxRetries only when the
-	// user left the field unset on the CR (nil pointer → -1 here).
+	// The CRD defaults an omitted maxRetries to DefaultMaxRetries, so 0
+	// here is an explicit "one attempt, no retries". <0 (only possible
+	// from callers bypassing the API server) also means the default.
 	maxRetries := int(j.Spec.MaxRetries)
 	if maxRetries < 0 {
 		maxRetries = int(DefaultMaxRetries)

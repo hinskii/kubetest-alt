@@ -62,7 +62,7 @@ func OpenAPISpec() map[string]any {
 			},
 			"/tests/{name}": map[string]any{
 				"get":    routeOp("Get a Test by name.", nil, jsonRef("#/components/schemas/Test"), errorResp()),
-				"patch":  routeOp("Merge-patch a Test. Blocked 409 for managed-by!=ui (§7).", jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()),
+				"patch":  routeOp("JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by.", jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()),
 				"delete": routeOp("Delete a Test. Blocked 409 for managed-by!=ui (§7).", nil, nil, errorResp()),
 				"parameters": []any{
 					pathParam("name", "Test name."),

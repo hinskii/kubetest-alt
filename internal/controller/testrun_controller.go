@@ -253,6 +253,7 @@ func (r *TestRunReconciler) mapPodToTestRun(_ context.Context, obj client.Object
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=testruns/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=testruns/finalizers,verbs=update
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=tests,verbs=get;list;watch
+// +kubebuilder:rbac:groups=tests.kubetest.io,resources=tests/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=webhooks,verbs=get;list;watch
 // +kubebuilder:rbac:groups=tests.kubetest.io,resources=webhooks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
@@ -523,6 +524,7 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 	if err := r.Status().Update(ctx, run); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.recordLatestRun(ctx, run, true)
 	// Don't requeue explicitly — the Update above triggers a Reconcile that
 	// enters observeOrCreateJob to create the Job.
 	return ctrl.Result{}, nil
@@ -904,6 +906,7 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 	if err := r.Status().Update(ctx, run); err != nil {
 		return ctrl.Result{}, err
 	}
+	r.recordLatestRun(ctx, run, false)
 	return ctrl.Result{}, nil
 }
 

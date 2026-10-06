@@ -19,7 +19,7 @@ package apiserver
 import (
 	"encoding/json"
 	"fmt"
-	"maps"
+	"io"
 	"net/http"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -114,8 +114,16 @@ func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, t)
 }
 
-// patchTest applies a merge-patch to a Test. Blocked with 409 if the target
-// carries a non-ui managed-by label (§7).
+// maxPatchBytes bounds a PATCH body (inline content is capped at 512KB by
+// the Test webhook; leave room for the rest of the spec).
+const maxPatchBytes = 2 << 20
+
+// patchTest applies a JSON merge patch (RFC 7396) to a Test: objects merge
+// key by key, arrays and scalars replace, null deletes. The old handler
+// swapped the whole spec when the payload had an image or git source and
+// silently ignored everything else — a patch of only spec.steps returned
+// 200 and changed nothing (fixes.md #21). Blocked with 409 unless the Test
+// is GUI-owned (§7); the patch may not touch the managed-by label.
 func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -127,52 +135,49 @@ func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 		writeLookupError(w, err)
 		return
 	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxPatchBytes+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, ReasonBadRequest, fmt.Sprintf("read body: %v", err))
+		return
+	}
+	if len(body) > maxPatchBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, ReasonBadRequest,
+			fmt.Sprintf("patch larger than %d bytes", maxPatchBytes))
+		return
+	}
+	// The label can be set, replaced or removed (null) by a merge patch;
+	// any of those except "ui" would hand the Test to someone else.
+	var probe struct {
+		Metadata struct {
+			Labels map[string]*string `json:"labels"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		writeError(w, http.StatusBadRequest, ReasonBadRequest,
+			fmt.Sprintf("decode: body must be a JSON merge patch object: %v", err))
+		return
+	}
+	if v, ok := probe.Metadata.Labels[LabelManagedBy]; ok && (v == nil || *v != ManagedByUI) {
+		writeError(w, http.StatusBadRequest, ReasonBadRequest,
+			fmt.Sprintf("cannot change or remove %s via PATCH — leave it out of the payload", LabelManagedBy))
+		return
+	}
 	var current testsv1alpha1.Test
 	if err := s.K8sClient.Get(r.Context(),
 		types.NamespacedName{Namespace: ns, Name: name}, &current); err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	if isManagedByGitOps(current.Labels) {
-		writeError(w, http.StatusConflict, ReasonManagedByGitOps,
-			fmt.Sprintf("Test %q is managed by GitOps — edit it in the source repo", name))
+	if isLockedForUI(current.Labels) {
+		writeError(w, http.StatusConflict, ReasonManagedByGitOps, lockedMessage(name, current.Labels, "edit"))
 		return
 	}
-	// Merge-patch: decode into a fresh Test carrying only the fields the
-	// user supplied, then apply as a patch on top of the current object.
-	var patch testsv1alpha1.Test
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeError(w, http.StatusBadRequest, ReasonBadRequest,
-			fmt.Sprintf("decode: %v", err))
-		return
-	}
-	// Guard against a Ui-owner accidentally handing itself over to GitOps
-	// via PATCH (would silently make future edits impossible without
-	// touching the CR by hand).
-	if v, ok := patch.Labels[LabelManagedBy]; ok && v != ManagedByUI {
-		writeError(w, http.StatusBadRequest, ReasonBadRequest,
-			fmt.Sprintf("cannot re-label managed-by to %q via PATCH — remove the label from the payload", v))
-		return
-	}
-	// Overlay: labels merged; spec swapped (last-write-wins) if payload
-	// supplied one.
-	updated := current.DeepCopy()
-	if updated.Labels == nil {
-		updated.Labels = map[string]string{}
-	}
-	maps.Copy(updated.Labels, patch.Labels)
-	if patch.Spec.Container.Image != "" || patch.Spec.Content.Git != nil {
-		updated.Spec = patch.Spec
-	}
-	// managed-by always stays ui (spoof rejected above; also survives spec swap).
-	updated.Labels[LabelManagedBy] = ManagedByUI
-
-	if err := s.K8sClient.Update(r.Context(), updated); err != nil {
+	if err := s.K8sClient.Patch(r.Context(), &current, client.RawPatch(types.MergePatchType, body)); err != nil {
 		writeAPIError(w, err)
 		return
 	}
-	s.recordAudit(r, apiclient.ActionTestUpdate, updated.Namespace, updated.Name, nil)
-	writeJSON(w, http.StatusOK, updated)
+	s.recordAudit(r, apiclient.ActionTestUpdate, current.Namespace, current.Name, nil)
+	writeJSON(w, http.StatusOK, current)
 }
 
 // deleteTest removes a Test. Blocked with 409 for gitops-owned CRs (§7).
@@ -193,9 +198,8 @@ func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, err)
 		return
 	}
-	if isManagedByGitOps(current.Labels) {
-		writeError(w, http.StatusConflict, ReasonManagedByGitOps,
-			fmt.Sprintf("Test %q is managed by GitOps — delete it in the source repo", name))
+	if isLockedForUI(current.Labels) {
+		writeError(w, http.StatusConflict, ReasonManagedByGitOps, lockedMessage(name, current.Labels, "delete"))
 		return
 	}
 	if err := s.K8sClient.Delete(r.Context(), &current); err != nil {

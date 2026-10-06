@@ -68,11 +68,12 @@ type WebhookSpec struct {
 	// +optional
 	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
 
-	// MaxRetries bounds the retry count on 5xx / connection errors. 0
-	// defaults to 5. 4xx responses are ALWAYS permanent regardless of
-	// this value.
+	// MaxRetries bounds the retry count on 5xx / connection errors.
+	// Defaults to 5 when omitted; an explicit 0 means a single attempt.
+	// 4xx responses are ALWAYS permanent regardless of this value.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10
+	// +kubebuilder:default=5
 	// +optional
 	MaxRetries int32 `json:"maxRetries,omitempty"`
 }

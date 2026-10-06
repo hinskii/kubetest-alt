@@ -166,7 +166,7 @@ func (f *fakeRunStore) List(_ context.Context, filter store.Filter, page store.P
 }
 
 // mkTest returns a Test CR with the given name + managed-by label value.
-// Empty labelVal → no managed-by label (treated as ui per §7).
+// Empty labelVal → no managed-by label (read-only for the GUI, §7).
 func mkTest(name, labelVal string) *testsv1alpha1.Test {
 	labels := map[string]string{}
 	if labelVal != "" {
@@ -226,7 +226,7 @@ func TestManagedBy_GitopsPatch_Returns409(t *testing.T) {
 		map[string]any{"spec": map[string]any{"type": "cypress"}})
 	assert.Equal(t, http.StatusConflict, rec.Code)
 	assert.Equal(t, ReasonManagedByGitOps, body["reason"])
-	assert.Contains(t, body["message"], "managed by GitOps")
+	assert.Contains(t, body["message"], "managed by gitops")
 }
 
 // R-mb-2: gitops + DELETE → 409 with ManagedByGitOps reason.
@@ -259,12 +259,22 @@ func TestManagedBy_UIPatch_Returns200(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 }
 
-// R-mb-5: missing managed-by label → treated as ui → PATCH 200.
-func TestManagedBy_MissingLabel_TreatedAsUI(t *testing.T) {
+// R-mb-5: missing managed-by label → not created by the API server
+// (kubectl, an ArgoCD app without the label) → read-only, like gitops.
+// fixes.md #22: it used to be treated as ui and edited by the GUI.
+func TestManagedBy_MissingLabel_IsLocked(t *testing.T) {
 	_, h := mkServer(t, mkTest("no-label", ""))
-	rec, _ := doRequest(t, h, "PATCH", "/tests/no-label",
-		map[string]any{"spec": map[string]any{"type": "cypress"}})
-	assert.Equal(t, http.StatusOK, rec.Code)
+	rec, body := doRequest(t, h, "PATCH", "/tests/no-label",
+		map[string]any{"metadata": map[string]any{"labels": map[string]string{"team": "sre"}}})
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, body["message"], "not created through the API")
+	rec, _ = doRequest(t, h, "DELETE", "/tests/no-label", nil)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	rec, _ = doRequest(t, h, "POST", "/runs", &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "r", Namespace: "default"},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "no-label"},
+	})
+	assert.Equal(t, http.StatusCreated, rec.Code, "runs stay allowed")
 }
 
 // R-mb-6: POST /tests with spoofed managed-by=gitops → 400 (spoof guard).

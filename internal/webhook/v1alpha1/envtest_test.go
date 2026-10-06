@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -396,4 +397,21 @@ func TestEnvtest_RunNameMustFitAJobName(t *testing.T) {
 	require.NoError(t, k8sClient.Create(ctx, gen))
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, gen) })
 	assert.LessOrEqual(t, len(gen.Name), 63)
+}
+
+// TestEnvtest_WebhookMaxRetriesDefaultsToFive: fixes.md #20 — the field
+// documented "0 defaults to 5" but an omitted value meant no retries. The
+// default now lives in the CRD schema, applied by the API server.
+func TestEnvtest_WebhookMaxRetriesDefaultsToFive(t *testing.T) {
+	ctx := context.Background()
+	wh := &testsv1alpha1.Webhook{
+		ObjectMeta: metav1.ObjectMeta{Name: "notify", Namespace: "default"},
+		Spec:       testsv1alpha1.WebhookSpec{URL: "https://hooks.example.com/kubetest"},
+	}
+	require.NoError(t, k8sClient.Create(ctx, wh))
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, wh) })
+
+	var got testsv1alpha1.Webhook
+	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Namespace: wh.Namespace, Name: wh.Name}, &got))
+	assert.Equal(t, int32(5), got.Spec.MaxRetries)
 }

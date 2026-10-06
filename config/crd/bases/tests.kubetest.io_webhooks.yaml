@@ -224,10 +224,11 @@ spec:
                   type: object
                 type: array
               maxRetries:
+                default: 5
                 description: |-
-                  MaxRetries bounds the retry count on 5xx / connection errors. 0
-                  defaults to 5. 4xx responses are ALWAYS permanent regardless of
-                  this value.
+                  MaxRetries bounds the retry count on 5xx / connection errors.
+                  Defaults to 5 when omitted; an explicit 0 means a single attempt.
+                  4xx responses are ALWAYS permanent regardless of this value.
                 format: int32
                 maximum: 10
                 minimum: 0

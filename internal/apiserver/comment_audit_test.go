@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/store"
@@ -262,4 +263,56 @@ func TestRuns_NotBeforeInEnvelope(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, run.NotBefore)
 	assert.Equal(t, at.UTC(), *run.NotBefore)
+}
+
+// fixes.md #21: PATCH is a JSON merge patch — fields it names change,
+// everything else stays. The old handler replaced the whole spec when the
+// payload had an image or git source, and silently ignored other patches.
+func TestPatchTest_MergesInsteadOfReplacing(t *testing.T) {
+	s, h := mkServer(t, mkTest("ui-owned", ManagedByUI))
+	patch := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/tests/ui-owned", strings.NewReader(body)))
+		return rec
+	}
+	get := func() testsv1alpha1.Test {
+		t.Helper()
+		var got testsv1alpha1.Test
+		require.NoError(t, s.K8sClient.Get(t.Context(), types.NamespacedName{Namespace: "default", Name: "ui-owned"}, &got))
+		return got
+	}
+
+	// Only args: image and git source must survive.
+	require.Equal(t, http.StatusOK, patch(`{"spec":{"container":{"args":["run","other.js"]}}}`).Code)
+	got := get()
+	assert.Equal(t, []string{"run", "other.js"}, got.Spec.Container.Args)
+	assert.Equal(t, "grafana/k6:2.2.0", got.Spec.Container.Image)
+	require.NotNil(t, got.Spec.Content.Git)
+
+	// A patch without image/git used to be a silent no-op.
+	require.Equal(t, http.StatusOK, patch(`{"spec":{"timeout":"10m"}}`).Code)
+	got = get()
+	require.NotNil(t, got.Spec.Timeout)
+	assert.Equal(t, 10*time.Minute, got.Spec.Timeout.Duration)
+
+	// null deletes; labels merge and keep managed-by.
+	require.Equal(t, http.StatusOK, patch(`{"metadata":{"labels":{"team":"sre"}},"spec":{"timeout":null}}`).Code)
+	got = get()
+	assert.Nil(t, got.Spec.Timeout)
+	assert.Equal(t, "sre", got.Labels["team"])
+	assert.Equal(t, ManagedByUI, got.Labels[LabelManagedBy])
+
+	// The managed-by label can't be removed or changed.
+	for _, body := range []string{
+		`{"metadata":{"labels":{"app.kubernetes.io/managed-by":null}}}`,
+		`{"metadata":{"labels":{"app.kubernetes.io/managed-by":"argocd"}}}`,
+	} {
+		rec := patch(body)
+		assert.Equal(t, http.StatusBadRequest, rec.Code, body)
+		assert.Contains(t, rec.Body.String(), "managed-by")
+	}
+	assert.Equal(t, ManagedByUI, get().Labels[LabelManagedBy])
+
+	assert.Equal(t, http.StatusBadRequest, patch(`[1,2]`).Code, "must be an object")
 }
