@@ -108,7 +108,15 @@ kubectl -n kubetest-e2e create secret generic minio-creds \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # MinIO Deployment + Service.
-cat <<'EOF' | kubectl -n "$RELEASE_NS" apply -f -
+#
+# Images: minio/minio and minio/mc were pulled from Docker Hub (and Quay)
+# upstream in 2026 — every tag 404s, which left this script timing out on
+# `rollout status` before any scenario ran. Chainguard publishes both; the
+# free tier only serves :latest, so we pin by digest for reproducibility.
+# Both are shell-less (entrypoint = the binary), hence no `sh -c` below.
+MINIO_IMAGE="cgr.dev/chainguard/minio@sha256:a05a4497e8dce3cb7a7a1bf1872ba5d30ea988f1e8c22c9e0920503761c4b5f1"
+MC_IMAGE="cgr.dev/chainguard/minio-client@sha256:487ea889cfb126aeb8d51405dd8d2f8426da33734a8369338814c4eebe0179e6"
+cat <<EOF | kubectl -n "$RELEASE_NS" apply -f -
 apiVersion: apps/v1
 kind: Deployment
 metadata: { name: minio }
@@ -120,7 +128,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+          image: ${MINIO_IMAGE}
           args: ["server", "/data", "--console-address=:9001"]
           env:
             - { name: MINIO_ROOT_USER, value: minioadmin }
@@ -146,10 +154,18 @@ spec:
   ports:
     - { name: s3, port: 9000, targetPort: 9000 }
 EOF
-kubectl -n "$RELEASE_NS" rollout status deploy/minio --timeout=120s
+if ! kubectl -n "$RELEASE_NS" rollout status deploy/minio --timeout=120s; then
+  log "::error::MinIO did not become Ready — dumping pod state"
+  kubectl -n "$RELEASE_NS" describe pods -l app=minio || true
+  kubectl -n "$RELEASE_NS" get events --sort-by=.lastTimestamp | tail -30 || true
+  exit 1
+fi
 
 # Bucket-create Job — one-shot `mc mb`. Idempotent with `--ignore-existing`.
-cat <<'EOF' | kubectl -n "$RELEASE_NS" apply -f -
+# MC_HOST_local carries endpoint + creds, so no `mc alias set` (and no
+# shell) is needed; MC_CONFIG_DIR points at a writable emptyDir because
+# the image runs as non-root.
+cat <<EOF | kubectl -n "$RELEASE_NS" apply -f -
 apiVersion: batch/v1
 kind: Job
 metadata: { name: minio-mkbucket }
@@ -160,16 +176,22 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:RELEASE.2025-04-03T17-07-56Z
-          command:
-            - sh
-            - -c
-            - |
-              set -eux
-              mc alias set local http://minio:9000 minioadmin minioadmin
-              mc mb --ignore-existing local/kubetest-artifacts
+          image: ${MC_IMAGE}
+          args: ["mb", "--ignore-existing", "local/kubetest-artifacts"]
+          env:
+            - { name: MC_HOST_local, value: "http://minioadmin:minioadmin@minio:9000" }
+            - { name: MC_CONFIG_DIR, value: /tmp/mc }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: {}
 EOF
-kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket --timeout=120s
+if ! kubectl -n "$RELEASE_NS" wait --for=condition=complete job/minio-mkbucket --timeout=120s; then
+  log "::error::bucket-create Job did not complete"
+  kubectl -n "$RELEASE_NS" logs job/minio-mkbucket --all-containers=true || true
+  exit 1
+fi
 phase_end "minio_deploy"
 
 phase_start "helm_install"
