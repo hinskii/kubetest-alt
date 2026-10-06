@@ -56,6 +56,11 @@ type RunResult struct {
 // OOM, SIGKILL). Callers fall back to Pod terminated state per §15.2.
 var ErrResultNotFound = errors.New("result: not found")
 
+// ErrResultMalformed indicates a result.json that exists but can't be used
+// (bad JSON, non-terminal phase). Permanent: retrying reads the same bytes,
+// so the run ends as error instead of requeueing forever (fixes.md #10).
+var ErrResultMalformed = errors.New("result: malformed")
+
 // ResultReader fetches the wrapper's terminal result for a given TestRun.
 // Interface exists so step 07 can drop in a object-storage-backed implementation
 // without touching the reconciler.

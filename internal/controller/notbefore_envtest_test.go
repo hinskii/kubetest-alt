@@ -125,3 +125,38 @@ func TestWaitingForSchedule(t *testing.T) {
 	assert.False(t, waitingForSchedule(run(nil, ""), now))
 	assert.False(t, waitingForSchedule(run(&future, "{}"), now), "already set up (notBefore edited later) runs on")
 }
+
+// fixes.md #5 end to end: two runs queued behind a running Forbid run
+// used to block each other forever once it finished. Now they run one
+// after the other, oldest first.
+func TestReconcile_Forbid_QueuedRunsTakeTurns(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	test := newTestFixture(ns, "turns")
+	test.Spec.ConcurrencyPolicy = PolicyForbid
+	require.NoError(t, k8sClient.Create(ctx, test))
+
+	key := func(name string) client.ObjectKey { return client.ObjectKey{Namespace: ns, Name: name} }
+	finish := func(name string) {
+		fakeResults.Set(name, &RunResult{Phase: testsv1alpha1.PhasePassed})
+		patchJobConditions(t, ctx, key(name), []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: "True"}})
+		waitForPhase(t, ctx, key(name), testsv1alpha1.PhasePassed, 5*time.Second)
+	}
+
+	require.NoError(t, k8sClient.Create(ctx, newRunFixture(ns, "turns-1", "turns")))
+	waitForJob(t, ctx, key("turns-1"), 3*time.Second)
+	require.NoError(t, k8sClient.Create(ctx, newRunFixture(ns, "turns-2", "turns")))
+	waitForPhase(t, ctx, key("turns-2"), testsv1alpha1.PhaseQueued, 3*time.Second)
+	time.Sleep(1100 * time.Millisecond) // distinct creation second → turns-2 is older
+	require.NoError(t, k8sClient.Create(ctx, newRunFixture(ns, "turns-3", "turns")))
+	waitForPhase(t, ctx, key("turns-3"), testsv1alpha1.PhaseQueued, 3*time.Second)
+
+	finish("turns-1")
+	waitForJob(t, ctx, key("turns-2"), 5*time.Second)
+	assert.Never(t, func() bool { return hasJob(ctx, key("turns-3")) },
+		1500*time.Millisecond, 100*time.Millisecond, "Forbid: only one run at a time")
+
+	finish("turns-2")
+	waitForJob(t, ctx, key("turns-3"), 5*time.Second)
+}

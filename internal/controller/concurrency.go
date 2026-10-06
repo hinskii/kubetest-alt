@@ -58,19 +58,46 @@ func activePriorCount(prior []testsv1alpha1.TestRun, self *testsv1alpha1.TestRun
 	return n
 }
 
+// forbidBlocks reports whether prior p keeps self waiting under Forbid:
+// p has started (it has a resolved spec), or p is an older run still
+// waiting its turn. Runs queue in creation order — the oldest waiting run
+// always proceeds, so waiting runs can't block each other forever.
+func forbidBlocks(p, self *testsv1alpha1.TestRun) bool {
+	if IsTerminalPhase(p.Status.Phase) || (self != nil && p.UID == self.UID) {
+		return false
+	}
+	return p.Status.ResolvedSpec != "" || self == nil || queuedBefore(p, self)
+}
+
+// queuedBefore orders runs by creation time, then name (same-second
+// creations are common: cron fires, scripted runs).
+func queuedBefore(a, b *testsv1alpha1.TestRun) bool {
+	ta, tb := a.CreationTimestamp.Time, b.CreationTimestamp.Time
+	if !ta.Equal(tb) {
+		return ta.Before(tb)
+	}
+	return a.Name < b.Name
+}
+
 // DecideConcurrency picks the action for a NEW run given the priors (all
 // TestRuns for the same Test in the same namespace, EXCLUDING self) and the
 // Test's ConcurrencyPolicy. Empty policy is treated as Allow.
 //
 // Pure function — trivially unit-testable.
 func DecideConcurrency(prior []testsv1alpha1.TestRun, self *testsv1alpha1.TestRun, policy string) ConcurrencyAction {
+	if policy == PolicyForbid {
+		for i := range prior {
+			if forbidBlocks(&prior[i], self) {
+				return ConcurrencyWait
+			}
+		}
+		return ConcurrencyProceed
+	}
 	active := activePriorCount(prior, self)
 	if active == 0 {
 		return ConcurrencyProceed
 	}
 	switch policy {
-	case PolicyForbid:
-		return ConcurrencyWait
 	case PolicyReplace:
 		return ConcurrencyReplacePrior
 	default:

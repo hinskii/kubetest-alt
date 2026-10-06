@@ -35,6 +35,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/metrics"
+	"github.com/hinskii/kubetest-alt/internal/names"
 )
 
 // SourceCron is TestRun.spec.source on runs the scheduler creates.
@@ -234,7 +235,7 @@ func (s *Scheduler) evaluate(ctx context.Context, t *testsv1alpha1.Test, now tim
 func scheduledRun(t *testsv1alpha1.Test, prev time.Time) *testsv1alpha1.TestRun {
 	return &testsv1alpha1.TestRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-%d", t.Name, prev.Unix()),
+			Name:      names.Bounded(fmt.Sprintf("%s-%d", t.Name, prev.Unix())),
 			Namespace: t.Namespace,
 			Labels: map[string]string{
 				LabelScheduledForTest: t.Name,

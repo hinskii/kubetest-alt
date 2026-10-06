@@ -134,6 +134,10 @@ type TestRunReconciler struct {
 	// can land later; 10s is fine for MVP.
 	ConcurrencyWaitInterval time.Duration
 
+	// UnschedulableTimeout is how long a run's pod may stay unschedulable
+	// before the run ends as error. Zero = DefaultUnschedulableTimeout.
+	UnschedulableTimeout time.Duration
+
 	// Now returns the current time. Overridable so tests get deterministic
 	// timestamps. Defaults to metav1.Now.
 	Now func() metav1.Time
@@ -354,6 +358,13 @@ func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// From here we expect either an existing Job or a not-yet-created one.
 	return r.observeOrCreateJob(ctx, logger, &run)
+}
+
+func (r *TestRunReconciler) unschedulableTimeout() time.Duration {
+	if r.UnschedulableTimeout > 0 {
+		return r.UnschedulableTimeout
+	}
+	return DefaultUnschedulableTimeout
 }
 
 // waitForNotBefore holds a scheduled run in queued until spec.notBefore.
@@ -619,6 +630,13 @@ func (r *TestRunReconciler) createJob(ctx context.Context, logger interface{ Inf
 		}
 	}
 	if err := r.Create(ctx, job); err != nil && !apierrors.IsAlreadyExists(err) {
+		if apierrors.IsInvalid(err) {
+			// The API server rejected the Job itself: retrying sends the
+			// same object again. End the run with the reason instead of
+			// leaving it queued forever (fixes.md #9).
+			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError, ReasonCompileError,
+				fmt.Sprintf("Job rejected by the API server: %v", err))
+		}
 		return ctrl.Result{}, fmt.Errorf("create Job: %w", err)
 	}
 
@@ -644,7 +662,7 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 	// for ImagePullBackOff / OOMKilled since Job status alone doesn't
 	// surface those.
 	pod, _ := r.findPodForJob(ctx, job)
-	if infra := AnalyzePod(pod); infra.Reason != "" {
+	if infra := AnalyzePod(pod, r.Now().Time, r.unschedulableTimeout()); infra.Reason != "" {
 		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseError,
 			infra.Reason, infra.Message, job)
 	}
@@ -652,19 +670,28 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 	switch conclusion {
 	case JobSucceeded, JobFailedConclusion:
 		result, err := r.Results.Read(ctx, run)
-		if err == nil && result != nil {
-			// Fold scraper output (metrics, JUnit counts, artifact refs)
-			// into TestRun.Status before the terminal transition writes it.
-			applyRunResultToStatus(run, result)
-			return r.terminalAndDeleteJob(ctx, run, result.Phase, "", result.ErrorMessage, job)
-		}
-		if !errors.Is(err, ErrResultNotFound) && err != nil {
+		switch {
+		case err == nil && result != nil:
+		case errors.Is(err, ErrResultMalformed):
+			// Permanent: rereading returns the same bytes (fixes.md #10).
+			return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseError,
+				ReasonMalformedResult, err.Error(), job)
+		case err == nil || errors.Is(err, ErrResultNotFound):
+			// No result.json (no object storage, or the upload failed):
+			// the verdict the wrapper left in the pod status.
+			if result = ResultFromTermination(pod); result == nil {
+				// Not even that — §15.2 fallback via pod terminated state.
+				phase, reason, msg := FallbackPhaseFromJobFailure(job, pod)
+				return r.terminalAndDeleteJob(ctx, run, phase, reason, msg, job)
+			}
+		default:
 			// Transient reader failure — requeue.
 			return ctrl.Result{RequeueAfter: r.FallbackRequeue}, err
 		}
-		// Missing result.json — §15.2 fallback via pod terminated state.
-		phase, reason, msg := FallbackPhaseFromJobFailure(job)
-		return r.terminalAndDeleteJob(ctx, run, phase, reason, msg, job)
+		// Fold scraper output (metrics, JUnit counts, artifact refs)
+		// into TestRun.Status before the terminal transition writes it.
+		applyRunResultToStatus(run, result)
+		return r.terminalAndDeleteJob(ctx, run, result.Phase, "", result.ErrorMessage, job)
 
 	case JobStillRunning:
 		if IsPodRunning(pod) {

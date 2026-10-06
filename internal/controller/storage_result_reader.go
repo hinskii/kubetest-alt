@@ -51,6 +51,7 @@ func NewStorageResultReader(d storage.Downloader, bucket string) *StorageResultR
 //   - Object present → parse into ExecutionResult, project into RunResult.
 //   - Object absent (storage.ErrNotFound) → return ErrResultNotFound so the
 //     reconciler falls back to Pod terminated state (§15.2).
+//   - Unparseable JSON or a non-final phase → ErrResultMalformed (permanent).
 //   - Transient errors bubble up unchanged; the reconciler treats them as
 //     retryable via FallbackRequeue.
 func (r *StorageResultReader) Read(ctx context.Context, run *testsv1alpha1.TestRun) (*RunResult, error) {
@@ -80,9 +81,13 @@ func (r *StorageResultReader) Read(ctx context.Context, run *testsv1alpha1.TestR
 	}
 	var er executor.ExecutionResult
 	if err := json.Unmarshal(b, &er); err != nil {
-		return nil, fmt.Errorf("parse %s/%s: %w", r.Bucket, key, err)
+		return nil, fmt.Errorf("%w: %s: %v", ErrResultMalformed, key, err)
 	}
-	return projectRunResult(&er), nil
+	rr := projectRunResult(&er)
+	if !IsTerminalPhase(rr.Phase) {
+		return nil, fmt.Errorf("%w: %s: phase %q is not a final phase", ErrResultMalformed, key, er.Phase)
+	}
+	return rr, nil
 }
 
 // projectRunResult narrows ExecutionResult (wire format) into RunResult

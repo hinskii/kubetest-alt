@@ -38,6 +38,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/composer"
+	"github.com/hinskii/kubetest-alt/internal/names"
 )
 
 // compositeRequeue is the fallback re-poll interval while children
@@ -143,7 +144,7 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 
 		// Look up (or create) children for this step.
 		stepKids := kidsForStep(kids, i)
-		expected := expectedChildren(step, i)
+		expected := expectedChildren(run, step, i)
 		if err := r.ensureStepChildren(ctx, logger, run, i, step, stepKids, expected); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -209,7 +210,7 @@ func (r *TestRunReconciler) reconcileComposite(ctx context.Context, logger inter
 // expectedChild names one anticipated child TestRun for a step.
 type expectedChild struct {
 	Key     string // "s{step}/{testRef}[{i}]" — matches StepResult map key
-	Name    string // "{parent}-s{step}-{testRef}-{i}"
+	Name    string // "{parent}-s{step}-{testRef}-{i}", names.Bounded
 	StepIdx int
 	TestRef string
 	Index   int32
@@ -219,7 +220,7 @@ type expectedChild struct {
 
 // expectedChildren enumerates every child (across all refs in the step,
 // with count replicas each) that this step SHOULD have.
-func expectedChildren(step testsv1alpha1.Step, stepIdx int) []expectedChild {
+func expectedChildren(parent *testsv1alpha1.TestRun, step testsv1alpha1.Step, stepIdx int) []expectedChild {
 	if step.Execute == nil {
 		return nil
 	}
@@ -230,14 +231,16 @@ func expectedChildren(step testsv1alpha1.Step, stepIdx int) []expectedChild {
 			count = 1
 		}
 		for i := int32(0); i < count; i++ {
-			out = append(out, expectedChild{
+			e := expectedChild{
 				Key:     fmt.Sprintf("s%d/%s[%d]", stepIdx, ref.Name, i),
 				StepIdx: stepIdx,
 				TestRef: ref.Name,
 				Index:   i,
 				Count:   count,
 				Config:  composer.RenderChildConfig(ref.Config, i, count),
-			})
+			}
+			e.Name = childName(parent, stepIdx, e)
+			out = append(out, e)
 		}
 	}
 	return out
@@ -279,13 +282,19 @@ func kidsForStep(all []testsv1alpha1.TestRun, stepIdx int) []testsv1alpha1.TestR
 	return out
 }
 
-// findChild returns the child matching one expectedChild by name-suffix.
-// Deterministic child names + label triple make this O(N) with tiny N.
-func findChildByExecIndex(kids []testsv1alpha1.TestRun, testRef string, execIdx string) *testsv1alpha1.TestRun {
+// childName is the deterministic name of one expected child; creating it
+// twice hits AlreadyExists. Bounded to a valid Job name.
+func childName(parent *testsv1alpha1.TestRun, stepIdx int, e expectedChild) string {
+	return names.Bounded(fmt.Sprintf("%s-s%d-%s-%d", parent.Name, stepIdx, e.TestRef, e.Index))
+}
+
+// findChild returns the child with exactly name. Matching a name fragment
+// paired the wrong child when one testRef contains another ("api" and
+// "api-smoke" in the same step) — fixes.md #8.
+func findChild(kids []testsv1alpha1.TestRun, name string) *testsv1alpha1.TestRun {
 	for i := range kids {
-		k := &kids[i]
-		if k.Labels[compiler.LabelExecIndex] == execIdx && strings.Contains(k.Name, testRef) {
-			return k
+		if kids[i].Name == name {
+			return &kids[i]
 		}
 	}
 	return nil
@@ -296,7 +305,7 @@ func findChildByExecIndex(kids []testsv1alpha1.TestRun, testRef string, execIdx 
 func gatherOutcomes(kids []testsv1alpha1.TestRun, expected []expectedChild) ([]composer.ChildOutcome, bool) {
 	outcomes := make([]composer.ChildOutcome, 0, len(expected))
 	for _, e := range expected {
-		child := findChildByExecIndex(kids, e.TestRef, fmt.Sprintf("%d", e.Index))
+		child := findChild(kids, e.Name)
 		if child == nil {
 			return nil, false
 		}
@@ -348,9 +357,9 @@ func (r *TestRunReconciler) ensureStepChildren(
 		if inFlight >= cap {
 			return nil
 		}
-		name := fmt.Sprintf("%s-s%d-%s-%d", parent.Name, stepIdx, e.TestRef, e.Index)
+		name := e.Name
 		// Already exists?
-		if findChildByExecIndex(kids, e.TestRef, fmt.Sprintf("%d", e.Index)) != nil {
+		if findChild(kids, name) != nil {
 			continue
 		}
 		child := &testsv1alpha1.TestRun{
@@ -449,7 +458,7 @@ func recordedStepVerdict(sr testsv1alpha1.StepResult) *composer.StepVerdict {
 // when nothing has changed.
 func (r *TestRunReconciler) updatePerChildStepResults(run *testsv1alpha1.TestRun, _ int, kids []testsv1alpha1.TestRun, expected []expectedChild) {
 	for _, e := range expected {
-		child := findChildByExecIndex(kids, e.TestRef, fmt.Sprintf("%d", e.Index))
+		child := findChild(kids, e.Name)
 		if child == nil {
 			continue
 		}

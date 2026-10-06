@@ -373,3 +373,27 @@ func splitPath(p string) []any {
 	}
 	return out
 }
+
+// TestEnvtest_RunNameMustFitAJobName is the sentinel for the TestRun name
+// rule: the API server accepts object names up to 253 characters, so a
+// 64-character name is only refused with the validating webhook on the
+// CREATE path (fixes.md #9 — it used to hang in queued).
+func TestEnvtest_RunNameMustFitAJobName(t *testing.T) {
+	ctx := context.Background()
+	long := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("r", 64), Namespace: "default"},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "t"},
+	}
+	err := k8sClient.Create(ctx, long)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most 63")
+
+	// generateName: the API server cuts the prefix so the final name fits.
+	gen := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{GenerateName: strings.Repeat("g", 70) + "-", Namespace: "default"},
+		Spec:       testsv1alpha1.TestRunSpec{TestRef: "t"},
+	}
+	require.NoError(t, k8sClient.Create(ctx, gen))
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, gen) })
+	assert.LessOrEqual(t, len(gen.Name), 63)
+}

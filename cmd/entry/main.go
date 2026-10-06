@@ -98,6 +98,9 @@ func runWrapper(ctx context.Context) int {
 		RequestPath:    executor.RequestPath,
 		ResultDir:      resultDir,
 		Loader:         os.Stderr,
+		// The verdict also lands in the pod status, for runs whose
+		// result.json can't reach object storage.
+		TerminationMessagePath: executor.TerminationMessagePath,
 	}
 	if err := entry.Execute(ctx); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)

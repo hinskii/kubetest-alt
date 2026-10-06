@@ -18,12 +18,18 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/compiler"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 func TestInspectJob(t *testing.T) {
@@ -185,7 +191,7 @@ func TestAnalyzePod(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			infra := AnalyzePod(tc.pod)
+			infra := AnalyzePod(tc.pod, time.Now(), DefaultUnschedulableTimeout)
 			assert.Equal(t, tc.wantReason, infra.Reason)
 			if tc.wantSubstr != "" {
 				assert.Contains(t, infra.Message, tc.wantSubstr)
@@ -203,26 +209,78 @@ func TestIsPodRunning(t *testing.T) {
 
 func TestFallbackPhaseFromJobFailure(t *testing.T) {
 	t.Run("nil job → error MissingResult", func(t *testing.T) {
-		p, r, m := FallbackPhaseFromJobFailure(nil)
+		p, r, m := FallbackPhaseFromJobFailure(nil, nil)
 		assert.Equal(t, testsv1alpha1.PhaseError, p)
 		assert.Equal(t, ReasonMissingResult, r)
-		assert.Contains(t, m, "no result.json")
+		assert.Contains(t, m, "no result")
 	})
 	t.Run("job with generic failure", func(t *testing.T) {
-		p, r, _ := FallbackPhaseFromJobFailure(&batchv1.Job{Status: batchv1.JobStatus{
+		p, r, m := FallbackPhaseFromJobFailure(&batchv1.Job{Status: batchv1.JobStatus{
 			Conditions: []batchv1.JobCondition{{Type: batchv1.JobFailed, Status: corev1.ConditionTrue}},
-		}})
+		}}, wrapperPod(corev1.ContainerStateTerminated{ExitCode: 137, Reason: "Error"}))
 		assert.Equal(t, testsv1alpha1.PhaseError, p)
 		assert.Equal(t, ReasonMissingResult, r)
+		assert.Equal(t, "wrapper produced no result; container exited with code 137 (Error)", m)
 	})
 	t.Run("job DeadlineExceeded → JobDeadline reason", func(t *testing.T) {
 		p, r, m := FallbackPhaseFromJobFailure(&batchv1.Job{Status: batchv1.JobStatus{
 			Conditions: []batchv1.JobCondition{{
 				Type: batchv1.JobFailed, Status: corev1.ConditionTrue, Reason: "DeadlineExceeded",
 			}},
-		}})
+		}}, nil)
 		assert.Equal(t, testsv1alpha1.PhaseError, p)
 		assert.Equal(t, ReasonJobDeadline, r)
 		assert.Contains(t, m, "activeDeadlineSeconds")
 	})
+}
+
+func wrapperPod(term corev1.ContainerStateTerminated) *corev1.Pod {
+	return &corev1.Pod{Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{
+		{Name: "sidecar", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Message: "not me"}}},
+		{Name: compiler.ContainerWrapper, State: corev1.ContainerState{Terminated: &term}},
+	}}}
+}
+
+// fixes.md #6: with no result.json the verdict comes from the wrapper's
+// termination summary — passed AND failed runs, not "error" for all.
+func TestResultFromTermination(t *testing.T) {
+	failed := executor.ExecutionResult{
+		Phase: executor.PhaseFailed, ErrorMessage: "exit code 99",
+		TestCounts: &executor.TestCounts{Total: 3, Failed: 1, Passed: 2}, Metrics: map[string]float64{"p95_ms": 120},
+	}
+	got := ResultFromTermination(wrapperPod(corev1.ContainerStateTerminated{
+		Message: string(executor.TerminationSummary(failed)),
+	}))
+	require.NotNil(t, got)
+	assert.Equal(t, testsv1alpha1.PhaseFailed, got.Phase)
+	assert.Equal(t, "exit code 99", got.ErrorMessage)
+	assert.Equal(t, &testsv1alpha1.TestCounts{Total: 3, Failed: 1, Passed: 2}, got.TestCounts)
+	assert.Equal(t, map[string]float64{"p95_ms": 120}, got.Metrics)
+
+	passed := ResultFromTermination(wrapperPod(corev1.ContainerStateTerminated{
+		Message: string(executor.TerminationSummary(executor.ExecutionResult{Phase: executor.PhasePassed})),
+	}))
+	require.NotNil(t, passed)
+	assert.Equal(t, testsv1alpha1.PhasePassed, passed.Phase)
+
+	assert.Nil(t, ResultFromTermination(nil))
+	assert.Nil(t, ResultFromTermination(wrapperPod(corev1.ContainerStateTerminated{Message: "panic: boom"})))
+	assert.Nil(t, ResultFromTermination(&corev1.Pod{}), "no wrapper container status")
+}
+
+// fixes.md #19: an unschedulable pod ends the run after the grace period
+// instead of hanging until the Job deadline.
+func TestAnalyzePod_Unschedulable(t *testing.T) {
+	now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
+	pod := func(since time.Duration) *corev1.Pod {
+		return &corev1.Pod{Status: corev1.PodStatus{Phase: corev1.PodPending, Conditions: []corev1.PodCondition{{
+			Type: corev1.PodScheduled, Status: corev1.ConditionFalse, Reason: corev1.PodReasonUnschedulable,
+			Message:            "0/3 nodes are available: 3 Insufficient memory.",
+			LastTransitionTime: metav1.NewTime(now.Add(-since)),
+		}}}}
+	}
+	assert.Empty(t, AnalyzePod(pod(time.Minute), now, 5*time.Minute).Reason, "autoscaler gets its grace period")
+	got := AnalyzePod(pod(6*time.Minute), now, 5*time.Minute)
+	assert.Equal(t, ReasonUnschedulable, got.Reason)
+	assert.Contains(t, got.Message, "3 Insufficient memory")
 }

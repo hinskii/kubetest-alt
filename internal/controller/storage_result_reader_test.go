@@ -85,16 +85,24 @@ func TestStorageResultReader_TransientErrorBubbles(t *testing.T) {
 }
 
 // TestStorageResultReader_MalformedJSONFails: garbage payload → error
-// (reconciler treats as transient — a redeploy of the wrapper might
-// write proper JSON, but that's a step-08 problem, not the reader's).
+// (permanent: the reconciler ends the run as error/MalformedResult).
 func TestStorageResultReader_MalformedJSONFails(t *testing.T) {
 	fake := storage.NewFake()
 	require.NoError(t, fake.Put(context.Background(), testReaderBucket, readerKeys("run-bad").Result(),
 		strings.NewReader("{not-json"), 9, "application/json"))
 	r := NewStorageResultReader(fake, testReaderBucket)
 	_, err := r.Read(context.Background(), readerRun("run-bad"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "parse")
+	require.ErrorIs(t, err, ErrResultMalformed, "permanent — the reconciler must not requeue forever")
+}
+
+func TestStorageResultReader_NonFinalPhaseIsMalformed(t *testing.T) {
+	fake := storage.NewFake()
+	body := `{"phase":"running"}`
+	require.NoError(t, fake.Put(context.Background(), testReaderBucket, readerKeys("run-odd").Result(),
+		strings.NewReader(body), int64(len(body)), "application/json"))
+	_, err := NewStorageResultReader(fake, testReaderBucket).Read(context.Background(), readerRun("run-odd"))
+	require.ErrorIs(t, err, ErrResultMalformed)
+	assert.Contains(t, err.Error(), `phase "running"`)
 }
 
 func TestStorageResultReader_GuardRails(t *testing.T) {

@@ -18,6 +18,7 @@ package controller
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,44 @@ func runWith(uid string, phase testsv1alpha1.Phase) testsv1alpha1.TestRun {
 		ObjectMeta: metav1.ObjectMeta{Name: "r-" + uid, UID: types.UID(uid)},
 		Status:     testsv1alpha1.TestRunStatus{Phase: phase},
 	}
+}
+
+// younger gives r a creation time after self's (zero) one.
+func younger(r testsv1alpha1.TestRun) testsv1alpha1.TestRun {
+	r.CreationTimestamp = metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	return r
+}
+
+func startedRun(uid string) testsv1alpha1.TestRun {
+	r := runWith(uid, testsv1alpha1.PhaseRunning)
+	r.Status.ResolvedSpec = "{}"
+	return r
+}
+
+// fixes.md #5: two runs waiting behind a finished Forbid run used to count
+// each other as active and wait forever. Exactly one — the older — goes.
+func TestDecideConcurrency_ForbidWaitingRunsDontDeadlock(t *testing.T) {
+	t0 := metav1.NewTime(time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC))
+	older := runWith("older", testsv1alpha1.PhaseQueued)
+	older.CreationTimestamp = t0
+	younger := runWith("younger", testsv1alpha1.PhaseQueued)
+	younger.CreationTimestamp = metav1.NewTime(t0.Add(time.Second))
+	done := startedRun("done")
+	done.Status.Phase = testsv1alpha1.PhasePassed
+	all := []testsv1alpha1.TestRun{done, older, younger}
+
+	assert.Equal(t, ConcurrencyProceed, DecideConcurrency(all, &older, PolicyForbid))
+	assert.Equal(t, ConcurrencyWait, DecideConcurrency(all, &younger, PolicyForbid))
+
+	// Once the older one has started, the younger keeps waiting for it.
+	older.Status.ResolvedSpec, older.Status.Phase = "{}", testsv1alpha1.PhaseRunning
+	assert.Equal(t, ConcurrencyWait, DecideConcurrency([]testsv1alpha1.TestRun{done, older, younger}, &younger, PolicyForbid))
+
+	// Same creation second: name breaks the tie, still exactly one goes.
+	a, b := runWith("a", testsv1alpha1.PhaseQueued), runWith("b", testsv1alpha1.PhaseQueued)
+	pair := []testsv1alpha1.TestRun{a, b}
+	assert.Equal(t, ConcurrencyProceed, DecideConcurrency(pair, &a, PolicyForbid))
+	assert.Equal(t, ConcurrencyWait, DecideConcurrency(pair, &b, PolicyForbid))
 }
 
 func TestDecideConcurrency_TableDriven(t *testing.T) {
@@ -67,8 +106,13 @@ func TestDecideConcurrency_TableDriven(t *testing.T) {
 		{"1 running prior, Forbid", []testsv1alpha1.TestRun{runWith("a", testsv1alpha1.PhaseRunning)}, PolicyForbid, ConcurrencyWait},
 		{"1 running prior, Replace", []testsv1alpha1.TestRun{runWith("a", testsv1alpha1.PhaseRunning)}, PolicyReplace, ConcurrencyReplacePrior},
 
-		// Queued prior counts as active too.
-		{"1 queued prior, Forbid", []testsv1alpha1.TestRun{runWith("a", testsv1alpha1.PhaseQueued)}, PolicyForbid, ConcurrencyWait},
+		// An older queued prior goes first (runs queue in creation order:
+		// "r-a" sorts before "self" at equal creation time).
+		{"1 older queued prior, Forbid", []testsv1alpha1.TestRun{runWith("a", testsv1alpha1.PhaseQueued)}, PolicyForbid, ConcurrencyWait},
+		// A younger queued prior that hasn't started doesn't block self.
+		{"1 younger queued prior, Forbid", []testsv1alpha1.TestRun{younger(runWith("z", testsv1alpha1.PhaseQueued))}, PolicyForbid, ConcurrencyProceed},
+		// A younger prior that already started does.
+		{"1 younger started prior, Forbid", []testsv1alpha1.TestRun{younger(startedRun("z"))}, PolicyForbid, ConcurrencyWait},
 
 		// Paused counts as active (test isn't done).
 		{"1 paused prior, Forbid", []testsv1alpha1.TestRun{runWith("a", testsv1alpha1.PhasePaused)}, PolicyForbid, ConcurrencyWait},

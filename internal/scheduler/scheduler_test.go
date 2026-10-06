@@ -455,3 +455,17 @@ func TestScheduler_InvalidScheduleIsDefensiveSkip(t *testing.T) {
 	require.NoError(t, s.Tick(context.Background(), clk.Now()))
 	assert.Empty(t, listRuns(t, c))
 }
+
+// fixes.md #9: "{test}-{unix}" exceeds the 63-character run-name limit for
+// Test names over 52 characters; the fire must still produce a valid,
+// deterministic (idempotent) name.
+func TestScheduledRun_LongTestNameFitsAndIsDeterministic(t *testing.T) {
+	test := newTest(strings.Repeat("checkout-", 7)+"flow", "*/5 * * * *", t0) // 67 chars
+	a, b := scheduledRun(test, t0), scheduledRun(test, t0)
+	assert.LessOrEqual(t, len(a.Name), 63)
+	assert.Equal(t, a.Name, b.Name, "same fire → same name → AlreadyExists dedupes it")
+	assert.NotEqual(t, a.Name, scheduledRun(test, t0.Add(5*time.Minute)).Name)
+
+	short := newTest("smoke", "*/5 * * * *", t0)
+	assert.Equal(t, fmt.Sprintf("smoke-%d", t0.Unix()), scheduledRun(short, t0).Name, "short names unchanged")
+}

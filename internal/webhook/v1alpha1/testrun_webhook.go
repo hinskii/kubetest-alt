@@ -19,12 +19,14 @@ package v1alpha1
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/names"
 )
 
 var testrunlog = logf.Log.WithName("testrun-resource")
@@ -64,7 +66,23 @@ type TestRunCustomValidator struct{}
 
 // ValidateCreate runs on TestRun creation.
 func (v *TestRunCustomValidator) ValidateCreate(_ context.Context, obj *testsv1alpha1.TestRun) (admission.Warnings, error) {
+	if err := validateRunName(obj.Name); err != nil {
+		return nil, err
+	}
 	return nil, validateTestRun(&obj.Spec)
+}
+
+// validateRunName rejects names that can't become a Job: the run name is
+// the Job name and the value of the run-id / job-name labels, all limited
+// to 63 characters. Accepting it used to leave the run queued forever,
+// retrying a Job create that could never succeed (fixes.md #9). With
+// generateName the API server has already produced the final name here.
+func validateRunName(name string) error {
+	if len(name) > names.MaxLen {
+		return fmt.Errorf("metadata.name %q is %d characters; a TestRun name must be at most %d (it becomes the Job name)",
+			name, len(name), names.MaxLen)
+	}
+	return nil
 }
 
 // ValidateUpdate runs on TestRun update. Same rules as create.

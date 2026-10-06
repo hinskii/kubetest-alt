@@ -18,11 +18,14 @@ package controller
 
 import (
 	"fmt"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/compiler"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 // Reasons surfaced in TestRunStatus.Message. Kept as constants so tests can
@@ -52,6 +55,8 @@ const (
 	ReasonAbortedByUser       = "AbortedByUser"
 	ReasonAbortedByParent     = "AbortedByParent"
 	ReasonMissingResult       = "MissingResult"
+	ReasonMalformedResult     = "MalformedResult"
+	ReasonUnschedulable       = "Unschedulable"
 )
 
 // IsTerminalPhase reports whether a Phase means "done, no more transitions".
@@ -106,10 +111,18 @@ type InfraFailure struct {
 	Message string
 }
 
+// DefaultUnschedulableTimeout is how long a pod may stay unschedulable
+// before the run ends as error. Long enough for a cluster autoscaler to add
+// a node; far shorter than the Job deadline the run used to wait for.
+const DefaultUnschedulableTimeout = 5 * time.Minute
+
 // AnalyzePod looks for infrastructure failures on a Pod that should terminate
 // the TestRun as phase=error rather than phase=failed (§15.3).
 //
 // Detected today (checked in order):
+//   - PodScheduled=False/Unschedulable for longer than unschedulableFor
+//     → ReasonUnschedulable (message from the scheduler: which resources
+//     or taints rule every node out)
 //   - ImagePullBackOff / ErrImagePull on any container → ReasonImagePull
 //   - OOMKilled on any container → ReasonOOMKilled
 //   - Init container Terminated with ExitCode>0 → ReasonContentFetchFailed,
@@ -117,9 +130,19 @@ type InfraFailure struct {
 //     /dev/termination-log — the fetcher writes FETCH_ERROR there).
 //
 // Returns zero value (empty Reason) if the pod looks healthy or is nil.
-func AnalyzePod(pod *corev1.Pod) InfraFailure {
+func AnalyzePod(pod *corev1.Pod, now time.Time, unschedulableFor time.Duration) InfraFailure {
 	if pod == nil {
 		return InfraFailure{}
+	}
+	for _, c := range pod.Status.Conditions {
+		if c.Type == corev1.PodScheduled && c.Status == corev1.ConditionFalse &&
+			c.Reason == corev1.PodReasonUnschedulable && now.Sub(c.LastTransitionTime.Time) >= unschedulableFor {
+			return InfraFailure{
+				Reason: ReasonUnschedulable,
+				Message: fmt.Sprintf("infra: pod unschedulable for %s: %s",
+					unschedulableFor, c.Message),
+			}
+		}
 	}
 
 	// Check init containers first — content-fetcher failures should surface
@@ -188,16 +211,56 @@ func IsPodRunning(pod *corev1.Pod) bool {
 	return pod != nil && pod.Status.Phase == corev1.PodRunning
 }
 
-// FallbackPhaseFromJobFailure derives a TestRun phase when the Job is Failed
-// but the wrapper didn't write a result.json (crash/SIGKILL). §15.2:
-// "Missing result.json → fallback path = container exit code + pod
-// terminated state → phase error with reason. Never assume result.json exists."
+// ResultFromTermination returns the verdict the wrapper left in the pod
+// status (executor.TerminationSummary in the wrapper container's
+// terminated.message), or nil. This is how runs get a verdict when
+// result.json never reached object storage (fixes.md #6) — the wrapper
+// exits 0 whatever the verdict, so its exit code can't carry it.
+func ResultFromTermination(pod *corev1.Pod) *RunResult {
+	term := wrapperTerminated(pod)
+	if term == nil {
+		return nil
+	}
+	er, ok := executor.ParseTerminationSummary(term.Message)
+	if !ok {
+		return nil
+	}
+	return projectRunResult(&er)
+}
+
+func wrapperTerminated(pod *corev1.Pod) *corev1.ContainerStateTerminated {
+	if pod == nil {
+		return nil
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name != compiler.ContainerWrapper {
+			continue
+		}
+		if cs.State.Terminated != nil {
+			return cs.State.Terminated
+		}
+		return cs.LastTerminationState.Terminated
+	}
+	return nil
+}
+
+// FallbackPhaseFromJobFailure derives a TestRun phase when the wrapper left
+// no verdict at all — neither result.json nor a termination summary: it
+// crashed or was SIGKILL'd. §15.2: "Missing result.json → fallback path =
+// container exit code + pod terminated state → phase error with reason."
 //
 // If the Job's failure was ADSExceeded (activeDeadlineSeconds), map to
-// ReasonJobDeadline; otherwise generic MissingResult.
-func FallbackPhaseFromJobFailure(job *batchv1.Job) (testsv1alpha1.Phase, string, string) {
+// ReasonJobDeadline; otherwise MissingResult with the wrapper container's
+// exit code and termination reason.
+func FallbackPhaseFromJobFailure(job *batchv1.Job, pod *corev1.Pod) (testsv1alpha1.Phase, string, string) {
 	reason := ReasonMissingResult
-	message := "wrapper produced no result.json; container likely crashed or was SIGKILL'd"
+	message := "wrapper produced no result; container likely crashed or was SIGKILL'd"
+	if term := wrapperTerminated(pod); term != nil {
+		message = fmt.Sprintf("wrapper produced no result; container exited with code %d", term.ExitCode)
+		if term.Reason != "" {
+			message += " (" + term.Reason + ")"
+		}
+	}
 	if job != nil {
 		for _, c := range job.Status.Conditions {
 			if c.Status == corev1.ConditionTrue && c.Type == batchv1.JobFailed &&

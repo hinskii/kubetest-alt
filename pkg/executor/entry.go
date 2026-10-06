@@ -97,6 +97,10 @@ type Entry struct {
 	// Stderr is where load/setup errors are logged. Production is os.Stderr;
 	// tests inject a bytes.Buffer to assert on messages.
 	Loader io.Writer
+
+	// TerminationMessagePath receives TerminationSummary of the final
+	// result (production: TerminationMessagePath). Empty skips it.
+	TerminationMessagePath string
 }
 
 // JTLProcessorResult is the return type from the JTL processor. Distinct
@@ -170,6 +174,7 @@ func (e *Entry) Execute(ctx context.Context) error {
 	// survives. Never changes Phase; puts errors in ScrapeError.
 	e.runScrape(ctx, req, &result)
 
+	e.writeTermination(result)
 	if err := WriteResultAtomic(e.ResultDir, result); err != nil {
 		_, _ = fmt.Fprintf(e.Loader, "write result: %v\n", err)
 		return err
@@ -432,11 +437,24 @@ func (e *Entry) runScrape(ctx context.Context, req ExecutionRequest, result *Exe
 func (e *Entry) writeErrorResult(msg string) error {
 	_, _ = fmt.Fprintln(e.Loader, msg)
 	result := ExecutionResult{Phase: PhaseError, ErrorMessage: msg}
+	e.writeTermination(result)
 	if err := WriteResultAtomic(e.ResultDir, result); err != nil {
 		_, _ = fmt.Fprintf(e.Loader, "write error result: %v\n", err)
 		return err
 	}
 	return nil
+}
+
+// writeTermination leaves the verdict where Kubernetes surfaces it in the
+// pod status. Best effort: result.json stays the primary channel.
+func (e *Entry) writeTermination(result ExecutionResult) {
+	if e.TerminationMessagePath == "" {
+		return
+	}
+	// #nosec G306 -- kubelet-provided file; must stay readable by kubelet.
+	if err := os.WriteFile(e.TerminationMessagePath, TerminationSummary(result), 0o644); err != nil {
+		_, _ = fmt.Fprintf(e.Loader, "write termination message: %v\n", err)
+	}
 }
 
 func loadRequest(reqPath string) (ExecutionRequest, error) {
