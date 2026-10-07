@@ -1,0 +1,43 @@
+{{define "content"}}
+{{$d := .Data}}
+<h1>{{$d.ClusterDisplayName}}</h1>
+<p class="muted">{{$d.Shown}} of {{$d.Total}} tests</p>
+
+<form class="filters" method="get">
+  <label>Namespace
+    <select name="namespace">
+      <option value="">All</option>
+      {{range $d.Namespaces}}<option value="{{.}}"{{if eq . $d.Namespace}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <label>Tool
+    <select name="tool">
+      <option value="">All</option>
+      {{range $d.Tools}}<option value="{{.}}"{{if eq . $d.Tool}} selected{{end}}>{{.}}</option>{{end}}
+    </select>
+  </label>
+  <button type="submit" class="button secondary">Filter</button>
+</form>
+
+{{range $d.Groups}}
+<section class="group">
+  <h2><span class="chip">{{.Tool}}</span> <span class="muted">{{len .Tests}}</span></h2>
+  <table class="table">
+    <thead><tr><th>Test</th><th>Namespace</th><th>Last run</th><th></th></tr></thead>
+    <tbody>
+    {{range .Tests}}
+      {{$ns := .Namespace}}
+      <tr>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+        <td class="muted">{{.Namespace}}</td>
+        <td>{{with .LatestRun}}<a class="status {{phaseClass .Phase}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape $ns}}/{{pathEscape .Name}}">{{.Phase}}</a> <span class="muted">{{when .FinishedAt}}</span>{{else}}<span class="muted">never run</span>{{end}}</td>
+        <td>{{if .Locked}}<span class="chip" title="Managed outside the GUI (GitOps or kubectl): read-only here, runs allowed">read-only</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{else}}
+<p>No tests match.</p>
+{{end}}
+{{end}}

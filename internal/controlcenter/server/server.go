@@ -70,6 +70,7 @@ func (s *Server) Handler() http.Handler {
 	// and in controlcenter_cluster_up.
 	mux.HandleFunc("GET /readyz", ok)
 	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
+	s.routes(mux)
 	mux.HandleFunc("/", s.notFound)
 
 	// CrossOriginProtection rejects cross-site non-safe requests

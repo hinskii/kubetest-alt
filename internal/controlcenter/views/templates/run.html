@@ -1,0 +1,107 @@
+{{define "content"}}
+{{$d := .Data}}{{$r := $d.Run}}
+<div class="title-row">
+  <h1>{{$r.Name}}</h1>
+  <span class="status {{phaseClass $r.Phase}}" id="run-phase">{{$r.Phase}}</span>
+  {{with $r.Tool}}<span class="chip">{{.}}</span>{{end}}
+</div>
+{{with $r.Message}}<p class="message">{{.}}</p>{{end}}
+
+<section class="panel facts">
+  <dl>
+    <dt>Test</dt><dd><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $r.Namespace}}/{{pathEscape $r.TestRef}}">{{$r.TestRef}}</a> <span class="muted">{{$r.Namespace}}</span></dd>
+    {{with $r.ParentRun}}<dt>Part of</dt><dd><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape $r.Namespace}}/{{pathEscape .}}">{{.}}</a></dd>{{end}}
+    <dt>Source</dt><dd>{{$r.Source}}{{with index $r.Tags "kubetest.io/created-by"}} · {{.}}{{end}}</dd>
+    {{with $r.NotBefore}}<dt>Scheduled</dt><dd>{{when .}}</dd>{{end}}
+    {{with $r.QueuedAt}}<dt>Queued</dt><dd>{{when .}}</dd>{{end}}
+    {{with $r.StartedAt}}<dt>Started</dt><dd>{{when .}}</dd>{{end}}
+    {{with $r.FinishedAt}}<dt>Finished</dt><dd>{{when .}} <span class="muted">{{duration $r.DurationMs}}</span></dd>{{end}}
+    {{with $r.TestCounts}}<dt>Tests</dt><dd>{{.Passed}} passed · {{.Failed}} failed · {{.Skipped}} skipped · {{.Total}} total</dd>{{end}}
+    {{with $r.Abort}}<dt>Abort</dt><dd>{{.Reason}}{{with .RequestedBy}} by {{.}}{{end}}{{with .Message}}: {{.}}{{end}}</dd>{{end}}
+    {{if eq $r.Origin "archive"}}<dt>Record</dt><dd class="muted">run history (the TestRun is gone from the cluster)</dd>{{end}}
+  </dl>
+  {{if $r.Config}}
+  <h3>Parameters</h3>
+  <dl>{{range $k, $v := $r.Config}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}</dl>
+  {{end}}
+  {{if $r.Metrics}}
+  <h3>Metrics</h3>
+  <dl>{{range $k, $v := $r.Metrics}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}</dl>
+  {{end}}
+</section>
+
+{{if $d.Steps}}
+<section class="panel">
+  <h2>Steps</h2>
+  <table class="table">
+    <thead><tr><th></th><th>Name</th><th>Phase</th><th>Started</th><th>Finished</th><th>Message</th></tr></thead>
+    <tbody>
+    {{range $d.Steps}}
+      <tr>
+        <td class="muted">{{.Kind}}</td>
+        <td>{{.Key}}</td>
+        <td><span class="status {{phaseClass .Step.Phase}}">{{.Step.Phase}}</span></td>
+        <td class="muted">{{when .Step.StartedAt}}</td>
+        <td class="muted">{{when .Step.FinishedAt}}</td>
+        <td>{{.Step.Message}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
+<section class="panel">
+  <div class="title-row">
+    <h2>Log</h2>
+    <a class="button secondary" href="{{$d.Path}}/logs.txt">Download</a>
+  </div>
+  <pre class="log" id="log" data-src="{{$d.Path}}/log" data-live="{{$d.Live}}">Loading…</pre>
+</section>
+
+<section class="panel">
+  <h2>Artifacts</h2>
+  {{with $d.ArtifactsErr}}<p class="muted">Artifacts unavailable: {{.}}</p>{{end}}
+  {{if $d.Artifacts}}
+  <ul class="artifacts">
+    {{range $d.Artifacts}}
+    <li><a href="{{$d.Path}}/artifacts/{{artifactPath .Path}}" target="_blank" rel="noopener">{{.Path}}</a>
+      <span class="muted">{{.ContentType}}</span>
+      <a class="muted" href="{{$d.Path}}/artifacts/{{artifactPath .Path}}?download=1">download</a></li>
+    {{end}}
+  </ul>
+  {{else if not $d.ArtifactsErr}}
+  <p class="muted">None.</p>
+  {{end}}
+</section>
+
+<section class="panel">
+  <h2>Comment</h2>
+  {{with $r.Comment}}<blockquote class="comment">{{.Text}}<footer class="muted">{{.By}} · {{when .At}}</footer></blockquote>{{end}}
+  {{if and (canRun $.User) (terminal $r.Phase)}}
+  <form method="post" action="{{$d.Path}}/comment" class="inline-form">
+    <input type="text" name="text" maxlength="500" placeholder="Why did it fail? Known issue?" value="{{with $r.Comment}}{{.Text}}{{end}}">
+    <button type="submit" class="button secondary">Save</button>
+  </form>
+  <p class="muted">Leave it empty and save to remove the comment.</p>
+  {{else if not (terminal $r.Phase)}}
+  <p class="muted">A comment can be added once the run has finished.</p>
+  {{end}}
+</section>
+
+{{if canRun $.User}}
+<section class="panel actions">
+  {{if not (terminal $r.Phase)}}
+  <form method="post" action="{{$d.Path}}/abort" class="inline-form">
+    <input type="text" name="message" maxlength="512" placeholder="Reason (optional)">
+    <button type="submit" class="button danger">Abort run</button>
+  </form>
+  {{else if canDelete $.User}}
+  <form method="post" action="{{$d.Path}}/delete" class="inline-form">
+    <button type="submit" class="button danger">Delete run and its logs and artifacts</button>
+  </form>
+  {{end}}
+</section>
+{{end}}
+<script src="/static/run.js" defer></script>
+{{end}}

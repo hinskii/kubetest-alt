@@ -1,0 +1,72 @@
+{{define "content"}}
+{{$d := .Data}}{{$t := $d.Test}}
+<div class="title-row">
+  <h1>{{$t.Name}}</h1>
+  {{with $t.Tool}}<span class="chip">{{.}}</span>{{end}}
+  {{if $t.GitOpsLocked}}<span class="chip" title="Managed outside the GUI: read-only here, runs allowed">read-only</span>{{end}}
+</div>
+<p class="muted">Namespace {{$t.Namespace}}{{with $t.Templates}} · templates {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}</p>
+
+{{if canRun $.User}}
+<section class="panel">
+  <h2>Run</h2>
+  <form method="post" action="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/run" class="run-form">
+    {{range $d.Params}}
+    <label>
+      <span>{{.Name}} <span class="muted">{{.Type}}{{if .Required}}, required{{end}}</span></span>
+      {{if .Enum}}
+        <select name="config.{{.Name}}"{{if .Required}} required{{end}}>
+          {{$def := .Default}}
+          {{range .Enum}}<option value="{{.}}"{{if eq . $def}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      {{else if eq .Type "boolean"}}
+        <select name="config.{{.Name}}">
+          <option value="true"{{if eq .Default "true"}} selected{{end}}>true</option>
+          <option value="false"{{if ne .Default "true"}} selected{{end}}>false</option>
+        </select>
+      {{else}}
+        <input type="{{.InputType}}" name="config.{{.Name}}" value="{{.Default}}"{{with .Step}} step="{{.}}"{{end}}{{with .Pattern}} pattern="{{.}}" title="must match {{.}}"{{end}}{{if .Required}} required{{end}}>
+      {{end}}
+    </label>
+    {{end}}
+    <label>
+      <span>Start at <span class="muted">UTC, optional — empty starts now</span></span>
+      <input type="datetime-local" name="notBefore">
+    </label>
+    <div><button type="submit" class="button">Run test</button></div>
+  </form>
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>Runs</h2>
+  {{if $d.Runs}}
+  <table class="table">
+    <thead><tr><th>Run</th><th>Phase</th><th>Started</th><th>Duration</th><th>Source</th><th>Note</th></tr></thead>
+    <tbody>
+    {{range $d.Runs}}
+      <tr>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+        <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
+        <td class="muted">{{if .StartedAt}}{{when .StartedAt}}{{else if .NotBefore}}scheduled {{when .NotBefore}}{{end}}</td>
+        <td>{{duration .DurationMs}}</td>
+        <td class="muted">{{.Source}}{{with index .Tags "kubetest.io/created-by"}} · {{.}}{{end}}</td>
+        <td>{{with .Comment}}{{.Text}}{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  <p class="pager">
+    {{if $d.PageCursor}}<a href="?">Newest</a>{{end}}
+    {{with $d.NextCursor}}<a href="?after={{queryEscape .}}">Older runs</a>{{end}}
+  </p>
+  {{else}}
+  <p class="muted">No runs yet.</p>
+  {{end}}
+</section>
+
+<details class="panel">
+  <summary>Definition <span class="muted">(templates merged, expressions not evaluated)</span></summary>
+  <pre class="code">{{toYAML $t.Spec}}</pre>
+</details>
+{{end}}

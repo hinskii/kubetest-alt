@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
@@ -153,6 +154,15 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 		writeLookupError(w, err)
 		return
 	}
+	// ?offset=N skips the first N bytes: a client following a live run
+	// asks only for what it hasn't got yet.
+	var skip int64
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if skip, err = strconv.ParseInt(v, 10, 64); err != nil || skip < 0 {
+			writeError(w, http.StatusBadRequest, ReasonBadRequest, "offset: want a byte count >= 0")
+			return
+		}
+	}
 	ref, err := s.findRun(r.Context(), ns, r.PathValue("id"))
 	if err != nil {
 		writeLookupError(w, err)
@@ -172,6 +182,13 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 	}
 	wroteHeader := false
 	err = stream.stream(r.Context(), func(chunk []byte) error {
+		if skip > 0 {
+			n := min(skip, int64(len(chunk)))
+			chunk, skip = chunk[n:], skip-n
+			if len(chunk) == 0 {
+				return nil
+			}
+		}
 		if !wroteHeader {
 			w.WriteHeader(http.StatusOK)
 			wroteHeader = true

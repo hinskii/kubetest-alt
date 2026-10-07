@@ -280,7 +280,17 @@ func (c *Client) ListAudit(ctx context.Context, o ListAuditOptions) (*AuditPage,
 
 // OpenLogs streams the run's stored log (text). Caller closes it.
 func (c *Client) OpenLogs(ctx context.Context, namespace, id string) (io.ReadCloser, error) {
-	resp, err := c.do(ctx, http.MethodGet, "/runs/"+url.PathEscape(id)+"/logs.txt", ns(namespace), nil)
+	return c.OpenLogsFrom(ctx, namespace, id, 0)
+}
+
+// OpenLogsFrom streams the run's stored log from byte offset on — what a
+// client following a live run hasn't read yet. Caller closes it.
+func (c *Client) OpenLogsFrom(ctx context.Context, namespace, id string, offset int64) (io.ReadCloser, error) {
+	q := ns(namespace)
+	if offset > 0 {
+		q.Set("offset", strconv.FormatInt(offset, 10))
+	}
+	resp, err := c.do(ctx, http.MethodGet, "/runs/"+url.PathEscape(id)+"/logs.txt", q, nil)
 	if err != nil {
 		return nil, err
 	}

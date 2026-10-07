@@ -137,7 +137,110 @@ h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
 .status-paused { background: var(--warning-bg); color: var(--warning-text); }
 .status-aborted { background: var(--unknown-bg); color: var(--unknown-text); }
 
+h2 { font-size: 1.15rem; margin: 0 0 0.75rem; }
+h3 { font-size: 1rem; margin: 1rem 0 0.5rem; }
+
+.crumbs { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.85rem; margin-bottom: 1rem; color: var(--muted); }
+.crumbs a { color: var(--muted); text-decoration: none; }
+.crumbs a:hover { color: var(--primary-text); }
+
+.notice {
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: var(--radius);
+  background: var(--primary-soft);
+  color: var(--primary-text);
+}
+
+.title-row { display: flex; align-items: center; flex-wrap: wrap; gap: 0.6rem; }
+.title-row h1, .title-row h2 { margin: 0; }
+.title-row .button { margin-left: auto; }
+.message { margin: 0.5rem 0 0; }
+
+.panel {
+  margin-top: 1.25rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+details.panel summary { cursor: pointer; font-weight: 600; }
+
+.group { margin-top: 1.5rem; }
+
+.table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.table th, .table td { padding: 0.5rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.table th { font-weight: 600; color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
+.table tr:last-child td { border-bottom: none; }
+.group .table, .panel .table { background: var(--surface); }
+.group .table { table-layout: fixed; }
+.group .table th:nth-child(1) { width: 35%; }
+.group .table th:nth-child(2) { width: 20%; }
+.group .table th:nth-child(4) { width: 8rem; }
+.group .table td { overflow-wrap: anywhere; }
+
+.filters { display: flex; flex-wrap: wrap; align-items: end; gap: 0.75rem; margin-top: 1rem; }
+.filters label, .run-form label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.85rem; }
+
+input, select {
+  font: inherit;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  min-width: 0;
+}
+.run-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; align-items: end; }
+.inline-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.inline-form input[type="text"] { flex: 1 1 260px; }
+
+.button {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+.button.secondary { background: var(--surface-muted); color: var(--text); border-color: var(--border); }
+.button.danger { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-text); }
+
+.facts dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; word-break: break-word; }
+
+.log, .code {
+  margin: 0.75rem 0 0;
+  padding: 1rem;
+  max-height: 32rem;
+  overflow: auto;
+  background: var(--surface-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.artifacts { margin: 0; padding-left: 1.2rem; }
+.artifacts li { margin: 0.25rem 0; word-break: break-all; }
+.comment { margin: 0 0 0.75rem; padding: 0.5rem 1rem; border-left: 3px solid var(--primary); }
+.comment footer { font-size: 0.8rem; margin-top: 0.25rem; }
+.pager { display: flex; gap: 1rem; margin: 0.75rem 0 0; }
+.actions { display: flex; gap: 1rem; }
+
 @media (max-width: 600px) {
+  .table { font-size: 0.85rem; }
+  .table th, .table td { padding: 0.4rem; }
+  .panel { padding: 1rem; overflow-x: auto; }
+
   .topbar, .page { padding-left: 1rem; padding-right: 1rem; }
   .user { max-width: 45vw; }
 }

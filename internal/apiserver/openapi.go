@@ -241,7 +241,9 @@ func OpenAPISpec() map[string]any {
 			"/runs/{id}/logs.txt": map[string]any{
 				"get": map[string]any{
 					"summary": "The run's whole stored log as text/plain (live runs: what has been " +
-						"flushed so far, no follow). ?download=1 adds Content-Disposition: attachment.",
+						"flushed so far, no follow). ?download=1 adds Content-Disposition: attachment. " +
+						"?offset=N skips the first N bytes, for clients following a live run.",
+					"parameters": []any{queryParam("offset", "Bytes to skip (default 0).")},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Log text.", "content": map[string]any{
 							"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}},

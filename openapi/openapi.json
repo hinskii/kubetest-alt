@@ -1060,6 +1060,17 @@
     },
     "/runs/{id}/logs.txt": {
       "get": {
+        "parameters": [
+          {
+            "description": "Bytes to skip (default 0).",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -1102,7 +1113,7 @@
             "description": "OK"
           }
         },
-        "summary": "The run's whole stored log as text/plain (live runs: what has been flushed so far, no follow). ?download=1 adds Content-Disposition: attachment."
+        "summary": "The run's whole stored log as text/plain (live runs: what has been flushed so far, no follow). ?download=1 adds Content-Disposition: attachment. ?offset=N skips the first N bytes, for clients following a live run."
       },
       "parameters": [
         {

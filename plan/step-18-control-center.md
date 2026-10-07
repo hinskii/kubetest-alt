@@ -155,7 +155,16 @@ history. Minute grouping is dropped; composite Tests show parent + children.
   (a failed audit write is logged, the action stands). Audit retention
   lands with the retention job (fixes.md).
 
-### 18e — Core views
+### 18e — Core views ✅
+Done as: tests list (grouped by tool, filters, last run, read-only chip),
+test page (typed run form incl. enum/boolean/pattern/required, optional
+UTC start time → notBefore, history with cursor paging, merged
+definition), run page (facts, parameters, metrics, steps/tries/workers in
+natural order, log, artifacts proxied with CSP sandbox, comment, abort,
+delete for admins). Live logs are polled (`/log?offset=N`, apiserver
+`logs.txt?offset=`) rather than relayed over WebSocket: works through the
+service proxy and any ingress, and the page reloads once the phase is
+final. Pod events and composite child links remain for later.
 - Clusters → Tests list (label grouping, tool chip, last phase, gitops lock).
 - Test detail: typed params form (string/integer/number/boolean, enum →
   select, pattern hint), run history (cursor paging), schedule form, comments.

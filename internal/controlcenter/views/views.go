@@ -41,8 +41,18 @@ var staticFS embed.FS
 type Page struct {
 	Title string
 	User  auth.User
+	// Notice is a one-line result of the previous action (after a
+	// POST-redirect-GET), shown above the content.
+	Notice string
+	// Breadcrumbs lead back up from this page.
+	Breadcrumbs []Crumb
 	// Data is the page-specific model.
 	Data any
+}
+
+// Crumb is one breadcrumb link.
+type Crumb struct {
+	Label, Href string
 }
 
 // ErrorData is the model of the error page.
@@ -60,7 +70,7 @@ type Views struct {
 
 // New parses every page template once; a broken template fails startup.
 func New() (*Views, error) {
-	layout, err := template.ParseFS(templatesFS, "templates/layout.html")
+	layout, err := template.New("layout.html").Funcs(funcs).ParseFS(templatesFS, "templates/layout.html")
 	if err != nil {
 		return nil, fmt.Errorf("views: layout: %w", err)
 	}

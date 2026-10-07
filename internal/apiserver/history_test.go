@@ -211,3 +211,17 @@ func TestDeleteRun_ArchivedWithoutDeleterIs503(t *testing.T) {
 // storageKeysFor is runKeys for archived rows (same derivation: namespace
 // "default" + testUID(name)); separate name keeps intent readable.
 func storageKeysFor(name string) storage.RunKeys { return runKeys(name) }
+
+func TestLogsText_Offset(t *testing.T) {
+	s, up, _ := mkStorageServer(t, []store.Row{archivedRow("old")})
+	up.put(storageKeysFor("old").LogChunk(0), []byte("line 1\n"))
+	up.put(storageKeysFor("old").LogChunk(1), []byte("line 2\n"))
+	base := "/runs/" + testUID("old") + "/logs.txt?offset="
+
+	for offset, want := range map[string]string{"0": "line 1\nline 2\n", "3": "e 1\nline 2\n", "7": "line 2\n", "10": "e 2\n", "99": ""} {
+		rec := get(t, s.Handler(), base+offset)
+		require.Equal(t, http.StatusOK, rec.Code)
+		assert.Equal(t, want, rec.Body.String(), "offset %s", offset)
+	}
+	assert.Equal(t, http.StatusBadRequest, get(t, s.Handler(), base+"-1").Code)
+}

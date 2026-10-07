@@ -16,6 +16,8 @@
     </div>
   </header>
   <main class="page">
+    {{with .Breadcrumbs}}<nav class="crumbs" aria-label="Breadcrumb">{{range $i, $c := .}}{{if $i}}<span aria-hidden="true">›</span>{{end}}<a href="{{$c.Href}}">{{$c.Label}}</a>{{end}}</nav>{{end}}
+    {{with .Notice}}<div class="notice" role="status">{{.}}</div>{{end}}
     {{template "content" .}}
   </main>
 </body>
