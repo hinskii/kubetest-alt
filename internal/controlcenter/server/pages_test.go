@@ -183,6 +183,7 @@ func TestTestsPage_GroupsByToolWithLatestRunAndLock(t *testing.T) {
 	assert.Contains(t, body, `href="/clusters/dev/tests/team-a/smoke"`)
 	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde"`)
 	assert.Contains(t, body, "status-failed")
+	assert.Contains(t, body, `<div id="tests-list" data-refresh>`, "the list refreshes itself (refresh.js)")
 	assert.Equal(t, 1, strings.Count(body, ">read-only<"), "only the Test not created by the GUI is locked")
 
 	filtered := w.get(t, clusterURL+"?tool=k6", "").Body.String()
@@ -200,6 +201,7 @@ func TestTestPage_RunFormOnlyForDevelopers(t *testing.T) {
 	assert.Contains(t, dev, `name="config.target" value="" required`)
 	assert.Contains(t, dev, `href="/clusters/dev/runs/team-a/smoke-abcde"`, "run history")
 	assert.Contains(t, dev, developer, "who started it")
+	assert.Contains(t, dev, `<section class="panel" id="runs" data-refresh>`, "the run history refreshes itself")
 
 	viewer := w.get(t, page, "someone@example.com").Body.String()
 	assert.NotContains(t, viewer, "Run test")
