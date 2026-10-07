@@ -143,6 +143,11 @@ the pieces it needs: oauth2-proxy lets `GET /live/` through
 (`controlCenter.liveView.existingSecret` to bring your own), shared by all
 replicas.
 
+When the run ends, the page reloads and shows the tool's report
+(`spec.artifacts.report`: k6's dashboard export, JMeter's, Gatling's,
+Playwright's HTML report) in its place — sandboxed like any artifact, with
+links to open it in a new tab or download it.
+
 ## Creating and editing Tests
 
 **New test** on a cluster's page opens a wizard that writes the Test CRD:

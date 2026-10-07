@@ -63,6 +63,18 @@
 </section>
 {{end}}
 
+{{if not $d.Live}}{{with $r.Report}}
+<section class="panel">
+  <div class="title-row">
+    <h2>Report</h2>
+    <a class="button secondary" href="{{$d.Path}}/artifacts/{{artifactPath .}}" target="_blank" rel="noopener">Open in a new tab</a>
+    <a class="button secondary" href="{{$d.Path}}/artifacts/{{artifactPath .}}?download=1">Download</a>
+  </div>
+  <p class="muted small">The tool's report of this run. It runs isolated from Control Center.</p>
+  <iframe class="live-view" src="{{$d.Path}}/artifacts/{{artifactPath .}}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Report of {{$r.Name}}"></iframe>
+</section>
+{{end}}{{end}}
+
 {{if $d.FailedCases}}
 <section class="panel">
   <h2>Failed tests <span class="muted">{{len $d.FailedCases}}</span></h2>

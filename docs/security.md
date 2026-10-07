@@ -13,7 +13,8 @@ who can reach the Service can set it.
 
 Artifacts are test output written by test code, so Control Center never
 serves them as its own pages: every artifact response carries
-`Content-Security-Policy: sandbox allow-scripts`. Scripts run — HTML
+`Content-Security-Policy: sandbox allow-scripts; frame-ancestors 'self'`.
+Scripts run — HTML
 reports (JMeter, Gatling, Playwright, k6) need them — but in a sandbox
 without `allow-same-origin`, which gives the document an opaque origin:
 it can't read Control Center's cookies, storage or pages, submit forms,
@@ -21,6 +22,8 @@ open popups or navigate the top window. Requests it makes to Control
 Center count as cross-site: they carry no session cookie as long as
 oauth2-proxy's cookie isn't `SameSite=None` (its default sets none, which
 browsers treat as Lax), and its POSTs fail the cross-origin check. Downloads (`?download=1`) are served as attachments.
+Only Control Center's own pages may frame an artifact: a finished run's
+page shows its report in an `<iframe sandbox="allow-scripts">`.
 
 ## Live view
 

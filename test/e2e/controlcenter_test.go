@@ -185,7 +185,8 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	waitForPhase(t, ctx, c, runName, testsv1alpha1.PhasePassed, 3*time.Minute)
 	page := ccPage(t, ui+runPath, ccDeveloper)
 	assert.Contains(t, page, ">passed<")
-	assert.NotContains(t, page, "live-view", "no live view once the run is over")
+	assert.NotContains(t, page, "Live view of", "no live view once the run is over")
+	assert.Contains(t, page, "Report of "+runName, "the k6 report in its place")
 	// The pod's Kubernetes events (the API server's events RBAC).
 	assert.Contains(t, page, "Kubernetes events")
 	assert.Contains(t, page, ">Scheduled<", "the scheduler's event for the run's pod")

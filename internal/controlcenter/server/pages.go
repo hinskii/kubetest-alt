@@ -63,8 +63,10 @@ const (
 // formComment is the comment form's text field.
 const formComment = "text"
 
-// artifactCSP is the Content-Security-Policy of a served artifact.
-const artifactCSP = "sandbox allow-scripts"
+// artifactCSP is the Content-Security-Policy of a served artifact: its
+// scripts run in an opaque origin, and only Control Center's own pages
+// may frame it (the run page shows the report).
+const artifactCSP = "sandbox allow-scripts; frame-ancestors 'self'"
 
 // finalPhases are the phases a run never leaves.
 var finalPhases = map[string]bool{
