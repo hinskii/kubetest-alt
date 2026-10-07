@@ -33,6 +33,10 @@ spec:
       # default 10s, runs shorter than ~20s get none. Short tests lower it.
       - name: K6_WEB_DASHBOARD_PERIOD
         value: "{{ config.dashboardPeriod }}"
+      # Listen on the pod's IP, not only localhost: the API server proxies
+      # Control Center's live view to it (spec.liveView below).
+      - name: K6_WEB_DASHBOARD_HOST
+        value: "0.0.0.0"
   # Artifact/metrics paths are relative to the wrapper's working
   # directory, /data (no container.workingDir set), and the tool writes
   # under /data/repo/results — hence the repo/ prefix. The wrapper
@@ -46,6 +50,11 @@ spec:
     report: "repo/results/k6-report.html"
   # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
   # never affects the verdict.
+  # The web dashboard while the run is going. Its data stream lives at
+  # <endpoint>events, and the page sits under /ui/ — hence endpoint=../.
+  liveView:
+    port: 5665
+    path: "/ui/?endpoint=../"
   metrics:
     from: k6Summary
     path: "repo/results/summary.json"

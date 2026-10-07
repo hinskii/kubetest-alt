@@ -64,6 +64,11 @@ type TestTemplateSpec struct {
 	// report lands and how to read it. Test-side Metrics overrides.
 	// +optional
 	Metrics *MetricsSpec `json:"metrics,omitempty"`
+
+	// LiveView: the tool's live web UI (see TestSpec). Test-side LiveView
+	// overrides.
+	// +optional
+	LiveView *LiveViewSpec `json:"liveView,omitempty"`
 }
 
 // TestTemplateStatus is intentionally minimal — templates are pure definitions.

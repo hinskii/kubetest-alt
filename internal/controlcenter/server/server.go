@@ -20,6 +20,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -45,7 +46,12 @@ type Server struct {
 	Log      *slog.Logger
 	// ProbeTimeout bounds a cluster health probe. Default 3s.
 	ProbeTimeout time.Duration
+	// LiveViewKey signs live-view links (CC_LIVE_VIEW_KEY). Empty: a
+	// random key, so links end with the process and replicas don't share
+	// them.
+	LiveViewKey []byte
 
+	live      *liveSigner
 	registry  *prometheus.Registry
 	requests  *prometheus.CounterVec
 	clusterUp *prometheus.GaugeVec
@@ -60,6 +66,11 @@ func (s *Server) Handler() http.Handler {
 		s.Log = slog.Default()
 	}
 	s.initMetrics()
+	live, err := newLiveSigner(s.LiveViewKey)
+	if err != nil {
+		panic(fmt.Sprintf("controlcenter: live-view key: %v", err)) // crypto/rand failing is fatal
+	}
+	s.live = live
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)
@@ -70,6 +81,8 @@ func (s *Server) Handler() http.Handler {
 	// and in controlcenter_cluster_up.
 	mux.HandleFunc("GET /readyz", ok)
 	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
+	// The tool's live UI, by signed link (live.go) — no session needed.
+	mux.HandleFunc("GET /live/{token}/{path...}", s.liveView)
 	s.routes(mux)
 	mux.HandleFunc("/", s.notFound)
 

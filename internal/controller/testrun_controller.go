@@ -761,15 +761,23 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 						"run", run.Name, "pod", pod.Name)
 				}
 			}
-			if run.Status.Phase != testsv1alpha1.PhaseRunning {
+			started := run.Status.Phase != testsv1alpha1.PhaseRunning
+			// The pod's IP is where the API server reaches spec.liveView.
+			newIP := pod != nil && pod.Status.PodIP != "" && pod.Status.PodIP != run.Status.PodIP
+			if started || newIP {
 				run.Status.Phase = testsv1alpha1.PhaseRunning
 				if run.Status.StartedAt == nil {
 					now := r.Now()
 					run.Status.StartedAt = &now
 				}
+				if pod != nil && pod.Status.PodIP != "" {
+					run.Status.PodIP = pod.Status.PodIP
+				}
 				if err := r.Status().Update(ctx, run); err != nil {
 					return ctrl.Result{}, err
 				}
+			}
+			if started {
 				// ActiveRuns++ on first queued→running transition. The
 				// matching decrement fires in transitionTerminal for
 				// runs that went through this path.

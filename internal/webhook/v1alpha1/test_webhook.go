@@ -180,6 +180,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateArtifacts(spec.Artifacts); err != nil {
 		return err
 	}
+	if lv := spec.LiveView; lv != nil && lv.Path != "" && (!strings.HasPrefix(lv.Path, "/") || strings.HasPrefix(lv.Path, "//")) {
+		return fmt.Errorf("spec.liveView.path %q must start with a single /", lv.Path)
+	}
 	if err := validateRetry("spec.retry", spec.Retry); err != nil {
 		return err
 	}

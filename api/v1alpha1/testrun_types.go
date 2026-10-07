@@ -147,6 +147,11 @@ type TestRunStatus struct {
 	// +optional
 	TestCounts *TestCounts `json:"testCounts,omitempty"`
 
+	// PodIP is the test pod's IP once it runs — where the API server
+	// reaches spec.liveView. Set by the operator.
+	// +optional
+	PodIP string `json:"podIP,omitempty"`
+
 	// Content records what the content fetcher checked out — for a git
 	// source, the requested revision and the commit it resolved to. Nil
 	// without a git source.

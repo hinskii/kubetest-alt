@@ -448,6 +448,9 @@ type runData struct {
 	MoreMedia int
 	Live      bool
 	Path      string
+	// LiveViewURL is the tool's live UI (spec.liveView) while the run
+	// isn't finished, by signed link.
+	LiveViewURL string
 }
 
 func stepKind(key string) string {
@@ -473,6 +476,9 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := runData{Cluster: c.Name, Run: run, Live: !finished(run.Phase), Path: runPath(c.Name, ns, id)}
+	if run.LiveView != "" && !finished(run.Phase) {
+		data.LiveViewURL = s.liveURL(c.Name, ns, views.RunID(*run), run.LiveView, time.Now())
+	}
 	for _, key := range sortedStepKeys(run.Steps) {
 		data.Steps = append(data.Steps, stepRow{Key: key, Kind: stepKind(key), Step: run.Steps[key]})
 	}

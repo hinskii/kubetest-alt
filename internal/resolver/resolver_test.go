@@ -321,6 +321,22 @@ func TestResolve_InterpolatesArtifactsReport(t *testing.T) {
 	assert.Equal(t, "repo/out/report/index.html", spec.Artifacts.Report, "report resolves like paths")
 }
 
+func TestResolve_LiveViewFromTemplate_TestOverrides(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Use = []string{"k6"}
+	tmpl := &testsv1alpha1.TestTemplate{ObjectMeta: metav1.ObjectMeta{Name: "k6", Namespace: test.Namespace},
+		Spec: testsv1alpha1.TestTemplateSpec{LiveView: &testsv1alpha1.LiveViewSpec{Port: 5665, Path: "/ui/"}}}
+	store := MapStore{test.Namespace + "/k6": tmpl}
+	spec, err := Resolve(test, mkRun(), store, Options{})
+	require.NoError(t, err)
+	assert.Equal(t, &testsv1alpha1.LiveViewSpec{Port: 5665, Path: "/ui/"}, spec.LiveView, "from the template")
+
+	test.Spec.LiveView = &testsv1alpha1.LiveViewSpec{Port: 8089}
+	spec, err = Resolve(test, mkRun(), store, Options{})
+	require.NoError(t, err)
+	assert.Equal(t, &testsv1alpha1.LiveViewSpec{Port: 8089}, spec.LiveView, "the Test's own wins")
+}
+
 func TestResolve_UnknownRef_ErrorNamesField(t *testing.T) {
 	test := mkTestBase()
 	test.Spec.Container.Args = []string{"--vus", "{{ config.nope }}"}

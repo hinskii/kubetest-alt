@@ -153,6 +153,22 @@ Make sure the tool never waits on a report viewer at the end of a run
 fails when the report is outside every `paths` glob; the catalog e2e case
 sets `report: true` to assert a real run produced it.
 
+### 4a. Live view (tools with a live web UI)
+
+If the tool serves a dashboard while it runs, declare it and Control Center
+shows it on the run page (isolated — docs/security.md):
+
+```yaml
+liveView:
+  port: 5665                 # the UI's port in the test container
+  path: "/ui/?endpoint=../"  # entry path + query; links inside must be relative
+```
+
+The tool must listen on the pod's IP, not only localhost (k6:
+`K6_WEB_DASHBOARD_HOST=0.0.0.0`). The UI is reached under a prefix, so it
+must use relative URLs; its own storage (localStorage/sessionStorage) is
+unavailable in the sandbox — check the UI still works without it.
+
 ### 4b. Metrics (load tools)
 
 If the tool produces a machine-readable report, point `spec.metrics` at it

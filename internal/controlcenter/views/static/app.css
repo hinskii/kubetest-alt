@@ -279,3 +279,6 @@ input, select {
 .markdown { width: 100%; font-family: var(--mono); font-size: 0.8rem; background: var(--surface-muted); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; }
 .title-row .button + .button { margin-left: 0; }
 .actions .button { white-space: nowrap; }
+
+/* Live view: the tool's dashboard in a sandboxed frame. */
+.live-view { width: 100%; height: 75vh; min-height: 480px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }

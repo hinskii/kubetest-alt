@@ -131,6 +131,8 @@ func createPodForJob(t *testing.T, ctx context.Context, namespace, runID, name s
 	// Set status.
 	pod.Status.Phase = phase
 	pod.Status.ContainerStatuses = containerStatuses
+	pod.Status.PodIP = "10.1.2.3"
+	pod.Status.PodIPs = []corev1.PodIP{{IP: "10.1.2.3"}}
 	require.NoError(t, k8sClient.Status().Update(ctx, pod))
 }
 
@@ -238,7 +240,8 @@ func TestReconcile_HappyPath(t *testing.T) {
 			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
 		}},
 	)
-	waitForPhase(t, ctx, runKey, testsv1alpha1.PhaseRunning, 3*time.Second)
+	running := waitForPhase(t, ctx, runKey, testsv1alpha1.PhaseRunning, 3*time.Second)
+	assert.Equal(t, "10.1.2.3", running.Status.PodIP, "where the API server reaches spec.liveView")
 
 	// Preload result BEFORE flipping job to complete so the reconciler sees
 	// it on the terminal Job event.

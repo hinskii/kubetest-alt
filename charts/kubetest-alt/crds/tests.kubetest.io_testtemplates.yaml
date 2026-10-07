@@ -1220,6 +1220,26 @@ spec:
                       type: object
                     type: array
                 type: object
+              liveView:
+                description: |-
+                  LiveView: the tool's live web UI (see TestSpec). Test-side LiveView
+                  overrides.
+                properties:
+                  path:
+                    description: |-
+                      Path is the UI's entry path with its query, relative to the pod's
+                      root (default "/"). Links inside the UI must be relative.
+                    maxLength: 512
+                    type: string
+                  port:
+                    description: Port the UI listens on in the test container.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                required:
+                - port
+                type: object
               metrics:
                 description: |-
                   Metrics, like Verdict, lets the catalog say once where a tool's

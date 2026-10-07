@@ -77,8 +77,9 @@ func run(ctx context.Context, log *slog.Logger, configPath, listen, devUser stri
 		return err
 	}
 	srv := &http.Server{
-		Addr:              listen,
-		Handler:           (&server.Server{Clusters: reg, Auth: resolver, Views: v, Log: log}).Handler(),
+		Addr: listen,
+		Handler: (&server.Server{Clusters: reg, Auth: resolver, Views: v, Log: log,
+			LiveViewKey: []byte(os.Getenv("CC_LIVE_VIEW_KEY"))}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

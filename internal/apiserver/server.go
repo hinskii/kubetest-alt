@@ -174,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 	// Runs — creation + list (cluster + store merge) + detail.
 	mux.HandleFunc("POST /runs", s.createRun)
 	mux.HandleFunc("GET /runs", s.listRuns)
+	mux.HandleFunc("GET /runs/{id}/live/{path...}", s.liveView)
 	mux.HandleFunc("GET /runs/{id}", s.getRun)
 	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
 	mux.HandleFunc("GET /runs/{id}/testcases", s.listRunCases)

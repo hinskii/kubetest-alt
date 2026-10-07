@@ -17,6 +17,7 @@ limitations under the License.
 package apiserver
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -405,6 +406,9 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 			e.Config = store.EffectiveConfig(spec.Config, cr.Spec.Config)
 			if c := cr.Status.Content; c != nil && spec.Content.Git != nil {
 				e.Git = gitCheckout(spec.Content.Git.URI, c.GitRevision, c.GitCommit)
+			}
+			if lv := spec.LiveView; lv != nil && !controller.IsTerminalPhase(cr.Status.Phase) {
+				e.LiveView = cmp.Or(lv.Path, "/")
 			}
 			if spec.Artifacts != nil {
 				paths := make([]string, len(cr.Status.ArtifactRefs))

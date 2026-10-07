@@ -215,6 +215,10 @@
             },
             "type": "object"
           },
+          "liveView": {
+            "description": "Entry path of the tool's live UI (spec.liveView) for GET /runs/{id}/live/{path}; only while the run isn't finished.",
+            "type": "string"
+          },
           "message": {
             "type": "string"
           },
@@ -1174,6 +1178,85 @@
         },
         "summary": "Set (replace) the comment of a finished run. The comment lives on the run-history row and is deleted with the run. Author from X-Kubetest-User."
       }
+    },
+    "/runs/{id}/live/{path}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Whatever the UI serves (HTML, assets, text/event-stream)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "410": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "The tool's live web UI (spec.liveView) while the run is running, proxied from the test pod's IP and declared port; {path} and the query (minus namespace) pass through, event streams are flushed. No cookies or credentials reach the pod and none come back."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Path inside the UI (may contain /).",
+          "in": "path",
+          "name": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "/runs/{id}/logs": {
       "get": {

@@ -263,6 +263,26 @@ func TestEnvtest_ArtifactsReportMustBeAValidGlob(t *testing.T) {
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })
 }
 
+// TestEnvtest_LiveViewPathMustBeAbsolute is the sentinel for the
+// spec.liveView.path rule (not expressible in the CRD schema).
+func TestEnvtest_LiveViewPathMustBeAbsolute(t *testing.T) {
+	ctx := context.Background()
+	obj := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "live-path", Namespace: "default"},
+		Spec: testsv1alpha1.TestSpec{
+			Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Args: []string{"run", "s.js"}},
+			LiveView:  &testsv1alpha1.LiveViewSpec{Port: 5665, Path: "//evil.example/ui"},
+		},
+	}
+	err := k8sClient.Create(ctx, obj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.liveView.path")
+
+	obj.Spec.LiveView.Path = "/ui/?endpoint=../"
+	require.NoError(t, k8sClient.Create(ctx, obj))
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })
+}
+
 // TestEnvtest_PodConfigAnnotationsPassThrough is the §8 regression guard at
 // the envtest layer: after a round-trip through defaulting + validating +
 // api-server storage, every user-supplied annotation/label must survive

@@ -48,6 +48,8 @@ const (
 	ReasonManagedByGitOps = "ManagedByGitOps"
 	ReasonInternal        = "Internal"
 	ReasonServiceUnavail  = "ServiceUnavailable"
+	// ReasonGone: the thing existed but is over (a finished run's live view).
+	ReasonGone = "Gone"
 )
 
 // Error is the body of every non-2xx JSON response.
@@ -91,6 +93,10 @@ type Run struct {
 	// Git is the code the run checked out, for a Test with a git source.
 	// Set once the run has finished.
 	Git *GitCheckout `json:"git,omitempty"`
+	// LiveView is the entry path of the tool's live web UI
+	// (spec.liveView), for GET /runs/{id}/live/{path}; set while the run
+	// is not finished.
+	LiveView string `json:"liveView,omitempty"`
 	// Report is the artifact path of the run's main report
 	// (spec.artifacts.report), when the run produced one.
 	Report string `json:"report,omitempty"`

@@ -527,6 +527,18 @@ func TestValidateArtifacts_Report(t *testing.T) {
 	require.ErrorContains(t, validateTest(spec("results/[")), "valid glob")
 }
 
+func TestValidateTest_LiveViewPath(t *testing.T) {
+	spec := func(path string) *testsv1alpha1.TestSpec {
+		s := baseValidSpec()
+		s.LiveView = &testsv1alpha1.LiveViewSpec{Port: 5665, Path: path}
+		return &s
+	}
+	require.NoError(t, validateTest(spec("")), "default /")
+	require.NoError(t, validateTest(spec("/ui/?endpoint=../")))
+	require.ErrorContains(t, validateTest(spec("ui/")), "spec.liveView.path")
+	require.ErrorContains(t, validateTest(spec("//other.host/")), "spec.liveView.path")
+}
+
 func TestValidateTest_Retry(t *testing.T) {
 	leaf := func(r *testsv1alpha1.RetryPolicy) *testsv1alpha1.TestSpec {
 		s := baseValidSpec()

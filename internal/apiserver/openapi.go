@@ -298,6 +298,23 @@ func OpenAPISpec() map[string]any {
 				},
 				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
+			"/runs/{id}/live/{path}": map[string]any{
+				"get": map[string]any{
+					"summary": "The tool's live web UI (spec.liveView) while the run is running, proxied " +
+						"from the test pod's IP and declared port; {path} and the query (minus namespace) " +
+						"pass through, event streams are flushed. No cookies or credentials reach the pod " +
+						"and none come back.",
+					"responses": map[string]any{
+						"200": map[string]any{"description": "Whatever the UI serves (HTML, assets, text/event-stream)."},
+						"404": errorSchema(),
+						"410": errorSchema(),
+						"502": errorSchema(),
+						"503": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."),
+					pathParam("path", "Path inside the UI (may contain /)."), namespaceParam()},
+			},
 			"/runs/{id}/artifacts": map[string]any{
 				"get": map[string]any{
 					"summary": "List the run's artifacts (recorded refs; falls back to listing the " +
@@ -429,6 +446,10 @@ func OpenAPISpec() map[string]any {
 								"revision": map[string]any{"type": "string", "description": "Requested revision; HEAD when unset."},
 								"commit":   map[string]any{"type": "string", "description": "Checked-out commit SHA."},
 							},
+						},
+						"liveView": map[string]any{
+							"type":        "string",
+							"description": "Entry path of the tool's live UI (spec.liveView) for GET /runs/{id}/live/{path}; only while the run isn't finished.",
 						},
 						"report": map[string]any{
 							"type":        "string",

@@ -3397,6 +3397,11 @@ spec:
                 - aborted
                 - error
                 type: string
+              podIP:
+                description: |-
+                  PodIP is the test pod's IP once it runs — where the API server
+                  reaches spec.liveView. Set by the operator.
+                type: string
               queuedAt:
                 format: date-time
                 type: string

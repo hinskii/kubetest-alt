@@ -312,6 +312,9 @@ func mergeTemplateInto(dst *testsv1alpha1.TestSpec, tmpl *testsv1alpha1.TestTemp
 	if tmpl.Metrics != nil && dst.Metrics == nil {
 		dst.Metrics = tmpl.Metrics.DeepCopy()
 	}
+	if tmpl.LiveView != nil && dst.LiveView == nil {
+		dst.LiveView = tmpl.LiveView.DeepCopy()
+	}
 	if tmpl.Verdict != nil && dst.Verdict == nil {
 		dst.Verdict = tmpl.Verdict.DeepCopy()
 	}
@@ -357,6 +360,9 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 	}
 	if test.Metrics != nil {
 		dst.Metrics = test.Metrics.DeepCopy()
+	}
+	if test.LiveView != nil {
+		dst.LiveView = test.LiveView.DeepCopy()
 	}
 	if test.Verdict != nil {
 		dst.Verdict = test.Verdict.DeepCopy()

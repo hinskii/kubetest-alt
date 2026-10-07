@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -383,6 +384,23 @@ func (c *Client) OpenArtifact(ctx context.Context, namespace, id, path string) (
 		return nil, err
 	}
 	return &ArtifactStream{Body: resp.Body, ContentType: resp.Header.Get("Content-Type"), Length: resp.ContentLength}, nil
+}
+
+// OpenLiveView opens GET /runs/{id}/live/{path}?{rawQuery}: the run's live
+// web UI (spec.liveView), passed through as is — HTML, assets or an event
+// stream. The caller reads and closes the body. A run that hasn't started
+// is a 503, a finished one a 410 (ReasonGone).
+func (c *Client) OpenLiveView(ctx context.Context, namespace, id, path, rawQuery string) (*http.Response, error) {
+	q, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return nil, fmt.Errorf("apiclient: live view query: %w", err)
+	}
+	maps.Copy(q, ns(namespace))
+	segs := strings.Split(path, "/")
+	for i, seg := range segs {
+		segs[i] = url.PathEscape(seg)
+	}
+	return c.do(ctx, http.MethodGet, "/runs/"+url.PathEscape(id)+"/live/"+strings.Join(segs, "/"), q, nil)
 }
 
 // Healthz checks the server is reachable.

@@ -310,11 +310,20 @@ open.
    (store `GetByName`, migration 0006), so name links keep working, and
    the run page has "Run again" (same Test, that run's parameters; works
    from history).
-4. **Live view.** A template declares the port of its live UI; Control
-   Center proxies it (K8s pod proxy) while the pod runs. k6 only for now
-   (web dashboard, xk6-dashboard#258 shim); Locust's UI would need
-   `--autostart` instead of `--headless` — opt-in later.
-5. **Grafana link.** Control Center config: a dashboard URL pattern per
+4. **Live view** ✅. `spec.liveView {port, path}` (templates too); k6 only
+   for now. Decided (user, 2026-10-07): isolated — sandboxed frame, signed
+   12 h link per run, oauth2-proxy `--skip-auth-route=GET=^/live/`,
+   `CC_LIVE_VIEW_KEY`. Built: operator writes `status.podIP`; API server
+   `GET /runs/{id}/live/{path}` proxies to podIP:port while running (no pod
+   RBAC, credentials stripped, streams flushed); `Run.liveView`; Control
+   Center `/live/<token>/…` with `sandbox allow-scripts`, CORS `*`,
+   `no-referrer`, and a Live view panel on the run page. k6 1.4.0's
+   dashboard works without the xk6-dashboard#258 shim (verified in
+   headless Chrome through the whole chain, sandboxed) — no shim, no
+   per-tool code. Its entry is `/ui/?endpoint=../` (events live at the
+   root). Locust's UI would need `--autostart` instead of `--headless` —
+   opt-in later.
+5. **Grafana link** — postponed (user, 2026-10-07). Control Center config: a dashboard URL pattern per
    tool with the run ID (`KUBETEST_RUN_ID`, already injected) as a
    variable. Templates do not send metrics yet; wiring k6/JMeter/Gatling
    output waits until the metrics backend is chosen.

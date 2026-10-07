@@ -98,6 +98,12 @@ type TestSpec struct {
 	// +optional
 	Metrics *MetricsSpec `json:"metrics,omitempty"`
 
+	// LiveView declares the web UI the tool serves while it runs (k6's
+	// dashboard). Control Center shows it during the run, isolated from its
+	// own pages; the API server reaches it at the pod's IP on Port.
+	// +optional
+	LiveView *LiveViewSpec `json:"liveView,omitempty"`
+
 	// Steps turns this Test into a COMPOSITE — a scenario that runs other
 	// Tests in ordered steps. Mutually exclusive with the leaf shape:
 	// when Steps is non-empty, container/content/use/verdict/services/
@@ -203,6 +209,20 @@ type StepExecuteTest struct {
 	// Test's own resolve pipeline (step 13).
 	// +optional
 	Config map[string]string `json:"config,omitempty"`
+}
+
+// LiveViewSpec is the tool's live web UI inside the test pod. The tool must
+// listen on the pod's IP (not only localhost).
+type LiveViewSpec struct {
+	// Port the UI listens on in the test container.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
+	// Path is the UI's entry path with its query, relative to the pod's
+	// root (default "/"). Links inside the UI must be relative.
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Path string `json:"path,omitempty"`
 }
 
 // MetricsSpec selects the report parser /entry runs after the tool exits.
