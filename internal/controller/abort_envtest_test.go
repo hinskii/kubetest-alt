@@ -232,9 +232,18 @@ func TestReconcile_Composite_StepTimeoutAbortsChildrenOnce(t *testing.T) {
 
 	// Step 0 times out → its child is aborted; step 1 starts and stays
 	// running (nothing drives its phase in envtest).
-	require.Eventually(t, func() bool {
+	// EventuallyWithT so a CI flake reports the state it last saw.
+	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		k0 := stepKids("0")
-		return len(k0) == 1 && k0[0].Status.Phase == testsv1alpha1.PhaseAborted && len(stepKids("1")) == 1
+		if assert.Len(c, k0, 1, "step-0 children") {
+			assert.Equal(c, testsv1alpha1.PhaseAborted, k0[0].Status.Phase,
+				"step-0 child phase (abort requested: %v, message: %q)", k0[0].Spec.Abort != nil, k0[0].Status.Message)
+		}
+		assert.Len(c, stepKids("1"), 1, "step-1 children")
+		var p testsv1alpha1.TestRun
+		if assert.NoError(c, k8sClient.Get(ctx, parentKey, &p)) {
+			assert.NotEmpty(c, p.Status.Steps, "parent steps (phase %q)", p.Status.Phase)
+		}
 	}, 15*time.Second, 100*time.Millisecond, "step-0 child aborted and step 1 started")
 
 	// While step 1 keeps the parent reconciling (3s requeues), step 0 must
