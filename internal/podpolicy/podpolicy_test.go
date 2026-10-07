@@ -78,3 +78,22 @@ func TestCheck_Allowlists(t *testing.T) {
 	require.NoError(t, p.Check(spec, &testsv1alpha1.PodConfig{ServiceAccountName: "gcs-writer"}))
 	assert.ErrorContains(t, p.Check(spec, &testsv1alpha1.PodConfig{ServiceAccountName: "x"}), "allowed: default, gcs-writer")
 }
+
+// Every volume kind the policy admits, by the name the API uses.
+func TestCheck_AllowedVolumeKinds(t *testing.T) {
+	var p Policy
+	sources := map[string]corev1.VolumeSource{
+		"emptyDir":              {EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		"configMap":             {ConfigMap: &corev1.ConfigMapVolumeSource{}},
+		"secret":                {Secret: &corev1.SecretVolumeSource{}},
+		"projected":             {Projected: &corev1.ProjectedVolumeSource{}},
+		"downwardAPI":           {DownwardAPI: &corev1.DownwardAPIVolumeSource{}},
+		"persistentVolumeClaim": {PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{}},
+		"ephemeral":             {Ephemeral: &corev1.EphemeralVolumeSource{}},
+		"csi":                   {CSI: &corev1.CSIVolumeSource{Driver: "secrets-store.csi.k8s.io"}},
+	}
+	for kind, src := range sources {
+		assert.Equal(t, kind, volumeKind(src))
+		assert.NoError(t, p.Check(&testsv1alpha1.TestSpec{Pod: &testsv1alpha1.PodConfig{Volumes: []corev1.Volume{vol("v", src)}}}, nil), kind)
+	}
+}

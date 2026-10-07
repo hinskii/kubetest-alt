@@ -161,7 +161,7 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # + secret-safe log redaction. Floor 80 mirrors pkg/executor — every
 # error branch matters (endpoint 4xx vs 5xx vs timeout vs secret-missing
 # splits into distinct outcomes that ALL land on metrics + status).
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80 pkg/report:90 pkg/storage:60 internal/controlcenter/auth:90 internal/controlcenter/clusters:80 internal/controlcenter/config:90 internal/controlcenter/server:85 internal/retention:80
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80 pkg/report:90 pkg/storage:60 internal/controlcenter/auth:90 internal/controlcenter/clusters:80 internal/controlcenter/config:90 internal/controlcenter/server:85 internal/retention:80 internal/cli:70 internal/podpolicy:90
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
@@ -234,9 +234,15 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager and control-center binaries.
+build: manifests generate fmt vet ## Build manager, control-center and the kubectl-kubetest CLI.
 	go build -o bin/manager ./cmd/operator
 	go build -o bin/control-center ./cmd/control-center
+	go build -o bin/kubectl-kubetest ./cmd/cli
+
+.PHONY: install-cli
+install-cli: ## Install kubectl-kubetest into $(GOBIN) (use as `kubectl kubetest`).
+	GOBIN=$(or $(GOBIN),$(shell go env GOPATH)/bin) go install ./cmd/cli
+	@mv $(or $(GOBIN),$(shell go env GOPATH)/bin)/cli $(or $(GOBIN),$(shell go env GOPATH)/bin)/kubectl-kubetest
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.

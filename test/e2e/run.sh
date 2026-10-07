@@ -372,6 +372,9 @@ export APISERVER_TOKEN
 export METRICS_APISERVER_URL="http://127.0.0.1:18080/metrics"
 export METRICS_OPERATOR_URL="http://127.0.0.1:18081/metrics"
 export CC_PROXY_URL="http://127.0.0.1:18090"
+# The CLI as users get it: kubeconfig of the kind cluster, service proxy.
+go build -o "$(pwd)/bin/kubectl-kubetest" ./cmd/cli
+export CLI_BIN="$(pwd)/bin/kubectl-kubetest"
 export CC_URL="http://127.0.0.1:18091"
 
 if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then

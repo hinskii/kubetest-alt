@@ -24,6 +24,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -264,6 +265,25 @@ func TestManagedBy_PostRunOnGitopsTest_Returns201(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, rec.Code)
 	assert.Equal(t, "ui", body["spec"].(map[string]any)["source"],
 		"server MUST set source=ui regardless of caller intent")
+}
+
+// API callers say which client they are (ui, api, cli); cron, trigger and
+// gitops are never theirs to claim.
+func TestCreateRun_SourceIsOneOfTheAPIClients(t *testing.T) {
+	_, h := mkServer(t, mkTest("t", ManagedByGitOps))
+	for i, src := range []string{"cli", "api", "ui"} {
+		rec, body := doRequest(t, h, "POST", "/runs", &testsv1alpha1.TestRun{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("r%d", i), Namespace: "default"},
+			Spec:       testsv1alpha1.TestRunSpec{TestRef: "t", Source: src}})
+		require.Equal(t, http.StatusCreated, rec.Code, src)
+		assert.Equal(t, src, body["spec"].(map[string]any)["source"])
+	}
+	for i, src := range []string{"cron", "trigger", "gitops"} {
+		rec, _ := doRequest(t, h, "POST", "/runs", &testsv1alpha1.TestRun{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("x%d", i), Namespace: "default"},
+			Spec:       testsv1alpha1.TestRunSpec{TestRef: "t", Source: src}})
+		assert.Equal(t, http.StatusBadRequest, rec.Code, src)
+	}
 }
 
 // R-mb-4: ui + PATCH → 200.

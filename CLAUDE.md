@@ -563,7 +563,7 @@ kubetest-alt/
 │   ├── apiserver/                # thin REST API (Control Center, CLI, scripts)
 │   ├── control-center/           # web UI (stateless; reaches each cluster's apiserver)
 │   ├── entry/                    # in-container wrapper (/entry) + content fetcher
-│   ├── cli/                      # kubectl-kubetest plugin
+│   ├── cli/                      # kubectl-kubetest plugin (internal/cli; docs/cli.md)
 │   └── gen-openapi/              # writes openapi/openapi.json
 ├── internal/
 │   ├── controller/               # TestRun (leaf, composite, parallel, services), Test, TestTrigger
@@ -577,6 +577,8 @@ kubetest-alt/
 │   ├── retention/                # leader-elected history/object expiry
 │   ├── apiserver/                # REST handlers + OpenAPI
 │   ├── controlcenter/            # UI: server, views (html/template), auth, clusters, config
+│   ├── cli/                      # kubectl-kubetest commands + discovery (service proxy, token)
+│   ├── podpolicy/                # what test pods may ask for (service accounts, volumes, privileges)
 │   ├── webhook/                  # admission webhooks
 │   └── webhookdelivery/          # outbound run-event webhooks
 ├── pkg/
@@ -589,7 +591,7 @@ kubetest-alt/
 ├── executors/                    # platform images: content-fetcher (+ gatling, soapui, kubepug)
 ├── config/                       # kustomize: crd/ rbac/ webhook/; templates/ (tool catalog); samples/
 ├── charts/kubetest-alt/          # Helm: operator, apiserver, Control Center (+ oauth2-proxy sidecar)
-├── docs/                         # control-center, security, storage, metrics, onboarding-a-tool
+├── docs/                         # control-center, cli, security, storage, metrics, onboarding-a-tool
 └── test/                         # helm, e2e (kind), catalog (every template on kind)
 ```
 

@@ -55,6 +55,14 @@ type (
 //  2. Runs against GitOps-managed Tests are ALLOWED — the enforcement rule
 //     from §7 says runs are ephemeral children, not definitions. We do NOT
 //     block based on the referenced Test's managed-by label.
+//
+// What an API caller may record as a run's source (TestRunSpec.Source).
+const (
+	sourceUI  = "ui"
+	sourceAPI = "api"
+	sourceCLI = "cli"
+)
+
 func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 	var run testsv1alpha1.TestRun
 	if err := json.NewDecoder(r.Body).Decode(&run); err != nil {
@@ -62,13 +70,18 @@ func (s *Server) createRun(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("decode: %v", err))
 		return
 	}
-	if run.Spec.Source != "" && run.Spec.Source != "ui" {
+	// Callers of the API may say which client they are (ui, api, cli);
+	// cron, trigger and gitops belong to the operator and Git, never to an
+	// API caller.
+	switch run.Spec.Source {
+	case "":
+		run.Spec.Source = sourceUI
+	case sourceUI, sourceAPI, sourceCLI:
+	default:
 		writeError(w, http.StatusBadRequest, ReasonBadRequest,
-			fmt.Sprintf("payload sets source=%q; the API server owns this field — omit it",
-				run.Spec.Source))
+			fmt.Sprintf("payload sets source=%q; API callers may only say ui, api or cli", run.Spec.Source))
 		return
 	}
-	run.Spec.Source = "ui"
 	if u := requestUser(r); u != "" {
 		if run.Spec.Tags == nil {
 			run.Spec.Tags = map[string]string{}

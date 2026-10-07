@@ -184,6 +184,12 @@ func TestE2E(t *testing.T) {
 		scenarioControlCenter(t, ctx, c)
 	})
 
+	t.Run("Scenario11_CLI", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=11 tool=cli duration=%s", time.Since(start)) }()
+		scenarioCLI(t, ctx, c)
+	})
+
 	t.Run("APIRequiresToken", func(t *testing.T) {
 		apiURL := os.Getenv("APISERVER_URL")
 		if apiURL == "" {

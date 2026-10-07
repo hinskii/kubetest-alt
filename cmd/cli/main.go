@@ -14,14 +14,31 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// kubectl-kubetest: install on $PATH and use as `kubectl kubetest …`.
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/hinskii/kubetest-alt/internal/cli"
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "kubetest-alt cli: not implemented yet (step 10)")
-	os.Exit(1)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	err := cli.NewRootCmd(cli.Connect, os.Stdout, os.Stderr).ExecuteContext(ctx)
+	if err == nil {
+		return
+	}
+	var exit *cli.ExitError
+	if errors.As(err, &exit) {
+		os.Exit(exit.Code) // the verdict line is already on stderr
+	}
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(cli.ExitOther)
 }

@@ -90,37 +90,50 @@ func (p Policy) allowedSAs() string {
 	return strings.Join(append([]string{defaultSA}, p.ServiceAccounts...), ", ")
 }
 
+// Volume kinds, as the API spells them.
+const (
+	kindEmptyDir              = "emptyDir"
+	kindConfigMap             = "configMap"
+	kindSecret                = "secret"
+	kindProjected             = "projected"
+	kindDownwardAPI           = "downwardAPI"
+	kindPersistentVolumeClaim = "persistentVolumeClaim"
+	kindEphemeral             = "ephemeral"
+	kindCsi                   = "csi"
+	kindHostPath              = "hostPath"
+)
+
 // allowedVolumes never reach outside the pod's own storage and API objects.
 var allowedVolumes = []string{
-	"emptyDir", "configMap", "secret", "projected", "downwardAPI",
-	"persistentVolumeClaim", "ephemeral", "csi",
+	kindEmptyDir, kindConfigMap, kindSecret, kindProjected, kindDownwardAPI,
+	kindPersistentVolumeClaim, kindEphemeral, kindCsi,
 }
 
 func (p Policy) volumeAllowed(kind string) bool {
-	return slices.Contains(allowedVolumes, kind) || (kind == "hostPath" && p.AllowHostPath)
+	return slices.Contains(allowedVolumes, kind) || (kind == kindHostPath && p.AllowHostPath)
 }
 
 // volumeKind names a volume's source the way the API spells it.
 func volumeKind(s corev1.VolumeSource) string {
 	switch {
 	case s.EmptyDir != nil:
-		return "emptyDir"
+		return kindEmptyDir
 	case s.ConfigMap != nil:
-		return "configMap"
+		return kindConfigMap
 	case s.Secret != nil:
-		return "secret"
+		return kindSecret
 	case s.Projected != nil:
-		return "projected"
+		return kindProjected
 	case s.DownwardAPI != nil:
-		return "downwardAPI"
+		return kindDownwardAPI
 	case s.PersistentVolumeClaim != nil:
-		return "persistentVolumeClaim"
+		return kindPersistentVolumeClaim
 	case s.Ephemeral != nil:
-		return "ephemeral"
+		return kindEphemeral
 	case s.CSI != nil:
-		return "csi"
+		return kindCsi
 	case s.HostPath != nil:
-		return "hostPath"
+		return kindHostPath
 	}
 	return "this kind of" // nfs, iscsi, rbd, … — node- or network-level storage
 }
