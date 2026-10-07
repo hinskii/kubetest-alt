@@ -27,6 +27,9 @@ import (
 // the run page by content type or extension, whichever tool wrote them
 // (Cypress cypress/screenshots + videos, Playwright test-results, …).
 
+// typePNG is the most common screenshot type.
+const typePNG = "image/png"
+
 // maxMedia bounds the gallery; the full list stays under Artifacts.
 const maxMedia = 24
 
@@ -34,7 +37,7 @@ const maxMedia = 24
 // table lacks video types, and the type an artifact got recorded with
 // depends on the tool image's /etc/mime.types.
 var mediaTypes = map[string]string{
-	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+	".png": typePNG, ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
 	".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm",
 }
 

@@ -45,7 +45,7 @@ func TestMediaOf(t *testing.T) {
 	assert.Equal(t, mediaItem{Path: "cypress/videos/checkout.cy.js.mp4", Type: "video/mp4", Video: true}, items[1])
 	assert.True(t, items[2].Video)
 
-	var many []apiclient.Artifact
+	many := make([]apiclient.Artifact, 0, maxMedia+5)
 	for i := range maxMedia + 5 {
 		many = append(many, apiclient.Artifact{Path: fmt.Sprintf("s/%d.png", i)})
 	}
