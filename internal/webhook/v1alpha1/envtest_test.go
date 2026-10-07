@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/report"
 )
 
 // baseValidWireSpec is the minimum spec that clears both the OpenAPI
@@ -414,4 +415,19 @@ func TestEnvtest_WebhookMaxRetriesDefaultsToFive(t *testing.T) {
 	var got testsv1alpha1.Webhook
 	require.NoError(t, k8sClient.Get(ctx, types.NamespacedName{Namespace: wh.Namespace, Name: wh.Name}, &got))
 	assert.Equal(t, int32(5), got.Spec.MaxRetries)
+}
+
+// TestMetricsFormatEnumMatchesParsers: the CRD's spec.metrics.from enum
+// must list exactly the formats pkg/report parses — a parser missing from
+// the enum can't be used, an enum value without a parser fails at run time.
+func TestMetricsFormatEnumMatchesParsers(t *testing.T) {
+	root, err := findRepoRoot()
+	require.NoError(t, err)
+	// #nosec G304 -- repo-relative constant path.
+	raw, err := os.ReadFile(filepath.Join(root, "config", "crd", "bases", "tests.kubetest.io_tests.yaml"))
+	require.NoError(t, err)
+	var crd map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &crd))
+	enum := findEnum(t, crd, "spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.metrics.properties.from")
+	assert.ElementsMatch(t, report.Formats, enum)
 }

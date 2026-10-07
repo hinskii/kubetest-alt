@@ -14,8 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package report turns a load tool's machine-readable report into the
-// flat metric vocabulary every kubetest consumer (run status, history,
+// Package report turns a tool's machine-readable report (load tools, ZAP,
+// kubepug) into the flat metric vocabulary every kubetest consumer (run status, history,
 // Control Center analytics) uses — see docs/metrics.md.
 //
 // Which parser runs is declared on the Test (spec.metrics.from), exactly
@@ -41,10 +41,13 @@ const (
 	FromLocustCSV     = "locustCsv"     // locust --csv <prefix> → <prefix>_stats.csv
 	FromGatlingStats  = "gatlingStats"  // <results>/<run>/js/stats.json
 	FromArtilleryJSON = "artilleryJson" // artillery run --output report.json
+	FromZAPJSON       = "zapJson"       // zap-*.py -J report.json
+	FromKubepugJSON   = "kubepugJson"   // kubepug --format json --filename report.json
 )
 
 // Formats lists every supported format (webhook validation, docs).
-var Formats = []string{FromK6Summary, FromJTL, FromLocustCSV, FromGatlingStats, FromArtilleryJSON}
+var Formats = []string{FromK6Summary, FromJTL, FromLocustCSV, FromGatlingStats, FromArtilleryJSON,
+	FromZAPJSON, FromKubepugJSON}
 
 // ErrNoReport means the glob matched nothing — typically the tool crashed
 // before writing its report, or the template's output flag and
@@ -57,6 +60,8 @@ var parsers = map[string]func(io.Reader) (map[string]float64, error){
 	FromLocustCSV:     parseLocust,
 	FromGatlingStats:  parseGatling,
 	FromArtilleryJSON: parseArtillery,
+	FromZAPJSON:       parseZAP,
+	FromKubepugJSON:   parseKubepug,
 }
 
 // Parse reads one report in the given format.

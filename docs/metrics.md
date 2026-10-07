@@ -4,8 +4,9 @@ Every run can carry two kinds of numbers:
 
 - **Test counts** (`status.testCounts`: total / passed / failed / skipped)
   from any JUnit XML the run scrapes as an artifact. No configuration.
-- **Load metrics** (`status.metrics`) from the tool's own report, when the
-  Test (usually via its catalog template) declares `spec.metrics`.
+- **Metrics** (`status.metrics`) from the tool's own report, when the Test
+  (usually via its catalog template) declares `spec.metrics`: request and
+  latency figures for load tools, findings for ZAP and kubepug.
 
 Both are recorded on the TestRun, in run history and in webhook payloads.
 Neither ever changes the run's verdict — that is `spec.verdict`'s job.
@@ -33,10 +34,11 @@ logged by the wrapper (`metricsError` in `result.json`).
 | `locustCsv`     | Locust    | `locust --csv <prefix>` → `<prefix>_stats.csv` | `locust`      |
 | `gatlingStats`  | Gatling   | `<results>/<simulation>-<epoch>/js/stats.json` | `gatling`     |
 | `artilleryJson` | Artillery | `artillery run --output <file>.json`        | `artillery`      |
+| `zapJson`       | ZAP       | `zap-baseline.py -J <file>.json` (any ZAP scan's JSON report) | `zap-baseline` |
+| `kubepugJson`   | kubepug   | `kubepug --format json --filename <file>`   | `kubepug`        |
 
 Functional tools (Cypress, Playwright, pytest, Maven, Gradle, Newman,
-Cucumber, SoapUI) report through JUnit → test counts. Security/lint tools
-(ZAP, kubepug) report through their verdict and artifacts.
+Cucumber, SoapUI) report through JUnit → test counts.
 
 ## Vocabulary
 
@@ -63,6 +65,24 @@ a tool doesn't report are absent — never zero.
 | `data_sent_bytes` |                                            | ✓ |   |   |   |   |
 | `vus_max`         | peak virtual users                         | ✓ |   |   |   |   |
 
+### ZAP and kubepug
+
+| Key                | Meaning |
+|--------------------|---------|
+| `alerts_high`      | ZAP alert types of risk High |
+| `alerts_medium`    | … Medium |
+| `alerts_low`       | … Low |
+| `alerts_info`      | … Informational |
+| `alerts_total`     | all alert types |
+| `deprecated_apis`  | kubepug: API versions in the manifests the target Kubernetes version deprecates |
+| `deleted_apis`     | kubepug: API versions it no longer serves |
+| `affected_objects` | kubepug: objects using either |
+
+ZAP counts alert **types** per risk, summed over the scanned sites — what
+ZAP's own summary counts (`WARN-NEW: 7`), not how many URLs an alert was
+seen on. All keys of these two tools are always present: a clean scan is
+`0`, not missing.
+
 Runs judged by `verdict.from: junit` also carry `tests_total`,
 `tests_passed`, `tests_failed` and `tests_skipped` in `status.metrics`
 (the same numbers as `status.testCounts`, there for charting), and
@@ -86,5 +106,8 @@ and `http.codes.5xx`.
 
 Parsers are tested against real tool output under `pkg/report/testdata/`,
 produced by `hack/report-fixtures.sh` with the catalog's images against a
-target that answers `/` with 200 and `/missing` with 404 (so every fixture
-has ~50% errors). Re-run it after bumping a tool image.
+target that answers `/` with 200 and `/missing` with 404 (so every load
+fixture has ~50% errors; ZAP's baseline scan of it finds the missing
+security headers). The kubepug fixture scans manifests against Kubernetes
+1.24 so it has a deprecated and a deleted API. Re-run it after bumping a
+tool image.

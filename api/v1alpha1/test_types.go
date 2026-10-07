@@ -208,7 +208,7 @@ type StepExecuteTest struct {
 // MetricsSpec selects the report parser /entry runs after the tool exits.
 type MetricsSpec struct {
 	// From is the report format.
-	// +kubebuilder:validation:Enum=k6Summary;jtl;locustCsv;gatlingStats;artilleryJson
+	// +kubebuilder:validation:Enum=k6Summary;jtl;locustCsv;gatlingStats;artilleryJson;zapJson;kubepugJson
 	From string `json:"from"`
 
 	// Path is a doublestar glob relative to the working directory. When it

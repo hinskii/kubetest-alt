@@ -46,6 +46,10 @@ spec:
   artifacts:
     paths:
       - "repo/results/**/kubepug-report.*"
+  # Findings → status.metrics (deprecated_apis, deleted_apis, affected_objects).
+  metrics:
+    from: kubepugJson
+    path: "repo/results/kubepug-report.json"
   config:
     inputFile:
       type: string

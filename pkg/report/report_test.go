@@ -73,6 +73,18 @@ func TestParse_RealToolFixtures(t *testing.T) {
 				LatencyP95Ms: 2, LatencyP99Ms: 2, LatencyMaxMs: 4,
 			},
 		},
+		{
+			// Baseline scan of the bare target: missing security headers
+			// (2 medium, 6 low) and one informational alert type.
+			from: FromZAPJSON, file: "testdata/zap-report.json",
+			want: map[string]float64{AlertsHigh: 0, AlertsMedium: 2, AlertsLow: 6, AlertsInfo: 1, AlertsTotal: 9},
+		},
+		{
+			// Against Kubernetes 1.24: PDB policy/v1beta1 deprecated,
+			// Ingress networking.k8s.io/v1beta1 deleted, one object each.
+			from: FromKubepugJSON, file: "testdata/kubepug-report.json",
+			want: map[string]float64{DeprecatedAPIs: 1, DeletedAPIs: 1, AffectedObjects: 2},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.from, func(t *testing.T) {
@@ -106,6 +118,8 @@ func TestParse_RejectsBadInput(t *testing.T) {
 		FromLocustCSV:     {"", "Type,Name\nGET,/\n", "x,y\n"},
 		FromGatlingStats:  {"", "{", `{"stats":{}}`},
 		FromArtilleryJSON: {"", "{", `{"intermediate":[]}`},
+		FromZAPJSON:       {"", "{", `{"alerts":[]}`, `{"site":[{"alerts":[{"riskcode":"9"}]}]}`},
+		FromKubepugJSON:   {"", "{", `{"deprecated_apis":null}`, `{"deleted_apis":"x","deprecated_apis":null}`},
 	}
 	for from, inputs := range cases {
 		for _, in := range inputs {
@@ -115,6 +129,17 @@ func TestParse_RejectsBadInput(t *testing.T) {
 	}
 	_, err := Parse("nope", strings.NewReader("{}"))
 	assert.ErrorContains(t, err, "unknown report format")
+}
+
+// A clean scan is all zeros, not an empty map: "0 alerts" is a result.
+func TestParse_CleanSecurityReports(t *testing.T) {
+	got, err := Parse(FromZAPJSON, strings.NewReader(`{"site":[{"alerts":[]}]}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{AlertsHigh: 0, AlertsMedium: 0, AlertsLow: 0, AlertsInfo: 0, AlertsTotal: 0}, got)
+
+	got, err = Parse(FromKubepugJSON, strings.NewReader(`{"deprecated_apis":null,"deleted_apis":null}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]float64{DeprecatedAPIs: 0, DeletedAPIs: 0, AffectedObjects: 0}, got)
 }
 
 func TestParse_JTLSkipsTruncatedLastRow(t *testing.T) {

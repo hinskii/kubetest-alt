@@ -1226,6 +1226,8 @@ spec:
                     - locustCsv
                     - gatlingStats
                     - artilleryJson
+                    - zapJson
+                    - kubepugJson
                     type: string
                   path:
                     description: |-

@@ -2,4 +2,6 @@ config:
   inputFile: kubepug/manifests.yaml
 expect:
   phase: failed            # --error-on-deleted: CronJob/Ingress v1beta1 were removed
+  # Two deleted API versions, one object each (kubepug 1.7.1, latest k8s).
+  metrics: {deprecated_apis: 0, deleted_apis: 2, affected_objects: 2}
   artifacts: ["repo/results/kubepug-report.json"]

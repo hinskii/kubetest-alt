@@ -176,15 +176,16 @@ final. Pod events and composite child links remain for later.
 Order (user, 2026-10-07): **18-1f → 18-2f → 18f**. 18-1f and 18-2f
 produce the data 18f's analytics are built on.
 
-### 18-1f — Report parsers for ZAP and kubepug
+### 18-1f — Report parsers for ZAP and kubepug ✅
 The two catalog tools that only had a verdict get metrics like the load
 tools (pkg/report, `spec.metrics` in their catalog templates, fixtures
 from the catalog images' real output, docs/metrics.md vocabulary):
 - ZAP (`zapJson`, `-J report.json`): `alerts_high`, `alerts_medium`,
   `alerts_low`, `alerts_info`, `alerts_total`;
 - kubepug (`kubepugJson`, `--format json`): `deprecated_apis`,
-  `deleted_apis`, `apis_total` (resources affected).
+  `deleted_apis`, `affected_objects`.
 - Catalog e2e cases assert the metrics, like the load tools'.
+- CRD enum of `spec.metrics.from` is tested against `report.Formats`.
 
 ### 18-2f — Functional tests: per-test-case results
 Today JUnit gives only totals (`testCounts`). The reports carry every

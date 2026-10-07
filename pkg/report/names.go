@@ -46,6 +46,23 @@ const (
 	VUsMax            = "vus_max"
 )
 
+// ZAP: alert types found, by risk (all four always present, 0 when none).
+const (
+	AlertsHigh   = "alerts_high"
+	AlertsMedium = "alerts_medium"
+	AlertsLow    = "alerts_low"
+	AlertsInfo   = "alerts_info"
+	AlertsTotal  = "alerts_total"
+)
+
+// kubepug: API versions the manifests use that the target Kubernetes
+// version deprecates or no longer serves, and the objects using them.
+const (
+	DeprecatedAPIs  = "deprecated_apis"
+	DeletedAPIs     = "deleted_apis"
+	AffectedObjects = "affected_objects"
+)
+
 // SetErrorRate fills ErrorRate from Requests/Errors when both are known
 // and Requests > 0.
 func SetErrorRate(m map[string]float64) {

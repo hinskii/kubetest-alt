@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Regenerates the report fixtures under pkg/report/*/testdata by running
+# Regenerates the report fixtures under pkg/report/testdata by running
 # each catalog tool for real (same images as config/templates) against a
 # throwaway HTTP target that answers "/" with 200 and "/missing" with 404,
 # so every report contains both successes and failures.
@@ -23,9 +23,11 @@ JMETER_IMAGE="alpine/jmeter:5.6.3"
 LOCUST_IMAGE="locustio/locust:2.42.1"
 ARTILLERY_IMAGE="artilleryio/artillery:2.0.34"
 GATLING_IMAGE="${GATLING_IMAGE:-kubetest-alt-gatling:3.9.5-smoke}" # build: docker build -t "$GATLING_IMAGE" executors/gatling
+ZAP_IMAGE="ghcr.io/zaproxy/zaproxy:2.17.0"
+KUBEPUG_IMAGE="${KUBEPUG_IMAGE:-kubetest-alt-kubepug:1.7.1-smoke}" # build: docker build -t "$KUBEPUG_IMAGE" executors/kubepug
 
 TOOLS=("$@")
-[ ${#TOOLS[@]} -eq 0 ] && TOOLS=(k6 jmeter locust artillery gatling)
+[ ${#TOOLS[@]} -eq 0 ] && TOOLS=(k6 jmeter locust artillery gatling zap kubepug)
 
 docker network create "$NET" >/dev/null
 mkdir -p "$WORK/www"
@@ -61,7 +63,7 @@ export default function () {
 }
 EOF
     run "$K6_IMAGE" "$d" run --summary-export /work/out/summary.json /work/script.js
-    cp "$d/out/summary.json" "$ROOT/pkg/report/k6/testdata/summary.json"
+    cp "$d/out/summary.json" "$ROOT/pkg/report/testdata/summary.json"
     ;;
   jmeter)
     cat >"$d/plan.jmx" <<EOF
@@ -100,7 +102,7 @@ EOF
 </jmeterTestPlan>
 EOF
     run "$JMETER_IMAGE" "$d" -n -t /work/plan.jmx -l /work/out/jmeter.jtl -j /work/out/jmeter.log
-    cp "$d/out/jmeter.jtl" "$ROOT/pkg/report/jtl/testdata/jmeter.jtl"
+    cp "$d/out/jmeter.jtl" "$ROOT/pkg/report/testdata/jmeter.jtl"
     ;;
   locust)
     cat >"$d/locustfile.py" <<'EOF'
@@ -119,7 +121,7 @@ class FixtureUser(HttpUser):
         self.client.get("/missing")
 EOF
     run "$LOCUST_IMAGE" "$d" --headless -u 2 -r 2 -t 5s --host "$URL" -f /work/locustfile.py --csv /work/out/locust
-    cp "$d/out/locust_stats.csv" "$ROOT/pkg/report/locust/testdata/locust_stats.csv"
+    cp "$d/out/locust_stats.csv" "$ROOT/pkg/report/testdata/locust_stats.csv"
     ;;
   artillery)
     cat >"$d/scenario.yml" <<EOF
@@ -134,7 +136,7 @@ scenarios:
       - get: { url: "/missing" }
 EOF
     run "$ARTILLERY_IMAGE" "$d" run /work/scenario.yml --output /work/out/report.json
-    cp "$d/out/report.json" "$ROOT/pkg/report/artillery/testdata/report.json"
+    cp "$d/out/report.json" "$ROOT/pkg/report/testdata/report.json"
     ;;
   gatling)
     mkdir -p "$d/simulations"
@@ -152,7 +154,44 @@ class FixtureSimulation extends Simulation {
 EOF
     run "$GATLING_IMAGE" "$d" gatling-run -sf /work/simulations -rf /work/out -s FixtureSimulation -rm local
     stats="$(find "$d/out" -path '*/js/stats.json' | head -1)"
-    cp "$stats" "$ROOT/pkg/report/gatling/testdata/stats.json"
+    cp "$stats" "$ROOT/pkg/report/testdata/stats.json"
+    ;;
+  zap)
+    # zap-baseline.py only writes reports into a mounted /zap/wrk (see the
+    # catalog template). The bare target misses security headers, so the
+    # report has WARN-level alerts of several risks.
+    chmod -R a+rwX "$d"
+    docker run --rm --network "$NET" -v "$d/out:/zap/wrk" "$ZAP_IMAGE" \
+      zap-baseline.py -t "$URL" -m 1 -J zap-report.json || true
+    cp "$d/out/zap-report.json" "$ROOT/pkg/report/testdata/zap-report.json"
+    ;;
+  kubepug)
+    # Checked against Kubernetes 1.24: policy/v1beta1 PDB is deprecated
+    # there (removed in 1.25), networking.k8s.io/v1beta1 Ingress deleted
+    # (1.22), apps/v1 Deployment current — both finding kinds plus a clean
+    # resource.
+    cat >"$d/manifests.yaml" <<'EOF'
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: shop}
+spec: {minAvailable: 1, selector: {matchLabels: {app: web}}}
+---
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata: {name: web, namespace: shop}
+spec: {backend: {serviceName: web, servicePort: 80}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web}}
+    spec: {containers: [{name: web, image: nginx}]}
+EOF
+    run "$KUBEPUG_IMAGE" "$d" kubepug --k8s-version v1.24.0 --input-file /work/manifests.yaml --format json --filename /work/out/kubepug-report.json
+    cp "$d/out/kubepug-report.json" "$ROOT/pkg/report/testdata/kubepug-report.json"
     ;;
   *) echo "unknown tool: $tool" >&2; exit 2 ;;
   esac

@@ -64,6 +64,10 @@ spec:
   artifacts:
     paths:
       - "repo/results/**/zap-report.*"
+  # Alert types by risk → status.metrics (alerts_high/medium/low/info/total).
+  metrics:
+    from: zapJson
+    path: "repo/results/zap-report.json"
   config:
     target:
       type: string
