@@ -20,6 +20,7 @@ limitations under the License.
 package auth
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -30,8 +31,15 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 )
 
-// HeaderEmail is set by oauth2-proxy (--set-xauthrequest).
+// HeaderEmail is where oauth2-proxy puts the signed-in email in
+// auth_request mode (an ingress asks it, --set-xauthrequest). In front of
+// Control Center as a reverse proxy (the chart's sidecar) it sends
+// HeaderForwardedEmail instead — see Resolver.EmailHeader.
 const HeaderEmail = "X-Auth-Request-Email"
+
+// HeaderForwardedEmail is oauth2-proxy's upstream email header in reverse
+// proxy mode; it strips the same header from client requests.
+const HeaderForwardedEmail = "X-Forwarded-Email"
 
 // Role is a privilege level; higher values include lower ones.
 type Role int
@@ -69,6 +77,10 @@ type Resolver struct {
 	admins, developers []string
 	// devUser stands in for the oauth2-proxy header when it's absent.
 	devUser string
+	// EmailHeader names the header carrying the signed-in email
+	// (default HeaderEmail). Only a proxy that strips it from client
+	// requests may be in front of Control Center.
+	EmailHeader string
 }
 
 // NewResolver builds a Resolver. devUser (local development without
@@ -99,7 +111,7 @@ func (r *Resolver) Resolve(email string) User {
 // Middleware attaches the User to every request.
 func (r *Resolver) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		email := req.Header.Get(HeaderEmail)
+		email := req.Header.Get(cmp.Or(r.EmailHeader, HeaderEmail))
 		if email == "" {
 			email = r.devUser
 		}

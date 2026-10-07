@@ -71,6 +71,20 @@ func TestMiddleware_DevUserOnlyWhenHeaderMissing(t *testing.T) {
 	assert.Equal(t, User{Email: "dev@example.com", Role: RoleDeveloper}, got, "the real header wins")
 }
 
+func TestMiddleware_EmailHeader(t *testing.T) {
+	r, err := NewResolver(cfg(config.EnvProduction), "")
+	require.NoError(t, err)
+	r.EmailHeader = HeaderForwardedEmail // behind the chart's oauth2-proxy sidecar
+	var got User
+	h := http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) { got = FromContext(req.Context()) })
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(HeaderForwardedEmail, "boss@example.com")
+	req.Header.Set(HeaderEmail, "dev@example.com")
+	r.Middleware(h).ServeHTTP(httptest.NewRecorder(), req)
+	assert.Equal(t, User{Email: "boss@example.com", Role: RoleAdmin}, got, "only the configured header counts")
+}
+
 func TestRequire(t *testing.T) {
 	r, err := NewResolver(cfg(config.EnvProduction), "")
 	require.NoError(t, err)

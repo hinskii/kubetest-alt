@@ -96,7 +96,23 @@ func (s *Server) Handler() http.Handler {
 	return securityHeaders(h)
 }
 
+// OpsHandler serves only /healthz, /readyz and /metrics — for a second
+// listener on the pod IP when the UI listens on localhost behind an
+// oauth2-proxy sidecar (kubelet probes and Prometheus can't sign in).
+func (s *Server) OpsHandler() http.Handler {
+	s.initMetrics()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", ok)
+	mux.HandleFunc("GET /readyz", ok)
+	mux.Handle("GET /metrics", promhttp.HandlerFor(s.registry, promhttp.HandlerOpts{}))
+	return mux
+}
+
+// initMetrics creates the registry once: Handler and OpsHandler share it.
 func (s *Server) initMetrics() {
+	if s.registry != nil {
+		return
+	}
 	s.registry = prometheus.NewRegistry()
 	s.registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 	s.requests = prometheus.NewCounterVec(prometheus.CounterOpts{

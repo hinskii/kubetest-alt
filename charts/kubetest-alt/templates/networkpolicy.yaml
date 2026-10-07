@@ -18,6 +18,11 @@ spec:
     matchLabels:
       app.kubernetes.io/name: {{ .Chart.Name }}
       app.kubernetes.io/instance: {{ .Release.Name }}
+    # Not Control Center: it takes traffic from the ingress controller.
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [operator, apiserver]
   policyTypes: ["Ingress"]
   ingress:
     - from:
@@ -31,4 +36,16 @@ spec:
       ports:
         - port: 8443
           protocol: TCP
+    {{- with .Values.networkPolicy.apiServerProxyCIDRs }}
+    # The Kubernetes API server's service proxy — how Control Center
+    # reaches the kubetest API server. Its source is a control-plane /
+    # node address, not a pod in a namespace.
+    - from:
+        {{- range . }}
+        - ipBlock: {cidr: {{ . | quote }}}
+        {{- end }}
+      ports:
+        - port: 8080
+          protocol: TCP
+    {{- end }}
 {{- end -}}

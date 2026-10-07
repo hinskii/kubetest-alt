@@ -178,6 +178,12 @@ func TestE2E(t *testing.T) {
 
 	// Post-scenario: /metrics from operator + apiserver. Asserts the
 	// step-14 counters got real events end-to-end.
+	t.Run("Scenario10_ControlCenter", func(t *testing.T) {
+		start := time.Now()
+		defer func() { t.Logf("SCENARIO_TIMING scenario=10 tool=control-center duration=%s", time.Since(start)) }()
+		scenarioControlCenter(t, ctx, c)
+	})
+
 	t.Run("MetricsScrape_OperatorAndApiserver", func(t *testing.T) {
 		start := time.Now()
 		defer func() { t.Logf("SCENARIO_TIMING scenario=metrics duration=%s", time.Since(start)) }()

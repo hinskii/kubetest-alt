@@ -24,3 +24,8 @@
 # Grep for //go:embed to keep this list honest:
 #   grep -rn "go:embed" internal/ pkg/ cmd/
 !**/*.sql
+
+# Control Center's UI (internal/controlcenter/views: //go:embed templates/*.html
+# and static). test/dockerignore_test.go fails when an embed isn't listed.
+!internal/controlcenter/views/templates/*.html
+!internal/controlcenter/views/static/**

@@ -31,6 +31,14 @@ images:
   apiserver:
     repository: "ghcr.io/hinskii/kubetest-alt/apiserver"
     tag: ""
+  controlCenter:
+    repository: "ghcr.io/hinskii/kubetest-alt/control-center"
+    tag: ""
+  # The sign-in proxy in front of Control Center (controlCenter.auth.mode
+  # google). Pinned: it decides who gets in.
+  oauth2Proxy:
+    repository: "quay.io/oauth2-proxy/oauth2-proxy"
+    tag: "v7.15.5"
   # content-fetcher is what the operator's compiler references via
   # --content-fetcher-image. Bundles /entry — see CLAUDE.md §11.
   contentFetcher:
@@ -169,6 +177,8 @@ serviceAccounts:
     annotations: {}
   apiserver:
     annotations: {}
+  controlCenter:
+    annotations: {}   # e.g. Workload Identity for clusters with auth gcp
 
 # Postgres wiring. Empty DSN + disabled subchart = no run-history
 # persistence — the reconciler runs correct but archived-runs listing
@@ -182,3 +192,73 @@ postgresql:
 networkPolicy:
   enabled: false
   prometheusNamespace: "monitoring"
+  # Control Center reaches the API server through the Kubernetes API
+  # service proxy; with the policy on, admit the control plane's address
+  # range here (e.g. the GKE master CIDR), or Control Center can't connect.
+  apiServerProxyCIDRs: []
+
+# Control Center — the web UI (docs/control-center.md). Off by default.
+controlCenter:
+  enabled: false
+  replicas: 1
+  # production refuses development-only settings (kubeconfig clusters).
+  environment: production
+  # Roles by email; anyone else signed in is a viewer.
+  rbac:
+    admins: []       # + delete runs, cleanup
+    developers: []   # + run, abort, comment, schedule
+  # Clusters this Control Center manages (config format: docs/control-center.md).
+  # Empty = only the kubetest of this release, as "local".
+  clusters: []
+  localClusterDisplayName: ""
+  # CA bundles (PEM) of remote clusters' API servers, by name: each lands
+  # at /etc/control-center/ca-<name>.pem for a cluster's caFile.
+  caBundles: {}
+  auth:
+    # google: an oauth2-proxy sidecar signs people in with Google and lets
+    #   in only allowedEmails, allowedDomains and the rbac lists. Control
+    #   Center listens on localhost, so the proxy is the only way in.
+    # external: you put the sign-in in front (e.g. oauth2-proxy behind the
+    #   ingress, auth_request) and it sets emailHeader. It MUST strip that
+    #   header from client requests, and nothing else may reach the pod.
+    mode: google
+    google:
+      # OAuth client (Google Cloud Console → Credentials → OAuth client ID,
+      # type Web application, redirect URI https://<ingress.host>/oauth2/callback).
+      clientID: ""
+      # Secret with keys client-secret and cookie-secret (32 random bytes,
+      # base64: openssl rand -base64 32 | tr -- '+/' '-_').
+      existingSecret: ""
+      # Who may sign in. rbac.admins and rbac.developers are always allowed.
+      allowedEmails: []
+      # Whole Google Workspace domains, e.g. [firma.pl].
+      allowedDomains: []
+    # external mode: the header carrying the email.
+    emailHeader: X-Auth-Request-Email
+    oauth2Proxy:
+      # Addresses allowed to send X-Forwarded-For/-Proto/-Host (your
+      # ingress controller's pod CIDR). Empty trusts every source for
+      # those — not for the email, which oauth2-proxy always sets itself.
+      trustedProxyCIDRs: []
+      # Extra oauth2-proxy flags (another provider, cookie settings, …).
+      extraArgs: []
+      resources:
+        requests: {cpu: 10m, memory: 32Mi}
+        limits: {cpu: 200m, memory: 128Mi}
+  liveView:
+    # Secret (key "key") signing live-view links; empty = the chart keeps
+    # one of its own, stable across upgrades and shared by all replicas.
+    existingSecret: ""
+  service:
+    type: ClusterIP
+    port: 80
+  ingress:
+    enabled: false
+    className: ""
+    host: ""
+    annotations: {}
+    # e.g. [{secretName: kubetest-tls, hosts: [kubetest.example.com]}]
+    tls: []
+  resources:
+    requests: {cpu: 20m, memory: 48Mi}
+    limits: {cpu: 500m, memory: 256Mi}

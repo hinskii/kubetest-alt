@@ -36,7 +36,13 @@ IMAGES=(
   "kubetest-alt/operator:${IMAGE_TAG}"
   "kubetest-alt/apiserver:${IMAGE_TAG}"
   "kubetest-alt/content-fetcher:${IMAGE_TAG}"
+  "kubetest-alt/control-center:${IMAGE_TAG}"
+  "kubetest-alt/oauth2-proxy:${IMAGE_TAG}"
 )
+# Control Center's sign-in sidecar (chart-pinned), pulled and re-tagged as
+# a local single-platform image: kind can't load a pulled multi-platform
+# image whose other platforms' layers were never downloaded.
+OAUTH2_PROXY_IMAGE="quay.io/oauth2-proxy/oauth2-proxy:$(sed -n 's/^    tag: "\(v7[^"]*\)".*/\1/p' charts/kubetest-alt/values.yaml)"
 
 log() { echo "[e2e] $(date +%H:%M:%S) $*" >&2; }
 
@@ -84,6 +90,9 @@ phase_end "kind_create"
 phase_start "docker_build"
 docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
 docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
+docker build -f Dockerfile -t "kubetest-alt/control-center:${IMAGE_TAG}" --build-arg TARGET_BIN=cmd/control-center .
+docker pull "$OAUTH2_PROXY_IMAGE"
+echo "FROM $OAUTH2_PROXY_IMAGE" | docker build -t "kubetest-alt/oauth2-proxy:${IMAGE_TAG}" -
 # Content-fetcher Dockerfile COPYs go.mod, go.sum, api/, pkg/, cmd/entry/
 # — all repo-root paths. Build context MUST be repo root; the previous
 # `executors/content-fetcher` context left every COPY failing with
@@ -283,6 +292,15 @@ fi
 phase_end "storage_deploy"
 
 phase_start "helm_install"
+# Control Center runs as in production: Google sign-in through the
+# oauth2-proxy sidecar. The OAuth client is a dummy — nobody signs in;
+# the e2e checks the proxy refuses them and reaches the UI on the pod's
+# localhost through a port-forward instead.
+kubectl create namespace "$RELEASE_NS" --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n "$RELEASE_NS" create secret generic cc-google \
+  --from-literal=client-secret=e2e-dummy \
+  --from-literal=cookie-secret="$(head -c 32 /dev/urandom | base64 | tr -- '+/' '-_' | head -c 44)" \
+  --dry-run=client -o yaml | kubectl apply -f -
 if ! helm upgrade --install kt "$CHART_DIR" \
   --namespace "$RELEASE_NS" --create-namespace \
   --set images.registry="" \
@@ -295,6 +313,15 @@ if ! helm upgrade --install kt "$CHART_DIR" \
   --set images.contentFetcher.tag="${IMAGE_TAG}" \
   --set operator.metrics.bindAddress=":8080" \
   --set operator.metrics.secure=false \
+  --set controlCenter.enabled=true \
+  --set images.controlCenter.repository=kubetest-alt/control-center \
+  --set images.controlCenter.tag="${IMAGE_TAG}" \
+  --set images.oauth2Proxy.repository=kubetest-alt/oauth2-proxy \
+  --set images.oauth2Proxy.tag="${IMAGE_TAG}" \
+  --set controlCenter.auth.google.clientID=e2e.apps.googleusercontent.com \
+  --set controlCenter.auth.google.existingSecret=cc-google \
+  --set "controlCenter.rbac.developers={dev@e2e.test}" \
+  --set "controlCenter.rbac.admins={admin@e2e.test}" \
   "${STORAGE_VALUES[@]}" \
   --wait --timeout=5m; then
   log "::error::helm install failed — dumping cluster state for diagnosis"
@@ -309,9 +336,10 @@ fi
 kubectl -n "$RELEASE_NS" get all
 # Same image tag on every run: when a kept cluster is reused, helm sees no
 # change and the old pods would keep running the previous build.
-kubectl -n "$RELEASE_NS" rollout restart deploy/kt-kubetest-alt-operator deploy/kt-kubetest-alt-apiserver
+kubectl -n "$RELEASE_NS" rollout restart deploy/kt-kubetest-alt-operator deploy/kt-kubetest-alt-apiserver deploy/kt-kubetest-alt-control-center
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-operator  --timeout=180s
 kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-apiserver --timeout=180s
+kubectl -n "$RELEASE_NS" rollout status deploy/kt-kubetest-alt-control-center --timeout=180s
 
 # Install TestTemplates in the workload namespace. Scenario 2 (jmeter)
 # uses `use: jmeter` — resolver looks up the template in the Test's own
@@ -325,6 +353,10 @@ phase_end "helm_install"
 phase_start "portforward"
 kubectl -n "$RELEASE_NS" port-forward svc/kt-kubetest-alt-apiserver 18080:8080 >/dev/null 2>&1 &
 kubectl -n "$RELEASE_NS" port-forward deploy/kt-kubetest-alt-operator 18081:8080 >/dev/null 2>&1 &
+# Control Center: the Service is the oauth2-proxy sidecar (what users
+# reach); the pod's 8080 is the UI on its localhost, past sign-in.
+kubectl -n "$RELEASE_NS" port-forward svc/kt-kubetest-alt-control-center 18090:80 >/dev/null 2>&1 &
+kubectl -n "$RELEASE_NS" port-forward deploy/kt-kubetest-alt-control-center 18091:8080 >/dev/null 2>&1 &
 sleep 5
 # Sanity — did port-forwards actually attach? Curl each one, non-fatal
 # but visibly logged so scenario timeouts are diagnosable.
@@ -336,6 +368,8 @@ export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 export APISERVER_URL="http://127.0.0.1:18080"
 export METRICS_APISERVER_URL="http://127.0.0.1:18080/metrics"
 export METRICS_OPERATOR_URL="http://127.0.0.1:18081/metrics"
+export CC_PROXY_URL="http://127.0.0.1:18090"
+export CC_URL="http://127.0.0.1:18091"
 
 if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   phase_start "go_test"

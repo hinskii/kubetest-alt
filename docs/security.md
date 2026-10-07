@@ -51,6 +51,10 @@ Center:
   port, only while the run is running, dropping cookies, `Authorization`
   and the attribution header. It needs no pod RBAC. A NetworkPolicy in a
   test namespace must admit the API server on that port.
+- Each proxied request ends after 15 s. An open event stream would keep
+  the tool alive — k6 does not exit while a dashboard client is connected
+  — so watching a run must not hold it at running; the browser's
+  EventSource reconnects by itself and k6 resends its state.
 
 ## Known risk (fixes.md #1) — deferred
 

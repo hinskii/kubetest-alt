@@ -19,6 +19,7 @@ package apiserver
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -41,11 +42,12 @@ type livePod struct {
 	gotCookie    string
 	gotUser      string
 	gotAuthorize string
+	disconnected chan struct{}
 }
 
 func newLivePod(t *testing.T) *livePod {
 	t.Helper()
-	p := &livePod{}
+	p := &livePod{disconnected: make(chan struct{}, 8)}
 	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p.gotPath, p.gotQuery = r.URL.Path, r.URL.RawQuery
 		p.gotCookie, p.gotUser, p.gotAuthorize = r.Header.Get("Cookie"), r.Header.Get(HeaderUser), r.Header.Get("Authorization")
@@ -54,6 +56,7 @@ func newLivePod(t *testing.T) *livePod {
 			_, _ = fmt.Fprint(w, "data: first\n\n")
 			w.(http.Flusher).Flush()
 			<-r.Context().Done() // a stream stays open
+			p.disconnected <- struct{}{}
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: "ui", Value: "x"}) // #nosec G124 -- a test pod's cookie, asserted to be dropped
@@ -113,6 +116,31 @@ func TestLiveView_StreamsEvents(t *testing.T) {
 		assert.Equal(t, "data: first\n", l, "an event arrives while the stream is still open")
 	case <-time.After(5 * time.Second):
 		t.Fatal("the event was buffered instead of flushed")
+	}
+}
+
+// An open event stream must not keep the tool alive: the proxy ends it
+// after liveStreamMax, and the tool sees its client go away.
+func TestLiveView_StreamsEndSoTheToolCanExit(t *testing.T) {
+	old := liveStreamMax
+	liveStreamMax = 300 * time.Millisecond
+	t.Cleanup(func() { liveStreamMax = old })
+	pod := newLivePod(t)
+	s, _, _ := mkStorageServer(t, nil, pod.runningRun(t, "load"))
+	api := httptest.NewServer(s.Handler())
+	t.Cleanup(api.Close)
+
+	start := time.Now()
+	resp, err := http.Get(api.URL + "/runs/load/live/events")
+	require.NoError(t, err)
+	body, _ := io.ReadAll(resp.Body) // returns once the proxy ends the stream
+	_ = resp.Body.Close()
+	assert.Contains(t, string(body), "data: first")
+	assert.Less(t, time.Since(start), 5*time.Second, "the stream ended instead of staying open")
+	select {
+	case <-pod.disconnected:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the test pod never saw its client go away")
 	}
 }
 

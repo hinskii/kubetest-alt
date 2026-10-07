@@ -112,3 +112,24 @@ Secret is set (AWS credential chain, e.g. IRSA). */}}
       key: AWS_SECRET_ACCESS_KEY
 {{- end }}
 {{- end -}}
+
+{{/* Control Center (step 18h). */}}
+{{- define "kubetest-alt.controlCenter.selectorLabels" -}}
+app.kubernetes.io/name: {{ .Chart.Name }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: control-center
+{{- end -}}
+
+{{- define "kubetest-alt.controlCenter.name" -}}
+{{ include "kubetest-alt.fullname" . }}-control-center
+{{- end -}}
+
+{{/* Everyone the sign-in proxy lets in by address: allowedEmails plus
+     the rbac lists, lower-cased, de-duplicated, sorted. */}}
+{{- define "kubetest-alt.controlCenter.emails" -}}
+{{- $cc := .Values.controlCenter -}}
+{{- $all := concat $cc.auth.google.allowedEmails $cc.rbac.admins $cc.rbac.developers -}}
+{{- $out := list -}}
+{{- range $all }}{{ $out = append $out (lower (trim .)) }}{{ end -}}
+{{- $out | uniq | sortAlpha | join "\n" -}}
+{{- end -}}

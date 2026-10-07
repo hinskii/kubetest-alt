@@ -17,11 +17,13 @@ limitations under the License.
 package apiserver
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
+	"time"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controller"
@@ -34,8 +36,17 @@ import (
 // the TestRun status the operator writes, never from the request. Streams
 // (k6's server-sent events) are flushed as they come.
 //
+// Every proxied request ends after liveStreamMax: a live UI's open event
+// stream must not keep the tool alive — k6 doesn't exit while a dashboard
+// client is connected ("Stopping outputs…"), so watching a run would hold
+// it at running until the Job's deadline. Browsers' EventSource reconnects
+// by itself, and the tool sends its state again on a new connection.
+//
 // Callers never pass credentials through: cookies, Authorization and the
 // attribution header are dropped, and the UI's cookies are not returned.
+// liveStreamMax bounds one proxied live-view request (see liveView).
+var liveStreamMax = 15 * time.Second
+
 func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 	ns, err := s.targetNamespace(r, "")
 	if err != nil {
@@ -63,6 +74,9 @@ func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, ReasonServiceUnavail, "the run hasn't started yet")
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), liveStreamMax)
+	defer cancel()
+	r = r.WithContext(ctx)
 	target := net.JoinHostPort(run.Status.PodIP, strconv.Itoa(int(spec.LiveView.Port)))
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -81,7 +95,10 @@ func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 			resp.Header.Del("Set-Cookie")
 			return nil
 		},
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+		ErrorHandler: func(w http.ResponseWriter, req *http.Request, err error) {
+			if req.Context().Err() != nil {
+				return // our deadline or the client went away — the stream just ends
+			}
 			writeError(w, http.StatusBadGateway, ReasonServiceUnavail, "live view unreachable: "+err.Error())
 		},
 	}

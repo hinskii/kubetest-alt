@@ -160,3 +160,24 @@ func TestNotFoundAndStatic(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), "--primary")
 }
+
+func TestOpsHandler_ProbesAndMetricsOnly(t *testing.T) {
+	res, err := auth.NewResolver(&config.Config{Environment: config.EnvProduction}, "")
+	require.NoError(t, err)
+	s := &Server{Auth: res}
+	ui := s.Handler()
+	ops := s.OpsHandler()
+	for _, p := range []string{"/healthz", "/readyz", "/metrics"} {
+		rec := httptest.NewRecorder()
+		ops.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, p, nil))
+		assert.Equal(t, http.StatusOK, rec.Code, p)
+	}
+	rec := httptest.NewRecorder()
+	ui.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	rec = httptest.NewRecorder()
+	ops.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code, "no UI on the ops listener")
+	rec = httptest.NewRecorder()
+	ops.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	assert.Contains(t, rec.Body.String(), "controlcenter_http_requests_total", "the UI's request counter, shared registry")
+}

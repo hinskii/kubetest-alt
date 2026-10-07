@@ -332,3 +332,130 @@ func TestHelmTemplate_APIServerRoleIsNarrow(t *testing.T) {
 	assert.Regexp(t, `resources: \["testtemplates"\]\s+verbs: \["get", "list", "watch"\]`, role,
 		"templates are read-only")
 }
+
+// helmTemplateFails renders with args and returns the error output.
+func helmTemplateFails(t *testing.T, args ...string) string {
+	t.Helper()
+	helm := helmBinary(t)
+	full := append([]string{"template", "test", filepath.Join(findRepoRoot(t), chartDir),
+		"--namespace", "kubetest-alt"}, args...)
+	// #nosec G204 -- helm resolved via LookPath; chartDir const.
+	out, err := exec.Command(helm, full...).CombinedOutput()
+	require.Error(t, err, "helm template %v should fail", args)
+	return string(out)
+}
+
+// controlCenterDocs returns the rendered objects of templates/controlcenter.yaml.
+func controlCenterDocs(rendered string) string {
+	var out []string
+	for doc := range strings.SplitSeq(rendered, "\n---\n") {
+		if strings.Contains(doc, "# Source: kubetest-alt/templates/controlcenter.yaml") {
+			out = append(out, doc)
+		}
+	}
+	return strings.Join(out, "\n---\n")
+}
+
+var googleCC = []string{
+	"--set", "controlCenter.enabled=true",
+	"--set", "controlCenter.auth.google.clientID=abc.apps.googleusercontent.com",
+	"--set", "controlCenter.auth.google.existingSecret=cc-google",
+}
+
+func TestHelmTemplate_ControlCenterOffByDefault(t *testing.T) {
+	assert.Empty(t, controlCenterDocs(helmTemplate(t)))
+}
+
+// Google sign-in: an oauth2-proxy sidecar is the only way in.
+func TestHelmTemplate_ControlCenterGoogleSidecar(t *testing.T) {
+	got := controlCenterDocs(helmTemplate(t, append(googleCC,
+		"--set", "controlCenter.rbac.admins={Boss@Firma.pl}",
+		"--set", "controlCenter.rbac.developers={dev@firma.pl}",
+		"--set", "controlCenter.auth.google.allowedEmails={anna@firma.pl,boss@firma.pl}",
+		"--set", "controlCenter.auth.google.allowedDomains={partner.pl}",
+		"--set", "controlCenter.auth.oauth2Proxy.trustedProxyCIDRs={10.0.0.0/8}",
+		"--set", "controlCenter.ingress.enabled=true",
+		"--set", "controlCenter.ingress.host=kubetest.firma.pl")...))
+
+	// Control Center itself listens on localhost and trusts only the
+	// header oauth2-proxy sets and strips from clients — verified against
+	// v7.15.5: X-Auth-Request-Email passes through a skipped route
+	// untouched, X-Forwarded-Email doesn't.
+	assert.Contains(t, got, "- --listen=127.0.0.1:8080")
+	assert.Contains(t, got, "- --email-header=X-Forwarded-Email")
+	assert.NotContains(t, got, "--email-header=X-Auth-Request-Email")
+	for _, arg := range []string{
+		"--provider=google", "--client-id=abc.apps.googleusercontent.com",
+		"--upstream=http://127.0.0.1:8080/", "--authenticated-emails-file=/etc/oauth2-proxy/emails",
+		"--email-domain=partner.pl", "--skip-auth-strip-headers=true", "--skip-auth-route=GET=^/live/",
+		"--trusted-proxy-ip=10.0.0.0/8", "--redirect-url=https://kubetest.firma.pl/oauth2/callback",
+	} {
+		assert.Contains(t, got, "- "+arg, arg)
+	}
+	assert.Contains(t, got, "image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5")
+	assert.Contains(t, got, "secretKeyRef: {name: cc-google, key: client-secret}")
+	assert.Contains(t, got, "  emails: |\n    anna@firma.pl\n    boss@firma.pl\n    dev@firma.pl\n",
+		"allowed emails + rbac lists, lower-cased, once each")
+	// The Service and Ingress go to the proxy's port; the UI has none.
+	assert.Contains(t, got, "{name: http, containerPort: 4180, protocol: TCP}")
+	assert.NotContains(t, got, "containerPort: 8080")
+	assert.Contains(t, got, "host: kubetest.firma.pl")
+	// Only this release's API server, through the service proxy.
+	assert.Contains(t, got, "resources: [\"services/proxy\"]")
+	assert.Contains(t, got, "- test-kubetest-alt-apiserver\n      - http:test-kubetest-alt-apiserver:8080")
+	assert.Contains(t, got, "service: test-kubetest-alt-apiserver")
+	assert.Contains(t, got, "name: CC_LIVE_VIEW_KEY")
+	assert.Contains(t, got, "name: test-kubetest-alt-control-center-live-view", "the chart keeps a live-view key")
+}
+
+func TestHelmTemplate_ControlCenterExternalAuth(t *testing.T) {
+	got := controlCenterDocs(helmTemplate(t,
+		"--set", "controlCenter.enabled=true", "--set", "controlCenter.auth.mode=external",
+		"--set", "controlCenter.liveView.existingSecret=my-live-key"))
+	assert.NotContains(t, got, "oauth2-proxy:")
+	assert.Contains(t, got, "- --listen=:8080")
+	assert.Contains(t, got, "- --email-header=X-Auth-Request-Email")
+	assert.Contains(t, got, "secretKeyRef: {name: my-live-key, key: key}")
+	assert.NotContains(t, got, "kind: Secret", "an existing live-view key is used, none generated")
+}
+
+func TestHelmTemplate_ControlCenterRefusesOpenOrBrokenSignIn(t *testing.T) {
+	assert.Contains(t, helmTemplateFails(t, "--set", "controlCenter.enabled=true"), "clientID is required")
+	assert.Contains(t, helmTemplateFails(t, "--set", "controlCenter.enabled=true",
+		"--set", "controlCenter.auth.google.clientID=x"), "existingSecret is required")
+	assert.Contains(t, helmTemplateFails(t, googleCC...), "nobody could sign in")
+	assert.Contains(t, helmTemplateFails(t, "--set", "controlCenter.enabled=true",
+		"--set", "controlCenter.auth.mode=open"),
+		"must be google or external")
+}
+
+func TestHelmTemplate_NetworkPolicyLeavesControlCenterOut(t *testing.T) {
+	got := helmTemplate(t, "--set", "networkPolicy.enabled=true",
+		"--set", "networkPolicy.apiServerProxyCIDRs={172.16.0.0/28}")
+	assert.Contains(t, got, "values: [operator, apiserver]")
+	assert.Contains(t, got, `- ipBlock: {cidr: "172.16.0.0/28"}`)
+}
+
+// Remote clusters' CA bundles land next to the config, one file each.
+func TestHelmTemplate_ControlCenterCABundles(t *testing.T) {
+	values := filepath.Join(t.TempDir(), "values.yaml")
+	require.NoError(t, os.WriteFile(values, []byte(`controlCenter:
+  enabled: true
+  auth: {mode: external}
+  clusters:
+    - name: prod
+      auth: {type: gcp}
+      server: https://34.118.0.10
+      caFile: /etc/control-center/ca-prod.pem
+  caBundles:
+    prod: |
+      -----BEGIN CERTIFICATE-----
+      MIIBxyz
+      -----END CERTIFICATE-----
+`), 0o600))
+	got := controlCenterDocs(helmTemplate(t, "-f", values))
+	assert.Contains(t, got,
+		"  ca-prod.pem: |\n    -----BEGIN CERTIFICATE-----\n    MIIBxyz\n    -----END CERTIFICATE-----\n")
+	assert.Contains(t, got, "caFile: /etc/control-center/ca-prod.pem")
+	assert.NotContains(t, got, "name: local", "explicit clusters replace the default")
+}

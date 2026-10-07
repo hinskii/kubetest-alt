@@ -328,11 +328,32 @@ open.
    variable. Templates do not send metrics yet; wiring k6/JMeter/Gatling
    output waits until the metrics backend is chosen.
 
-### 18h — Packaging + docs
-- Chart component `controlCenter.enabled` (Deployment, Service, config,
-  Secret refs); oauth2-proxy stays external (documented).
-- Kind e2e smoke: list tests → start run → logs → result row.
-- Root CLAUDE.md §13 layout + new `docs/control-center.md`.
+### 18h — Packaging + docs ✅
+- Chart component `controlCenter.enabled`. Decided (user, 2026-10-07):
+  Google sign-in by email **in the chart** — `auth.mode: google` runs
+  oauth2-proxy v7.15.5 as a sidecar (allowedEmails + allowedDomains + the
+  rbac lists may sign in; `/live/` skipped; trustedProxyCIDRs), Control
+  Center listens on localhost and reads `X-Forwarded-Email` (oauth2-proxy
+  strips it from clients; `X-Auth-Request-Email` it passes through — checked
+  against the real image). `auth.mode: external` for a proxy in front.
+  Ops listener :9090 (`--ops-listen`) for probes/metrics. Role with
+  `services/proxy` on this release's API server only; live-view key Secret
+  kept across upgrades (lookup); `caBundles` for remote clusters;
+  NetworkPolicy leaves Control Center out and admits
+  `apiServerProxyCIDRs` (the service proxy's source).
+- Found by the e2e: k6 doesn't exit while a dashboard client is connected
+  (stuck in "Stopping outputs…"), so a watched run never finished. The
+  API server ends every live-view request after 15 s (EventSource
+  reconnects); measured: a 20 s k6 test with a reconnecting client
+  throughout exits after 32 s. The Control Center image also failed to
+  build in Docker — its templates/static weren't in .dockerignore;
+  test/dockerignore_test.go now checks every //go:embed.
+- Kind e2e Scenario 10: sign-in redirects to Google (a forged email
+  header changes nothing); the UI connected through the service proxy;
+  a k6 run started from Control Center; its live view through
+  oauth2-proxy → CC → service proxy → API server → pod IP, events
+  streaming; verdict, log and history on the pages.
+- CLAUDE.md §13 layout; `docs/control-center.md`.
 
 ---
 

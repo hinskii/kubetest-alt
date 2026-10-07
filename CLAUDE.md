@@ -557,33 +557,40 @@ for the curated template list.
 
 ```
 kubetest-alt/
-├── api/v1alpha1/                 # CRD types: test_types.go, testrun_types.go,
-│                                 #   testtemplate_types.go, testtrigger_types.go,
-│                                 #   groupversion_info.go, zz_generated.deepcopy.go
+├── api/v1alpha1/                 # CRD types: Test, TestRun, TestTemplate, TestTrigger, Webhook
 ├── cmd/
-│   ├── operator/main.go          # manager: controllers + webhooks
-│   ├── apiserver/main.go         # thin REST/gRPC API for GUI
-│   ├── entry/main.go             # in-container wrapper (/entry) + content fetcher
-│   └── cli/main.go               # kubectl-kubetest plugin
+│   ├── operator/                 # manager: controllers + webhooks + scheduler + retention
+│   ├── apiserver/                # thin REST API (Control Center, CLI, scripts)
+│   ├── control-center/           # web UI (stateless; reaches each cluster's apiserver)
+│   ├── entry/                    # in-container wrapper (/entry) + content fetcher
+│   ├── cli/                      # kubectl-kubetest plugin
+│   └── gen-openapi/              # writes openapi/openapi.json
 ├── internal/
-│   ├── controller/
-│   │   ├── testrun_controller.go     # compiles TestRun -> Job/Pod, tracks status
-│   │   ├── test_controller.go        # cron scheduling, latestRun status
-│   │   └── testtrigger_controller.go # watches k8s events -> creates TestRun
-│   ├── compiler/                 # Test(+Template) -> k8s Job/Pod/ConfigMap/Secret
-│   ├── scheduler/                # built-in RPC cron (NOT CronJob-per-test)
-│   ├── logstream/                # k8s log tail -> websocket + object-storage flush
-│   ├── scraper/                  # glob artifacts -> object storage; JUnit parse
-│   └── store/                    # Postgres run-history repo + retention
+│   ├── controller/               # TestRun (leaf, composite, parallel, services), Test, TestTrigger
+│   ├── compiler/                 # resolved spec -> Job/Pod/ConfigMap
+│   ├── resolver/                 # templates + config + {{ }} -> resolved spec
+│   ├── composer/                 # composite steps: graph, aggregation
+│   ├── scheduler/                # built-in cron (NOT CronJob-per-test)
+│   ├── logstream/                # pod log tail -> object storage
+│   ├── scraper/                  # artifact globs -> object storage; JUnit parse
+│   ├── store/                    # Postgres run history, test cases, audit (+ migrations)
+│   ├── retention/                # leader-elected history/object expiry
+│   ├── apiserver/                # REST handlers + OpenAPI
+│   ├── controlcenter/            # UI: server, views (html/template), auth, clusters, config
+│   ├── webhook/                  # admission webhooks
+│   └── webhookdelivery/          # outbound run-event webhooks
 ├── pkg/
-│   ├── executor/                 # Runner interface + ExecutionRequest/Result
-│   ├── expr/                     # {{ }} expression engine (config/env/matrix/shard)
-│   └── apis/                     # generated clientset (for API server + CLI)
-├── executors/                    # wrapper Dockerfiles: k6/ cypress/ newman/ locust/ jmeter/
-├── config/                       # kustomize: crd/ rbac/ manager/ webhook/
-├── charts/kubetest-alt/          # Helm: operator, apiserver (object storage + Postgres external)
-├── web/                          # GUI (SPA) -> talks only to apiserver
-└── test/                         # e2e (envtest + kind)
+│   ├── apiclient/                # the API's wire types + Go client (CC, CLI)
+│   ├── executor/                 # wrapper: ExecutionRequest/Result, fetcher, /entry
+│   ├── expr/                     # {{ }} expression engine
+│   ├── report/                   # tool report parsers -> shared metric vocabulary
+│   ├── storage/                  # S3 / GCS object storage, run key layout
+│   └── verdict/                  # verdictFrom processors (junit, jtl)
+├── executors/                    # platform images: content-fetcher (+ gatling, soapui, kubepug)
+├── config/                       # kustomize: crd/ rbac/ webhook/; templates/ (tool catalog); samples/
+├── charts/kubetest-alt/          # Helm: operator, apiserver, Control Center (+ oauth2-proxy sidecar)
+├── docs/                         # control-center, security, storage, metrics, onboarding-a-tool
+└── test/                         # helm, e2e (kind), catalog (every template on kind)
 ```
 
 ---
