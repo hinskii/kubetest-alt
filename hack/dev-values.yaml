@@ -1,0 +1,34 @@
+# Values for a local kubetest on kind (hack/dev-up.sh, `make dev-up`).
+# Everything in the cluster: MinIO for logs/artifacts, Postgres for run
+# history, Control Center without a sign-in proxy (you are dev@local, admin).
+# Never use these outside a throwaway cluster.
+images:
+  registry: ""
+  pullPolicy: Never          # built locally and loaded with `kind load`
+  operator: {repository: kubetest-alt/operator, tag: dev}
+  apiserver: {repository: kubetest-alt/apiserver, tag: dev}
+  contentFetcher: {repository: kubetest-alt/content-fetcher, tag: dev}
+  controlCenter: {repository: kubetest-alt/control-center, tag: dev}
+
+storage:
+  type: s3
+  bucket: kubetest-artifacts
+  s3:
+    endpoint: minio.kubetest-alt.svc:9000
+    useSSL: false
+    secretName: s3-creds
+
+postgresql:
+  dsn: postgres://kubetest:kubetest@postgres.kubetest-alt.svc:5432/kubetest?sslmode=disable
+
+operator:
+  metrics: {bindAddress: ":8080", secure: false}
+
+controlCenter:
+  enabled: true
+  environment: development
+  devUser: dev@local
+  auth: {mode: external}
+  rbac:
+    admins: [dev@local]
+  localClusterDisplayName: kind (local)

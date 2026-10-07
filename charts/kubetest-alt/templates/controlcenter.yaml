@@ -5,6 +5,12 @@
 {{- if not (has $cc.auth.mode (list "google" "external")) }}
 {{- fail (printf "controlCenter.auth.mode %q: must be google or external" $cc.auth.mode) }}
 {{- end }}
+{{- if and $cc.devUser (ne $cc.environment "development") }}
+{{- fail "controlCenter.devUser signs everyone in as that user: only with controlCenter.environment=development" }}
+{{- end }}
+{{- if and $cc.devUser $google }}
+{{- fail "controlCenter.devUser is for auth.mode=external (local development without a sign-in proxy)" }}
+{{- end }}
 {{- if $google }}
 {{- if not $cc.auth.google.clientID }}{{ fail "controlCenter.auth.google.clientID is required (or set controlCenter.auth.mode=external)" }}{{ end }}
 {{- if not $cc.auth.google.existingSecret }}{{ fail "controlCenter.auth.google.existingSecret is required: a Secret with client-secret and cookie-secret" }}{{ end }}
@@ -159,6 +165,9 @@ spec:
             {{- else }}
             - --listen=:8080
             - --email-header={{ $cc.auth.emailHeader }}
+            {{- with $cc.devUser }}
+            - --dev-user={{ . }}
+            {{- end }}
             {{- end }}
             - --ops-listen=:9090
           env:

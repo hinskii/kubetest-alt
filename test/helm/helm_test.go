@@ -485,3 +485,15 @@ func TestHelmTemplate_TestPodPolicy(t *testing.T) {
 	assert.Contains(t, got, "- --allowed-service-accounts=gcs-writer,s3-reader")
 	assert.Contains(t, got, "- --allow-host-path")
 }
+
+// Local development: everyone is devUser — never in production.
+func TestHelmTemplate_ControlCenterDevUser(t *testing.T) {
+	external := []string{"--set", "controlCenter.enabled=true", "--set", "controlCenter.auth.mode=external"}
+	got := controlCenterDocs(helmTemplate(t, append(external,
+		"--set", "controlCenter.environment=development", "--set", "controlCenter.devUser=dev@local")...))
+	assert.Contains(t, got, "- --dev-user=dev@local")
+	assert.Contains(t, helmTemplateFails(t, append(external, "--set", "controlCenter.devUser=dev@local")...),
+		"only with controlCenter.environment=development")
+	assert.Contains(t, helmTemplateFails(t, append(googleCC, "--set", "controlCenter.environment=development",
+		"--set", "controlCenter.devUser=dev@local", "--set", "controlCenter.rbac.admins={a@b.c}")...), "auth.mode=external")
+}

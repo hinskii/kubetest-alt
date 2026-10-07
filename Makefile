@@ -393,3 +393,38 @@ endef
 .PHONY: gui-client-check
 gui-client-check: ## Regenerate the GUI api client and refuse to proceed on drift.
 	cd web && npm run check:client
+
+##@ Local development (kind)
+
+DEV_CLUSTER ?= kubetest-dev
+
+.PHONY: dev-up
+dev-up: ## Local kubetest on kind: platform from this checkout, MinIO, Postgres, Control Center, samples in "demo".
+	KIND_CLUSTER=$(DEV_CLUSTER) hack/dev-up.sh
+
+.PHONY: dev-ui
+dev-ui: ## Open Control Center of the dev cluster on http://localhost:8090 (Ctrl-C to stop).
+	@echo "Control Center: http://localhost:8090"
+	kubectl --context kind-$(DEV_CLUSTER) -n kubetest-alt port-forward svc/kt-kubetest-alt-control-center 8090:80
+
+.PHONY: dev-reload
+dev-reload: ## Rebuild the platform images and restart them in the dev cluster.
+	docker build -q -f Dockerfile -t kubetest-alt/operator:dev --build-arg TARGET_BIN=cmd/operator .
+	docker build -q -f Dockerfile -t kubetest-alt/apiserver:dev --build-arg TARGET_BIN=cmd/apiserver .
+	docker build -q -f Dockerfile -t kubetest-alt/control-center:dev --build-arg TARGET_BIN=cmd/control-center .
+	docker build -q -f executors/content-fetcher/Dockerfile -t kubetest-alt/content-fetcher:dev .
+	for img in operator apiserver control-center content-fetcher; do kind load docker-image kubetest-alt/$$img:dev --name $(DEV_CLUSTER); done
+	kubectl --context kind-$(DEV_CLUSTER) apply -f config/crd/bases/
+	kubectl --context kind-$(DEV_CLUSTER) -n kubetest-alt rollout restart deploy/kt-kubetest-alt-operator deploy/kt-kubetest-alt-apiserver deploy/kt-kubetest-alt-control-center
+	kubectl --context kind-$(DEV_CLUSTER) -n kubetest-alt rollout status deploy/kt-kubetest-alt-operator --timeout=180s
+
+.PHONY: dev-namespace
+dev-namespace: ## Make namespace NS ready for Tests in the dev cluster (storage credentials, tool catalog).
+	@test -n "$(NS)" || { echo "usage: make dev-namespace NS=<namespace>"; exit 1; }
+	kubectl --context kind-$(DEV_CLUSTER) create namespace $(NS) --dry-run=client -o yaml | kubectl --context kind-$(DEV_CLUSTER) apply -f -
+	kubectl --context kind-$(DEV_CLUSTER) -n $(NS) create secret generic s3-creds --from-literal=AWS_ACCESS_KEY_ID=minioadmin --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin --dry-run=client -o yaml | kubectl --context kind-$(DEV_CLUSTER) apply -f -
+	kubectl --context kind-$(DEV_CLUSTER) -n $(NS) apply -f config/templates/
+
+.PHONY: dev-down
+dev-down: ## Delete the dev kind cluster.
+	kind delete cluster --name $(DEV_CLUSTER)

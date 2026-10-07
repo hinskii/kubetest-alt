@@ -206,8 +206,13 @@ networkPolicy:
 controlCenter:
   enabled: false
   replicas: 1
-  # production refuses development-only settings (kubeconfig clusters).
+  # production refuses development-only settings (kubeconfig clusters,
+  # devUser).
   environment: production
+  # Local development only (environment: development, auth.mode:
+  # external): act as this email when no sign-in header is present — no
+  # proxy, no Google. The chart refuses it in production.
+  devUser: ""
   # Roles by email; anyone else signed in is a viewer.
   rbac:
     admins: []       # + delete runs, cleanup
