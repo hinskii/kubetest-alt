@@ -173,6 +173,43 @@ final. Pod events and composite child links remain for later.
 - GitOps lock (§7): `managed-by=gitops` Tests read-only (Run allowed).
 - All phases: queued, running, paused, passed, failed, aborted, error.
 
+Order (user, 2026-10-07): **18-1f → 18-2f → 18f**. 18-1f and 18-2f
+produce the data 18f's analytics are built on.
+
+### 18-1f — Report parsers for ZAP and kubepug
+The two catalog tools that only had a verdict get metrics like the load
+tools (pkg/report, `spec.metrics` in their catalog templates, fixtures
+from the catalog images' real output, docs/metrics.md vocabulary):
+- ZAP (`zapJson`, `-J report.json`): `alerts_high`, `alerts_medium`,
+  `alerts_low`, `alerts_info`, `alerts_total`;
+- kubepug (`kubepugJson`, `--format json`): `deprecated_apis`,
+  `deleted_apis`, `apis_total` (resources affected).
+- Catalog e2e cases assert the metrics, like the load tools'.
+
+### 18-2f — Functional tests: per-test-case results
+Today JUnit gives only totals (`testCounts`). The reports carry every
+test case (name, class/suite, status, duration, failure message):
+1. **Failed tests on the run page** — name, message, stack excerpt,
+   without downloading the XML.
+2. **Per-test-case history** — e.g. "failed 4 of the last 20 runs,
+   12 s on average, slower lately"; slowest tests of a Test.
+3. **Flaky detection** — a test case that both passes and fails under
+   the same configuration gets a flakiness score and a marker.
+4. **New vs known failures** — comparing two runs: started failing,
+   fixed, still failing.
+5. **Screenshots and videos** of failed Cypress/Playwright tests shown
+   on the run page instead of digging through artifacts.
+6. **Commit and branch** of the test content on every run
+   (`content.git` revision resolved by the fetcher), to tie a failure to
+   a change.
+
+Shape: the wrapper already parses JUnit — it adds the case list to
+result.json (bounded: failures always, passing cases name + duration);
+the run store gets a `test_cases` table (partitioned and expired with
+`test_runs`); the apiserver serves `GET /runs/{id}/testcases` and
+`GET /tests/{name}/testcases/{case}/history`; Control Center renders
+1–5. Points 5 and 6 don't depend on the table.
+
 ### 18f — Analytics (generic)
 **Decisions (user, 2026-10-07):** no legacy import — history starts fresh
 with kubetest (the tool is about to be rolled out; the old Control
@@ -180,18 +217,15 @@ Center's k6 results are not carried over). No Critical Path parsing.
 Analytics cover **every catalog tool**, not only k6.
 
 - Computed from kubetest run history (`GET /runs` with `metrics`,
-  `testCounts`, `config`, `tool`) — no copy in Control Center.
+  `testCounts`, `config`, `tool`) and, for functional tools, the
+  per-test-case data of 18-2f — no copy in Control Center.
 - Tool-agnostic: per Test, trends of whatever the runs carry — pass rate
-  and duration for all tools, `testCounts` for JUnit-reporting tools,
-  `metrics` (pkg/report vocabulary) for load tools; columns/series =
-  metric keys present on the selected runs, never a per-tool layout.
+  and duration for all tools, `testCounts` and flakiness for
+  JUnit-reporting tools, `metrics` (pkg/report vocabulary) for load
+  tools and, after 18-1f, ZAP alerts and kubepug API findings;
+  columns/series = metric keys present on the selected runs, never a
+  per-tool layout.
 - One comparison builder for table + Markdown export over selected runs.
-- Report parsers for the two tools that only had a verdict (pkg/report,
-  `spec.metrics` in their catalog templates, fixtures from real output):
-  - ZAP (`zapJson`, `-J report.json`): `alerts_high`, `alerts_medium`,
-    `alerts_low`, `alerts_info`, `alerts_total`;
-  - kubepug (`kubepugJson`, `--format json`): `deprecated_apis`,
-    `deleted_apis`, `apis_total` (resources affected).
 
 ### 18g — Schedules, cleanup, k6 extras
 - One-shot schedules = TestRun with `spec.notBefore` (18d2); list =
