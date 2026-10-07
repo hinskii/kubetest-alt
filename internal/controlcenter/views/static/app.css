@@ -281,7 +281,16 @@ input, select, textarea {
 .actions .button { white-space: nowrap; }
 
 /* Live view: the tool's dashboard in a sandboxed frame. */
-.live-view { width: 100%; height: 75vh; min-height: 480px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+/* A tool's page (live view, report) is drawn for a white page: most have
+   no dark theme and no background of their own, so the frame is white
+   and light (prefers-color-scheme inside follows it). In the dark theme
+   it is inverted with the hue turned back, which keeps the series'
+   colours; "Original colors" (run.js) turns that off — screenshots and
+   images in a report invert too. */
+.tool-frame { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
+.live-view { display: block; width: 100%; height: 75vh; min-height: 480px; border: 0; background: #fff; color-scheme: light; }
+:root[data-theme="dark"] .tool-frame:not(.original) { background: #1d1f24; }
+:root[data-theme="dark"] .tool-frame:not(.original) .live-view { filter: invert(0.88) hue-rotate(180deg); }
 
 /* Run page: what Kubernetes says (step 18 follow-up). */
 .activity { margin: 0.25rem 0 0; padding: 0.5rem 0.75rem; border-radius: 8px; background: var(--surface-muted); }

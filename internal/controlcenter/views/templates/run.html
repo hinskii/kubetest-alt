@@ -57,9 +57,9 @@
 
 {{with $d.LiveViewURL}}
 <section class="panel">
-  <div class="title-row"><h2>Live view</h2><a class="button secondary" href="{{.}}" target="_blank" rel="noopener noreferrer">Open in a new tab</a></div>
+  <div class="title-row"><h2>Live view</h2><button type="button" class="button secondary" data-frame-colors hidden>Original colors</button><a class="button secondary" href="{{.}}" target="_blank" rel="noopener noreferrer">Open in a new tab</a></div>
   <p class="muted small">The tool's own dashboard, live while the run is going. It runs isolated from Control Center.</p>
-  <iframe class="live-view" src="{{.}}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Live view of {{$r.Name}}"></iframe>
+  <div class="tool-frame"><iframe class="live-view" src="{{.}}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Live view of {{$r.Name}}"></iframe></div>
 </section>
 {{end}}
 
@@ -67,11 +67,12 @@
 <section class="panel">
   <div class="title-row">
     <h2>Report</h2>
+    <button type="button" class="button secondary" data-frame-colors hidden>Original colors</button>
     <a class="button secondary" href="{{$d.Path}}/artifacts/{{artifactPath .}}" target="_blank" rel="noopener">Open in a new tab</a>
     <a class="button secondary" href="{{$d.Path}}/artifacts/{{artifactPath .}}?download=1">Download</a>
   </div>
   <p class="muted small">The tool's report of this run. It runs isolated from Control Center.</p>
-  <iframe class="live-view" src="{{$d.Path}}/artifacts/{{artifactPath .}}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Report of {{$r.Name}}"></iframe>
+  <div class="tool-frame"><iframe class="live-view" src="{{$d.Path}}/artifacts/{{artifactPath .}}" sandbox="allow-scripts" referrerpolicy="no-referrer" title="Report of {{$r.Name}}"></iframe></div>
 </section>
 {{end}}{{end}}
 

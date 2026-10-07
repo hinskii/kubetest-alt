@@ -56,3 +56,31 @@
   }
   poll();
 })();
+
+// Tool frames (live view, report) in the dark theme: inverted to match,
+// or the tool's original colors — the choice is remembered.
+(function () {
+  var buttons = document.querySelectorAll("[data-frame-colors]");
+  if (!buttons.length) return;
+  var original = false;
+  try { original = localStorage.getItem("frame-colors") === "original"; } catch (e) { /* storage blocked */ }
+  var root = document.documentElement;
+  function apply() {
+    var dark = root.getAttribute("data-theme") === "dark";
+    document.querySelectorAll(".tool-frame").forEach(function (f) { f.classList.toggle("original", original); });
+    buttons.forEach(function (b) {
+      b.hidden = !dark;
+      b.textContent = original ? "Match the dark theme" : "Original colors";
+    });
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener("click", function () {
+      original = !original;
+      try { localStorage.setItem("frame-colors", original ? "original" : "match"); } catch (e) { /* storage blocked */ }
+      apply();
+    });
+  });
+  // The theme toggle in the top bar changes data-theme.
+  new MutationObserver(apply).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  apply();
+})();
