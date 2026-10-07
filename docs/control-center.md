@@ -104,7 +104,13 @@ controlCenter:
       auth: {type: gcp}                       # Workload Identity
       server: https://34.118.0.10             # the GKE control plane
       caFile: /etc/control-center/ca-prod.pem
-      apiServer: {namespace: kubetest-alt, service: kt-kubetest-alt-apiserver, port: 8080}
+      apiServer:
+        namespace: kubetest-alt
+        service: kt-kubetest-alt-apiserver
+        port: 8080
+        tokenFile: /var/run/kubetest/tokens/prod/token
+  apiTokenSecrets:
+    prod: kubetest-prod-api-token   # a copy of prod's <release>-kubetest-alt-api-token
   caBundles:
     prod: |
       -----BEGIN CERTIFICATE-----
@@ -115,6 +121,12 @@ serviceAccounts:
     annotations:
       iam.gke.io/gcp-service-account: kubetest-cc@PROJECT.iam.gserviceaccount.com
 ```
+
+Every kubetest API requires its token (docs/security.md): copy each
+remote cluster's `<release>-kubetest-alt-api-token` Secret into Control
+Center's namespace and list it in `apiTokenSecrets`. The `local` cluster's
+is mounted automatically; list `local` explicitly and give it
+`tokenFile: /var/run/kubetest/api-token/token`.
 
 For a `gcp` cluster, the Google service account needs access to that
 cluster (`roles/container.clusterViewer`) and, in it, Kubernetes RBAC for

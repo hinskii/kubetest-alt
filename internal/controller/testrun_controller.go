@@ -48,6 +48,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/metrics"
+	"github.com/hinskii/kubetest-alt/internal/podpolicy"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
@@ -91,6 +92,10 @@ type TestRunReconciler struct {
 	// but the reconciler enters this code path again after fallback requeue
 	// so we still get a retry — the RunStore's UID upsert keeps it idempotent).
 	RunStore RunStorePersister
+
+	// PodPolicy is what a test pod may ask for (service accounts, volume
+	// kinds, privileges). The zero value is the strict default.
+	PodPolicy podpolicy.Policy
 
 	// FinishedRunTTL is how long a finished TestRun stays in the cluster
 	// once it is in run history; then the operator deletes the CR (logs,
@@ -483,6 +488,12 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		}
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
 			reason, resolveErr.Error())
+	}
+	// The test pod's service account, volumes and privileges against the
+	// platform's policy — on the resolved spec (templates included) and the
+	// TestRun's pod override, before any pod exists (fixes.md #1).
+	if err := r.PodPolicy.Check(resolvedSpec, run.Spec.Pod); err != nil {
+		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError, ReasonPolicyDenied, err.Error())
 	}
 
 	// Step 17: composite cycle detection at setup — resolves the whole

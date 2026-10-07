@@ -366,6 +366,9 @@ phase_end "portforward"
 
 export KUBECONFIG="${KUBECONFIG:-$HOME/.kube/config}"
 export APISERVER_URL="http://127.0.0.1:18080"
+# The API refuses requests without the chart's token (fixes.md #1).
+APISERVER_TOKEN="$(kubectl -n "$RELEASE_NS" get secret kt-kubetest-alt-api-token -o jsonpath='{.data.token}' | base64 -d)"
+export APISERVER_TOKEN
 export METRICS_APISERVER_URL="http://127.0.0.1:18080/metrics"
 export METRICS_OPERATOR_URL="http://127.0.0.1:18081/metrics"
 export CC_PROXY_URL="http://127.0.0.1:18090"

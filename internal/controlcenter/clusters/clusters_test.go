@@ -41,6 +41,7 @@ type fakeK8s struct {
 	mu       sync.Mutex
 	path     string
 	authz    string
+	token    string
 	caFile   string
 	caPEMb64 string
 }
@@ -50,7 +51,7 @@ func newFakeK8s(t *testing.T) *fakeK8s {
 	f := &fakeK8s{}
 	f.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.path, f.authz = r.URL.Path, r.Header.Get("Authorization")
+		f.path, f.authz, f.token = r.URL.Path, r.Header.Get("Authorization"), r.Header.Get("X-Kubetest-Token")
 		f.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -88,6 +89,32 @@ func TestGCP_BearerTokenThroughServiceProxy(t *testing.T) {
 	path, authz := k8s.last()
 	assert.Equal(t, wantProxy, path)
 	assert.Equal(t, "Bearer gcp-token", authz)
+}
+
+// The kubetest API token travels next to the cluster credential: the
+// service proxy forwards it to the API server.
+func TestAPIToken_FromTokenFile(t *testing.T) {
+	k8s := newFakeK8s(t)
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	require.NoError(t, os.WriteFile(tokenFile, []byte("s3cret-api-token\n"), 0o600))
+	ref := apiRef()
+	ref.TokenFile = tokenFile
+	reg, err := New(t.Context(), []config.Cluster{{
+		Name: "dev", Auth: config.ClusterAuth{Type: config.AuthGCP},
+		Server: k8s.URL, CAFile: k8s.caFile, APIServer: ref,
+	}}, Options{GCPTokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "gcp-token"})})
+	require.NoError(t, err)
+	require.NoError(t, reg.Get("dev").API.Healthz(t.Context()))
+	k8s.mu.Lock()
+	defer k8s.mu.Unlock()
+	assert.Equal(t, "s3cret-api-token", k8s.token, "trimmed")
+	assert.Equal(t, "Bearer gcp-token", k8s.authz, "the cluster credential is separate")
+
+	ref.TokenFile = filepath.Join(t.TempDir(), "missing")
+	_, err = New(t.Context(), []config.Cluster{{Name: "dev", Auth: config.ClusterAuth{Type: config.AuthGCP},
+		Server: k8s.URL, CAFile: k8s.caFile, APIServer: ref}},
+		Options{GCPTokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: "gcp-token"})})
+	require.ErrorContains(t, err, "API token", "a missing token fails startup, not the first page")
 }
 
 func TestKubeconfig(t *testing.T) {

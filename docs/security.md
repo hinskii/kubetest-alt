@@ -56,30 +56,64 @@ Center:
   — so watching a run must not hold it at running; the browser's
   EventSource reconnects by itself and k6 resends its state.
 
-## Known risk (fixes.md #1) — deferred
+## API token (fixes.md #1 — closed)
 
-Decision (2026-10-06): recorded, to be closed before a production rollout.
+The API server is a ClusterIP Service: any pod in the cluster can open a
+connection to it, not only the Kubernetes service proxy. So every request
+but `/healthz`, `/readyz` and `/metrics` must carry the API token in
+`X-Kubetest-Token` (`--auth-token-file`, compared in constant time); a
+missing or wrong one is a 401. Holding the token is what lets a client in,
+and because only token holders get through, `X-Kubetest-User`
+attribution is as trustworthy as they are (Control Center sets it from
+the signed-in email).
 
-- **Anything that can reach the Service can use the API.** Pods in the
-  cluster can reach a ClusterIP Service directly, not only through the
-  service proxy. The chart's NetworkPolicy (`networkPolicy.enabled`) is
-  off by default, and when on it admits every pod in the release
-  namespace.
-- **`spec.pod` is passed through unchecked.** A caller who can create a
-  Test can run a pod with any `serviceAccountName` and any volume,
-  including `hostPath`, in any namespace the API server can write to.
-  The API server's ClusterRole lets it create Tests and TestRuns
-  cluster-wide.
+- The chart generates the token once (`<release>-kubetest-alt-api-token`,
+  key `token`, 48 random characters) and keeps it across upgrades, or uses
+  `apiserver.auth.existingSecret`. The API server refuses to start with a
+  token under 32 characters; without `--auth-token-file` it runs open and
+  says so — development only.
+- Control Center of the same release mounts the Secret for its `local`
+  cluster; for other clusters, copy each cluster's token into a Secret
+  next to Control Center and list it in `controlCenter.apiTokenSecrets`
+  (docs/control-center.md).
+- Anyone else — scripts, CI — reads it from the Secret, so who may call
+  the API is who may `get` that Secret (Kubernetes RBAC):
+  `kubectl -n kubetest-alt get secret <release>-kubetest-alt-api-token -o jsonpath='{.data.token}' | base64 -d`.
+- **Rotation:** replace the Secret's `token` and restart the API server
+  and Control Center (`kubectl rollout restart`).
 
-Mitigations available today, without code changes:
+## Test-pod policy (fixes.md #1 — closed)
 
-- enable the NetworkPolicy and restrict its ingress to the control-plane
-  range (the source of service-proxy traffic on your platform);
-- label namespaces that run tests with Pod Security Admission
-  `pod-security.kubernetes.io/enforce: baseline` (blocks `hostPath`,
-  privileged pods, host namespaces);
-- run the API server namespaced (`apiserver.namespace`) so it can only
-  write to one namespace.
+`spec.pod` and `spec.container` pass through to the test pod (CLAUDE.md
+§8), so whoever can create a Test or TestRun — through the API or with
+kubectl — could otherwise pick any service account, mount the node's disk
+or run privileged. The platform's policy (chart `testPods`):
 
-Planned fix: NetworkPolicy on by default; an allowlist for
-`serviceAccountName` and volume types in the Test webhook.
+- **service accounts:** `default`, plus `testPods.allowedServiceAccounts`
+  (e.g. one bound to a Google service account for GCS);
+- **volumes:** emptyDir, configMap, secret, projected, downwardAPI,
+  persistentVolumeClaim, ephemeral, csi; `hostPath` only with
+  `testPods.allowHostPath`; anything else (nfs, iscsi, …) never;
+- **containers:** no `privileged`, no capabilities beyond Pod Security
+  Standards *baseline*.
+
+The operator checks every run's resolved spec — templates and the
+TestRun's pod override included — before a pod exists: a violation ends
+the run with `error`, reason `PolicyDenied`, and a message naming each
+field. The admission webhooks refuse Tests and TestRuns that break it at
+`kubectl apply` time (a template's pod settings are caught at run time).
+
+## Remaining risks
+
+- **One shared token.** It is a credential, not an identity per caller;
+  the audit log records the email Control Center passes, not which token
+  holder made a request.
+- **The API server's ClusterRole is cluster-wide** (create Tests and
+  TestRuns anywhere). A token holder can start runs in any namespace; set
+  `apiserver.namespace` to confine it to one.
+- **The policy covers what a Test can ask for, not everything a pod
+  can do.** Running as root inside the container, for example, is allowed.
+  For defence in depth, label test namespaces with Pod Security Admission
+  `pod-security.kubernetes.io/enforce: baseline`.
+- **NetworkPolicy** stays opt-in (`networkPolicy.enabled`); with the token
+  it limits exposure further but is no longer what keeps the API closed.

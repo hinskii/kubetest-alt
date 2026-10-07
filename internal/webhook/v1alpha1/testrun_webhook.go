@@ -27,6 +27,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/names"
+	"github.com/hinskii/kubetest-alt/internal/podpolicy"
 )
 
 var testrunlog = logf.Log.WithName("testrun-resource")
@@ -35,9 +36,9 @@ var testrunlog = logf.Log.WithName("testrun-resource")
 const DefaultSource = "api"
 
 // SetupTestRunWebhookWithManager registers the TestRun validating + defaulting webhook.
-func SetupTestRunWebhookWithManager(mgr ctrl.Manager) error {
+func SetupTestRunWebhookWithManager(mgr ctrl.Manager, policy podpolicy.Policy) error {
 	return ctrl.NewWebhookManagedBy(mgr, &testsv1alpha1.TestRun{}).
-		WithValidator(&TestRunCustomValidator{}).
+		WithValidator(&TestRunCustomValidator{Policy: policy}).
 		WithDefaulter(&TestRunCustomDefaulter{}).
 		Complete()
 }
@@ -62,14 +63,20 @@ func (d *TestRunCustomDefaulter) Default(_ context.Context, obj *testsv1alpha1.T
 // TestRunCustomValidator implements shape-only rules from step-02.
 // Cross-object lookups (does the referenced Test exist? are config keys valid?)
 // happen in the controller, not here — admission is race-prone.
-type TestRunCustomValidator struct{}
+type TestRunCustomValidator struct {
+	// Policy checks the run's pod override (spec.pod).
+	Policy podpolicy.Policy
+}
 
 // ValidateCreate runs on TestRun creation.
 func (v *TestRunCustomValidator) ValidateCreate(_ context.Context, obj *testsv1alpha1.TestRun) (admission.Warnings, error) {
 	if err := validateRunName(obj.Name); err != nil {
 		return nil, err
 	}
-	return nil, validateTestRun(&obj.Spec)
+	if err := validateTestRun(&obj.Spec); err != nil {
+		return nil, err
+	}
+	return nil, v.Policy.Check(&testsv1alpha1.TestSpec{}, obj.Spec.Pod)
 }
 
 // validateRunName rejects names that can't become a Job: the run name is
@@ -88,6 +95,9 @@ func validateRunName(name string) error {
 // ValidateUpdate runs on TestRun update. Same rules as create.
 func (v *TestRunCustomValidator) ValidateUpdate(_ context.Context, oldObj, newObj *testsv1alpha1.TestRun) (admission.Warnings, error) {
 	if err := validateTestRun(&newObj.Spec); err != nil {
+		return nil, err
+	}
+	if err := v.Policy.Check(&testsv1alpha1.TestSpec{}, newObj.Spec.Pod); err != nil {
 		return nil, err
 	}
 	return nil, validateAbortTransition(oldObj.Spec.Abort, newObj.Spec.Abort)

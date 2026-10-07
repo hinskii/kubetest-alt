@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,6 +55,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controller"
 	"github.com/hinskii/kubetest-alt/internal/logstream"
 	"github.com/hinskii/kubetest-alt/internal/metrics"
+	"github.com/hinskii/kubetest-alt/internal/podpolicy"
 	"github.com/hinskii/kubetest-alt/internal/retention"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
 	"github.com/hinskii/kubetest-alt/internal/store"
@@ -171,6 +173,14 @@ func main() {
 		"Days to keep finished runs (history rows, their logs/artifacts/results) and audit entries; "+
 			"removal is per month, so runs live up to a month longer. 0 keeps everything.")
 
+	// Test-pod policy (fixes.md #1): service accounts, hostPath.
+	var allowedSAs string
+	var allowHostPath bool
+	flag.StringVar(&allowedSAs, "allowed-service-accounts", "",
+		"Comma-separated service accounts test pods may use besides \"default\" (spec.pod.serviceAccountName).")
+	flag.BoolVar(&allowHostPath, "allow-host-path", false,
+		"Allow hostPath volumes (the node's filesystem) in test pods.")
+
 	// Finished TestRuns leave the cluster once they're in run history.
 	var finishedRunTTL time.Duration
 	flag.DurationVar(&finishedRunTTL, "finished-run-ttl", time.Hour,
@@ -194,6 +204,12 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+	podPolicy := podpolicy.Policy{AllowHostPath: allowHostPath}
+	for sa := range strings.SplitSeq(allowedSAs, ",") {
+		if sa = strings.TrimSpace(sa); sa != "" {
+			podPolicy.ServiceAccounts = append(podPolicy.ServiceAccounts, sa)
+		}
+	}
 
 	storageCfg := storageFlags.Config()
 	if err := storageCfg.Validate(); err != nil {
@@ -402,14 +418,14 @@ func main() {
 
 	// nolint:goconst
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err := webhookv1alpha1.SetupTestWebhookWithManager(mgr); err != nil {
+		if err := webhookv1alpha1.SetupTestWebhookWithManager(mgr, podPolicy); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "Test")
 			os.Exit(1)
 		}
 	}
 	// nolint:goconst
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err := webhookv1alpha1.SetupTestRunWebhookWithManager(mgr); err != nil {
+		if err := webhookv1alpha1.SetupTestRunWebhookWithManager(mgr, podPolicy); err != nil {
 			setupLog.Error(err, "Failed to create webhook", "webhook", "TestRun")
 			os.Exit(1)
 		}
@@ -437,6 +453,7 @@ func main() {
 		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
 		// Finished CRs leave etcd once in run history (no-op without a store).
 		FinishedRunTTL: finishedRunTTL,
+		PodPolicy:      podPolicy,
 		// Step 13: template resolution. Store reads TestTemplates from the
 		// manager cache; ResolverEnv is intentionally empty by default —
 		// the operator does NOT project os.Environ() into `{{ env.* }}`

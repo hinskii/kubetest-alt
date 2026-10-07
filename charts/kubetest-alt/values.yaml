@@ -128,6 +128,11 @@ runs:
 
 apiserver:
   replicas: 1
+  auth:
+    # Secret (key "token", ≥32 characters) with the API token every request
+    # must carry (X-Kubetest-Token). Empty = the chart generates one,
+    # <release>-kubetest-alt-api-token, kept across upgrades.
+    existingSecret: ""
   service:
     port: 8080
   resources:
@@ -211,6 +216,11 @@ controlCenter:
   # Empty = only the kubetest of this release, as "local".
   clusters: []
   localClusterDisplayName: ""
+  # API tokens of remote clusters' kubetest (Secret names, key "token"),
+  # by cluster name: each lands at /var/run/kubetest/tokens/<name>/token
+  # for that cluster's apiServer.tokenFile. This release's own is mounted
+  # for the default "local" cluster.
+  apiTokenSecrets: {}
   # CA bundles (PEM) of remote clusters' API servers, by name: each lands
   # at /etc/control-center/ca-<name>.pem for a cluster's caFile.
   caBundles: {}
@@ -262,3 +272,13 @@ controlCenter:
   resources:
     requests: {cpu: 20m, memory: 48Mi}
     limits: {cpu: 500m, memory: 256Mi}
+
+# What test pods may ask for (spec.pod / spec.container, fixes.md #1). The
+# operator checks every run's resolved spec (templates included); the
+# admission webhooks refuse Tests and TestRuns that break it.
+testPods:
+  # Service accounts besides "default" (e.g. one bound to a Google service
+  # account for GCS). Names apply in every namespace.
+  allowedServiceAccounts: []
+  # hostPath volumes give a test the node's filesystem.
+  allowHostPath: false

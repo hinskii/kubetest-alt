@@ -329,7 +329,14 @@ func dumpLogs(t *testing.T, run *testsv1alpha1.TestRun) {
 		return
 	}
 	url := fmt.Sprintf("%s/runs/%s/logs.txt?namespace=%s", strings.TrimRight(api, "/"), run.Name, namespace)
-	resp, err := http.Get(url) // #nosec G107 -- test-only, local port-forward
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return
+	}
+	if tok := os.Getenv("APISERVER_TOKEN"); tok != "" {
+		req.Header.Set("X-Kubetest-Token", tok)
+	}
+	resp, err := http.DefaultClient.Do(req) // #nosec G107 -- test-only, local port-forward
 	if err != nil {
 		t.Logf("logs: %v", err)
 		return

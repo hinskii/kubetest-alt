@@ -184,6 +184,26 @@ func TestE2E(t *testing.T) {
 		scenarioControlCenter(t, ctx, c)
 	})
 
+	t.Run("APIRequiresToken", func(t *testing.T) {
+		apiURL := os.Getenv("APISERVER_URL")
+		if apiURL == "" {
+			t.Skip("APISERVER_URL not set")
+		}
+		get := func(withToken bool) int {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL+"/tests?namespace="+workloadNS, nil)
+			require.NoError(t, err)
+			if withToken {
+				withAPIToken(req)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			_ = resp.Body.Close()
+			return resp.StatusCode
+		}
+		assert.Equal(t, http.StatusUnauthorized, get(false), "fixes.md #1: no token, no API")
+		assert.Equal(t, http.StatusOK, get(true))
+	})
+
 	t.Run("MetricsScrape_OperatorAndApiserver", func(t *testing.T) {
 		start := time.Now()
 		defer func() { t.Logf("SCENARIO_TIMING scenario=metrics duration=%s", time.Since(start)) }()
@@ -399,6 +419,7 @@ func scenarioParallel(t *testing.T, ctx context.Context, c client.Client) {
 			if err != nil {
 				return false
 			}
+			withAPIToken(req)
 			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				return false
@@ -412,6 +433,22 @@ func scenarioParallel(t *testing.T, ctx context.Context, c client.Client) {
 	}
 }
 
+// withAPIToken adds the API token run.sh read from the chart's Secret
+// (APISERVER_TOKEN): the API server refuses requests without it.
+func withAPIToken(req *http.Request) {
+	for k, v := range apiTokenHeader() {
+		req.Header[k] = v
+	}
+}
+
+func apiTokenHeader() http.Header {
+	h := http.Header{}
+	if tok := os.Getenv("APISERVER_TOKEN"); tok != "" {
+		h.Set("X-Kubetest-Token", tok)
+	}
+	return h
+}
+
 // readRunLogs reads a finished run's whole log over the apiserver's
 // WebSocket endpoint (the server closes the stream after the last chunk).
 func readRunLogs(t *testing.T, ctx context.Context, apiURL, ns, run string) string {
@@ -420,7 +457,7 @@ func readRunLogs(t *testing.T, ctx context.Context, apiURL, ns, run string) stri
 		"/runs/" + run + "/logs?namespace=" + ns
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	conn, resp, err := websocket.Dial(readCtx, wsURL, nil)
+	conn, resp, err := websocket.Dial(readCtx, wsURL, &websocket.DialOptions{HTTPHeader: apiTokenHeader()})
 	if resp != nil && resp.Body != nil {
 		defer resp.Body.Close()
 	}
@@ -574,6 +611,7 @@ func scenarioGitOpsGuard(t *testing.T, ctx context.Context, c client.Client) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, url, body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/merge-patch+json")
+	withAPIToken(req)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()

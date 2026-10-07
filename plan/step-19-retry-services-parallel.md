@@ -2,8 +2,8 @@
 
 The CRD accepted `spec.retry`, `spec.services`, `spec.parallel` and
 `steps[].retry`, and nothing executed them. User decision (2026-10-06):
-implement all of them now. Security of `spec.pod` / API server (#1) is
-deferred — recorded as a known risk in docs/security.md.
+implement all of them now. Security of `spec.pod` / API server (#1) was
+deferred here and closed after step 18h (plan/step-18-control-center.md).
 
 One commit + push per sub-step; gates per plan/README.md.
 

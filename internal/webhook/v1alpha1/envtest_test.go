@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -281,6 +282,43 @@ func TestEnvtest_LiveViewPathMustBeAbsolute(t *testing.T) {
 	obj.Spec.LiveView.Path = "/ui/?endpoint=../"
 	require.NoError(t, k8sClient.Create(ctx, obj))
 	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })
+}
+
+// TestEnvtest_TestPodPolicy is the sentinel for the test-pod policy
+// (fixes.md #1): a Test or TestRun asking for the node's disk or another
+// service account is refused at admission — only the webhook can do that.
+func TestEnvtest_TestPodPolicy(t *testing.T) {
+	ctx := context.Background()
+	mk := func(name string, pod *testsv1alpha1.PodConfig) *testsv1alpha1.Test {
+		return &testsv1alpha1.Test{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+			Spec: testsv1alpha1.TestSpec{
+				Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Args: []string{"run", "s.js"}},
+				Pod:       pod,
+			},
+		}
+	}
+	err := k8sClient.Create(ctx, mk("policy-hostpath", &testsv1alpha1.PodConfig{Volumes: []corev1.Volume{{
+		Name: "node", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}}}}))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "hostPath volumes are not allowed")
+
+	err = k8sClient.Create(ctx, mk("policy-sa", &testsv1alpha1.PodConfig{ServiceAccountName: "cluster-admin-sa"}))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `serviceAccountName "cluster-admin-sa" is not allowed`)
+
+	ok := mk("policy-ok", &testsv1alpha1.PodConfig{ServiceAccountName: "gcs-writer"})
+	require.NoError(t, k8sClient.Create(ctx, ok), "an allowlisted service account is fine")
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, ok) })
+
+	run := &testsv1alpha1.TestRun{
+		ObjectMeta: metav1.ObjectMeta{Name: "policy-run", Namespace: "default"},
+		Spec: testsv1alpha1.TestRunSpec{TestRef: "policy-ok",
+			Pod: &testsv1alpha1.PodConfig{ServiceAccountName: "cluster-admin-sa"}},
+	}
+	err = k8sClient.Create(ctx, run)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `spec.pod (TestRun).serviceAccountName "cluster-admin-sa"`)
 }
 
 // TestEnvtest_PodConfigAnnotationsPassThrough is the §8 regression guard at

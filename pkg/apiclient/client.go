@@ -38,9 +38,10 @@ import (
 // (https://<k8s-api>/api/v1/namespaces/<ns>/services/http:<svc>:<port>/proxy)
 // with an authenticated http.Client — see ServiceProxyURL.
 type Client struct {
-	base *url.URL
-	http *http.Client
-	user string
+	base  *url.URL
+	http  *http.Client
+	user  string
+	token string
 }
 
 // New returns a Client for baseURL. httpClient carries authentication
@@ -65,6 +66,15 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 func ServiceProxyURL(k8sServer, namespace, service string, port int) string {
 	return fmt.Sprintf("%s/api/v1/namespaces/%s/services/http:%s:%d/proxy",
 		strings.TrimRight(k8sServer, "/"), url.PathEscape(namespace), url.PathEscape(service), port)
+}
+
+// WithToken returns a copy that sends the API token (HeaderToken) — the
+// API server's --auth-token-file. The token is the client's credential;
+// keep it out of logs.
+func (c *Client) WithToken(token string) *Client {
+	cp := *c
+	cp.token = token
+	return &cp
 }
 
 // AsUser returns a copy whose requests are attributed to user (HeaderUser).
@@ -471,6 +481,9 @@ func (c *Client) do(ctx context.Context, method, path string, q url.Values, body
 	}
 	if c.user != "" {
 		req.Header.Set(HeaderUser, c.user)
+	}
+	if c.token != "" {
+		req.Header.Set(HeaderToken, c.token)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {

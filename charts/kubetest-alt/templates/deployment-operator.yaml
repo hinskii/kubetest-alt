@@ -30,6 +30,13 @@ spec:
             - --leader-elect
             {{- end }}
             - --content-fetcher-image={{ include "kubetest-alt.image" (dict "top" .Values.images "key" "contentFetcher" "ctx" .) }}
+            # Test-pod policy (fixes.md #1).
+            {{- with .Values.testPods.allowedServiceAccounts }}
+            - --allowed-service-accounts={{ join "," . }}
+            {{- end }}
+            {{- if .Values.testPods.allowHostPath }}
+            - --allow-host-path
+            {{- end }}
             - --health-probe-bind-address=:8081
             - --metrics-bind-address={{ .Values.operator.metrics.bindAddress }}
             - --metrics-secure={{ .Values.operator.metrics.secure }}

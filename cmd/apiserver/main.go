@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/apiserver"
 	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -53,6 +55,7 @@ func main() {
 		namespace     string
 		postgresDSN   string
 		presignExpiry time.Duration
+		tokenFile     string
 	)
 	flag.StringVar(&listenAddr, "listen", ":8080", "HTTP listen address.")
 	flag.StringVar(&namespace, "namespace", "",
@@ -64,6 +67,9 @@ func main() {
 		"Postgres DSN for run history (or $POSTGRES_DSN). Empty = cluster-only listing.")
 	flag.DurationVar(&presignExpiry, "presign-expiry", 15*time.Minute,
 		"Presigned artifact URL expiry.")
+	flag.StringVar(&tokenFile, "auth-token-file", "",
+		"File holding the API token every request must carry in "+apiclient.HeaderToken+
+			" (probes and /metrics excepted). Empty = no authentication: development only.")
 
 	zapOpts := zap.Options{Development: true}
 	zapOpts.BindFlags(flag.CommandLine)
@@ -112,7 +118,23 @@ func main() {
 	}
 	setupLog.Info("informer cache synced")
 
+	var token string
+	if tokenFile != "" {
+		b, err := os.ReadFile(tokenFile) // #nosec G304 -- operator-supplied flag
+		if err != nil {
+			setupLog.Error(err, "read --auth-token-file")
+			os.Exit(1)
+		}
+		if token = strings.TrimSpace(string(b)); len(token) < 32 {
+			setupLog.Error(nil, "the API token must be at least 32 characters", "file", tokenFile)
+			os.Exit(1)
+		}
+	} else {
+		setupLog.Info("WARNING: no --auth-token-file — the API accepts unauthenticated requests (development only)")
+	}
+
 	srv := &apiserver.Server{
+		AuthToken:          token,
 		K8sClient:          cl.GetClient(),
 		Namespace:          namespace,
 		Bucket:             storageCfg.Bucket,

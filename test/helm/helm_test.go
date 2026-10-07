@@ -459,3 +459,29 @@ func TestHelmTemplate_ControlCenterCABundles(t *testing.T) {
 	assert.Contains(t, got, "caFile: /etc/control-center/ca-prod.pem")
 	assert.NotContains(t, got, "name: local", "explicit clusters replace the default")
 }
+
+// fixes.md #1: the API server always requires a token; Control Center of
+// the release mounts the same Secret for its local cluster.
+func TestHelmTemplate_APIToken(t *testing.T) {
+	got := helmTemplate(t, "--set", "controlCenter.enabled=true", "--set", "controlCenter.auth.mode=external",
+		"--set", "controlCenter.apiTokenSecrets.prod=prod-token")
+	assert.Contains(t, got, "name: test-kubetest-alt-api-token")
+	assert.Contains(t, got, "- --auth-token-file=/var/run/kubetest/api-token/token")
+	assert.Equal(t, 2, strings.Count(got, "secretName: test-kubetest-alt-api-token"), "API server + Control Center")
+	assert.Contains(t, got, "tokenFile: /var/run/kubetest/api-token/token", "the local cluster sends it")
+	assert.Contains(t, got, "mountPath: /var/run/kubetest/tokens/prod")
+	assert.Contains(t, got, "secretName: prod-token")
+
+	own := helmTemplate(t, "--set", "apiserver.auth.existingSecret=my-token")
+	assert.NotContains(t, own, "name: test-kubetest-alt-api-token", "an existing Secret: none generated")
+	assert.Contains(t, own, "secretName: my-token")
+}
+
+func TestHelmTemplate_TestPodPolicy(t *testing.T) {
+	assert.NotContains(t, helmTemplate(t), "--allowed-service-accounts", "default: only \"default\"")
+	assert.NotContains(t, helmTemplate(t), "--allow-host-path")
+	got := helmTemplate(t, "--set", "testPods.allowedServiceAccounts={gcs-writer,s3-reader}",
+		"--set", "testPods.allowHostPath=true")
+	assert.Contains(t, got, "- --allowed-service-accounts=gcs-writer,s3-reader")
+	assert.Contains(t, got, "- --allow-host-path")
+}

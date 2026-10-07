@@ -30,8 +30,11 @@ const (
 	// QueryNamespace selects the namespace; required for single-object
 	// requests on a cluster-wide server.
 	QueryNamespace = "namespace"
-	// HeaderUser attributes a request to an end user (set by a trusted
-	// front end such as Control Center). Attribution, not authentication.
+	// HeaderToken carries the API token (the API server's
+	// --auth-token-file). Holding it is what lets a client in.
+	HeaderToken = "X-Kubetest-Token" // #nosec G101 -- a header name, not a credential
+	// HeaderUser attributes a request to an end user. Only token holders
+	// (Control Center) reach the API, so it is as trustworthy as they are.
 	HeaderUser = "X-Kubetest-User"
 	// HeaderNextCursor carries the keyset cursor of the next page of
 	// finished runs on GET /runs.
@@ -50,6 +53,8 @@ const (
 	ReasonServiceUnavail  = "ServiceUnavailable"
 	// ReasonGone: the thing existed but is over (a finished run's live view).
 	ReasonGone = "Gone"
+	// ReasonUnauthorized: no or a wrong API token (HeaderToken).
+	ReasonUnauthorized = "Unauthorized"
 )
 
 // Error is the body of every non-2xx JSON response.

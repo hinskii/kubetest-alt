@@ -46,6 +46,9 @@ const (
 	// happen in the controller (cross-object lookup + template resolution)
 	// rather than the webhook.
 	ReasonResolveFailed = "ResolveFailed"
+	// ReasonPolicyDenied: the test pod asks for something the platform's
+	// test-pod policy forbids (service account, volume, privileges).
+	ReasonPolicyDenied = "PolicyDenied"
 
 	// k8sReasonDeadlineExceeded is the string batch/v1 sets on JobCondition
 	// when activeDeadlineSeconds fires. Kept as an unexported const so goconst

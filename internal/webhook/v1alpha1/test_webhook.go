@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/podpolicy"
 )
 
 var testlog = logf.Log.WithName("test-resource")
@@ -87,9 +88,9 @@ var (
 )
 
 // SetupTestWebhookWithManager registers the Test validating + defaulting webhook.
-func SetupTestWebhookWithManager(mgr ctrl.Manager) error {
+func SetupTestWebhookWithManager(mgr ctrl.Manager, policy podpolicy.Policy) error {
 	return ctrl.NewWebhookManagedBy(mgr, &testsv1alpha1.Test{}).
-		WithValidator(&TestCustomValidator{}).
+		WithValidator(&TestCustomValidator{Policy: policy}).
 		WithDefaulter(&TestCustomDefaulter{}).
 		Complete()
 }
@@ -114,16 +115,26 @@ func (d *TestCustomDefaulter) Default(_ context.Context, obj *testsv1alpha1.Test
 
 // TestCustomValidator implements the create/update rules from step-02.
 // Shape-only: no cross-object lookups (race-prone at admission; belongs in the controller).
-type TestCustomValidator struct{}
+type TestCustomValidator struct {
+	// Policy is the platform's test-pod policy (also enforced by the
+	// operator on the resolved spec, templates included).
+	Policy podpolicy.Policy
+}
 
 // ValidateCreate runs on Test creation.
 func (v *TestCustomValidator) ValidateCreate(_ context.Context, obj *testsv1alpha1.Test) (admission.Warnings, error) {
-	return nil, validateTest(&obj.Spec)
+	if err := validateTest(&obj.Spec); err != nil {
+		return nil, err
+	}
+	return nil, v.Policy.Check(&obj.Spec, nil)
 }
 
 // ValidateUpdate runs on Test update. Same rules as create.
 func (v *TestCustomValidator) ValidateUpdate(_ context.Context, _, newObj *testsv1alpha1.Test) (admission.Warnings, error) {
-	return nil, validateTest(&newObj.Spec)
+	if err := validateTest(&newObj.Spec); err != nil {
+		return nil, err
+	}
+	return nil, v.Policy.Check(&newObj.Spec, nil)
 }
 
 // ValidateDelete is a no-op — step-02 only validates create/update.

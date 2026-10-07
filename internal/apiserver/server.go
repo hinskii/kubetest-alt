@@ -35,6 +35,7 @@ package apiserver
 
 import (
 	"context"
+	"crypto/subtle"
 	"net/http"
 	"time"
 
@@ -42,6 +43,7 @@ import (
 
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -52,6 +54,12 @@ type Server struct {
 	// cache (cluster.New at the cmd/apiserver level). List/Get read from
 	// cache; Create/Update/Patch/Delete go direct to the API server.
 	K8sClient client.Client
+
+	// AuthToken, when set, is required on every request but the probes and
+	// /metrics, in HeaderToken (fixes.md #1: the API server is a ClusterIP
+	// Service any pod could call; the service proxy is not the only way in).
+	// Empty serves unauthenticated — local development only.
+	AuthToken string
 
 	// Namespace scopes every read/write. Empty string means "all namespaces"
 	// — accepted for a cluster-scoped API server, callers that need
@@ -208,5 +216,32 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /metrics", s.MetricsHandler)
 	}
 
-	return mux
+	return requireToken(s.AuthToken, mux)
+}
+
+// HeaderToken carries the API token (apiclient.HeaderToken).
+const HeaderToken = apiclient.HeaderToken
+
+// openPaths answer without the token: kubelet probes and Prometheus.
+var openPaths = map[string]bool{pathHealthz: true, "/readyz": true, "/metrics": true}
+
+const pathHealthz = "/healthz"
+
+// requireToken rejects requests without the API token (constant-time
+// compare). Its own header never reaches handlers or logs.
+func requireToken(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte(token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get(HeaderToken)
+		r.Header.Del(HeaderToken)
+		if openPaths[r.URL.Path] || subtle.ConstantTimeCompare([]byte(got), want) == 1 {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeError(w, http.StatusUnauthorized, apiclient.ReasonUnauthorized,
+			"missing or wrong API token ("+HeaderToken+")")
+	})
 }

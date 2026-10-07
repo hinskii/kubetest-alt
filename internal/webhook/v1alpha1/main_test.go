@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/podpolicy"
 )
 
 // Shared envtest across all tests in this package. Individual tests grab the
@@ -107,10 +108,10 @@ func runTests(m *testing.M) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("new manager: %w", err)
 	}
-	if err := SetupTestWebhookWithManager(mgr); err != nil {
+	if err := SetupTestWebhookWithManager(mgr, envtestPolicy); err != nil {
 		return 0, fmt.Errorf("setup Test webhook: %w", err)
 	}
-	if err := SetupTestRunWebhookWithManager(mgr); err != nil {
+	if err := SetupTestRunWebhookWithManager(mgr, envtestPolicy); err != nil {
 		return 0, fmt.Errorf("setup TestRun webhook: %w", err)
 	}
 
@@ -187,3 +188,7 @@ func findRepoRoot() (string, error) {
 		dir = parent
 	}
 }
+
+// envtestPolicy is the test-pod policy the webhooks run with here: one
+// extra service account allowed, no hostPath.
+var envtestPolicy = podpolicy.Policy{ServiceAccounts: []string{"gcs-writer"}}

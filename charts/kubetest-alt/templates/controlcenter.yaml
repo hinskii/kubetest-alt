@@ -44,6 +44,7 @@ data:
           namespace: {{ .Release.Namespace }}
           service: {{ $apiSvc }}
           port: {{ .Values.apiserver.service.port }}
+          tokenFile: /var/run/kubetest/api-token/token
     {{- end }}
   {{- range $k, $v := $cc.caBundles }}
   ca-{{ $k }}.pem: |
@@ -175,6 +176,11 @@ spec:
             httpGet: {path: /healthz, port: ops}
           volumeMounts:
             - {name: config, mountPath: /etc/control-center, readOnly: true}
+            # This release's API token (the local cluster).
+            - {name: api-token, mountPath: /var/run/kubetest/api-token, readOnly: true}
+            {{- range $cluster, $secret := $cc.apiTokenSecrets }}
+            - {name: {{ printf "token-%s" $cluster | quote }}, mountPath: {{ printf "/var/run/kubetest/tokens/%s" $cluster }}, readOnly: true}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -245,6 +251,14 @@ spec:
         - name: config
           configMap:
             name: {{ $name }}
+        - name: api-token
+          secret:
+            secretName: {{ include "kubetest-alt.apiToken.secretName" . }}
+        {{- range $cluster, $secret := $cc.apiTokenSecrets }}
+        - name: {{ printf "token-%s" $cluster | quote }}
+          secret:
+            secretName: {{ $secret }}
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

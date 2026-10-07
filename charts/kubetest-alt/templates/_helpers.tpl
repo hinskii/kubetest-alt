@@ -133,3 +133,8 @@ app.kubernetes.io/component: control-center
 {{- range $all }}{{ $out = append $out (lower (trim .)) }}{{ end -}}
 {{- $out | uniq | sortAlpha | join "\n" -}}
 {{- end -}}
+
+{{/* The API token Secret (fixes.md #1): the chart's own, or apiserver.auth.existingSecret. */}}
+{{- define "kubetest-alt.apiToken.secretName" -}}
+{{- .Values.apiserver.auth.existingSecret | default (printf "%s-api-token" (include "kubetest-alt.fullname" .)) -}}
+{{- end -}}

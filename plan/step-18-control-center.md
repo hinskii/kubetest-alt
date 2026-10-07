@@ -34,7 +34,9 @@ browser ──oauth2-proxy──► control-center (Go, admin cluster)
 
 - kubetest apiserver stays **ClusterIP-only**; the only way in is the K8s
   API service proxy → authn/authz = Kubernetes RBAC (`services/proxy` on
-  one Service). Closes fixes.md #1 without a custom auth layer.
+  one Service). *Corrected later:* that did not close fixes.md #1 — a
+  ClusterIP is reachable from every pod, not only through the proxy. Closed
+  by an API token and a test-pod policy (see "fixes.md #1" below).
 - End-user identity (oauth2-proxy `X-Auth-Request-Email`) forwarded as
   `X-Kubetest-User` → `TestRun.spec.tags["kubetest.io/created-by"]`.
   Trust boundary documented: anyone with `services/proxy` can set it.
@@ -357,8 +359,22 @@ open.
 
 ---
 
+### fixes.md #1 — API security ✅ (after 18h)
+Decided (user, 2026-10-07): a shared API token; test pods use only
+allowlisted service accounts.
+- API server `--auth-token-file`: every request but /healthz, /readyz,
+  /metrics carries `X-Kubetest-Token` (constant-time compare; 401
+  otherwise). Chart: generated Secret kept across upgrades or
+  `apiserver.auth.existingSecret`; Control Center mounts it for `local`,
+  `controlCenter.apiTokenSecrets` + `apiServer.tokenFile` for others.
+  The kube service proxy forwards the header (e2e).
+- `internal/podpolicy`: service accounts (default + `testPods.
+  allowedServiceAccounts`), volume kinds (hostPath only with
+  `testPods.allowHostPath`), no privileged / non-baseline capabilities.
+  Operator checks the resolved spec + TestRun pod override at setup
+  (`PolicyDenied`, no pod created); Test and TestRun webhooks refuse
+  early. docs/security.md: what is closed, what remains.
+
 ## 3. Out of scope / follow-ups
-- Remaining fixes.md items (Forbid deadlock, MissingResult fallback, tool
-  label propagation, retention cron, …) — separate steps, ideally before
-  18e ships to users.
+- fixes.md: every item is done; #1 (API security) closed after 18h.
 - Multi-cluster federation inside kubetest — Control Center does it.

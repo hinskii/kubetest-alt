@@ -24,6 +24,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
@@ -81,6 +83,13 @@ func New(ctx context.Context, clusters []config.Cluster, o Options) (*Registry, 
 			apiclient.ServiceProxyURL(rc.Host, c.APIServer.Namespace, c.APIServer.Service, c.APIServer.Port), hc)
 		if err != nil {
 			return nil, fmt.Errorf("cluster %s: %w", c.Name, err)
+		}
+		if f := c.APIServer.TokenFile; f != "" {
+			b, err := os.ReadFile(f) // #nosec G304 -- path from the operator's config file
+			if err != nil {
+				return nil, fmt.Errorf("cluster %s: API token: %w", c.Name, err)
+			}
+			api = api.WithToken(strings.TrimSpace(string(b)))
 		}
 		cl := &Cluster{Cluster: c, REST: rc, API: api}
 		r.list = append(r.list, cl)

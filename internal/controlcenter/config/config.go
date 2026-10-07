@@ -96,6 +96,10 @@ type APIServerRef struct {
 	Namespace string `json:"namespace,omitempty"` // default kubetest-alt
 	Service   string `json:"service,omitempty"`   // default kubetest-alt-apiserver
 	Port      int    `json:"port,omitempty"`      // default 8080
+	// TokenFile holds the API server's token (its --auth-token-file):
+	// mounted from that cluster's Secret. Empty only for an API server
+	// running without authentication (development).
+	TokenFile string `json:"tokenFile,omitempty"`
 }
 
 // Defaults for APIServerRef — what the Helm chart installs.
