@@ -63,6 +63,9 @@ const (
 // formComment is the comment form's text field.
 const formComment = "text"
 
+// dispositionInline: the browser shows the file rather than saving it.
+const dispositionInline = "inline"
+
 // artifactCSP is the Content-Security-Policy of a served artifact: its
 // scripts run in an opaque origin, and only Control Center's own pages
 // may frame it (the run page shows the report).
@@ -650,12 +653,18 @@ func (s *Server) runArtifact(w http.ResponseWriter, r *http.Request) {
 	// the top window.
 	h.Set("Content-Security-Policy", artifactCSP)
 	h.Set("X-Content-Type-Options", "nosniff")
-	disposition := "inline"
+	disposition := dispositionInline
 	if r.URL.Query().Get("download") == "1" {
 		disposition = "attachment"
 	}
 	file := path[strings.LastIndex(path, "/")+1:]
 	h.Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disposition, safeName(file)))
+	if disposition == dispositionInline && strings.HasPrefix(ct, "text/html") {
+		// Shown, not downloaded: reports that need localStorage get one
+		// (storageshim.go); the length changes.
+		_ = copyWithStorageShim(w, st.Body)
+		return
+	}
 	if st.Length >= 0 {
 		h.Set("Content-Length", strconv.FormatInt(st.Length, 10))
 	}

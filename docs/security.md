@@ -23,7 +23,11 @@ Center count as cross-site: they carry no session cookie as long as
 oauth2-proxy's cookie isn't `SameSite=None` (its default sets none, which
 browsers treat as Lax), and its POSTs fail the cross-origin check. Downloads (`?download=1`) are served as attachments.
 Only Control Center's own pages may frame an artifact: a finished run's
-page shows its report in an `<iframe sandbox="allow-scripts">`.
+page shows its report in an `<iframe sandbox="allow-scripts">`. Shown HTML gets one script added at the top: in-memory
+`localStorage`/`sessionStorage` where the sandbox denies the real ones —
+the Playwright report reads its settings from there and is blank without
+them. The values live as long as the page; downloads are the file as
+stored.
 
 ## Live view
 

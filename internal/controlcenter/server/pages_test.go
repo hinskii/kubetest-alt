@@ -304,7 +304,7 @@ func TestRunArtifact_SandboxedStream(t *testing.T) {
 
 	rec := w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, "<script>x</script>", rec.Body.String())
+	assert.Equal(t, storageShim+"<script>x</script>", rec.Body.String(), "shown HTML gets the storage shim")
 	csp := rec.Header().Get("Content-Security-Policy")
 	assert.Equal(t, "sandbox allow-scripts; frame-ancestors 'self'", csp, "report scripts run, in an opaque origin, framed only by Control Center")
 	assert.NotContains(t, csp, "allow-same-origin", "workload HTML can't run as Control Center")
@@ -312,6 +312,7 @@ func TestRunArtifact_SandboxedStream(t *testing.T) {
 	assert.Equal(t, `inline; filename="index.html"`, rec.Header().Get("Content-Disposition"))
 	rec = w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html?download=1", "")
 	assert.Equal(t, `attachment; filename="index.html"`, rec.Header().Get("Content-Disposition"))
+	assert.Equal(t, "<script>x</script>", rec.Body.String(), "a download is the file as stored")
 	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/missing", "").Code)
 }
 
