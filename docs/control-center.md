@@ -150,10 +150,16 @@ replicas.
 1. **Basics** — namespace, name, and the tool: a TestTemplate of that
    namespace's catalog (k6, Cypress, JMeter, …) or an own image.
 2. **Source** — a git repository (revision, sparse-checkout paths, a
-   token from a Secret) and/or inline files.
+   token from a Secret) and/or inline files. File paths are under
+   `/data/repo/`, where a template's tool looks (a leading `/` means under
+   `/data`).
 3. **Parameters & container** — the template's parameters (a Test keeps
    only those that differ from the template's defaults; a run can still
    override them), image, command, arguments, environment, CPU/memory.
+   With inline files and no git, the template's main-file parameter —
+   the one its arguments put after `/data/repo/` (k6's `script`, JMeter's
+   `plan`, newman's `collection`, …) — points at the first file unless
+   you set it: pick k6, paste a script, create.
 4. **Pod & schedule** — pod annotations and labels (e.g.
    `sidecar.istio.io/inject=false`), service account, timeout, cron.
 5. **Review** — the Test's YAML and the API's verdict on it: a server-side

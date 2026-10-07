@@ -33,6 +33,9 @@ import (
 // caseWindows are the run windows offered on the cases page.
 var caseWindows = []int{10, 30, 100}
 
+// sortByName orders the test cases page by case name (?sort=name).
+const sortByName = "name"
+
 func casesPath(c, ns, test string) string { return testPath(c, ns, test) + "/cases" }
 
 type casesData struct {
@@ -67,7 +70,7 @@ func (s *Server) testCasesPage(w http.ResponseWriter, r *http.Request) {
 		slices.SortStableFunc(stats, func(a, b apiclient.CaseStats) int { return cmp.Compare(b.Flips, a.Flips) })
 	case "slowest":
 		slices.SortStableFunc(stats, func(a, b apiclient.CaseStats) int { return cmp.Compare(b.AvgMs, a.AvgMs) })
-	case "name":
+	case sortByName:
 		slices.SortStableFunc(stats, func(a, b apiclient.CaseStats) int { return cmp.Compare(a.Key, b.Key) })
 	default:
 		sortBy = "failures" // the API's order

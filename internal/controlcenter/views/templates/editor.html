@@ -91,10 +91,11 @@
       <label><span>Key in the Secret</span><input type="text" name="gitSecretKey" value="{{$f.GitSecretKey}}" placeholder="token" autocomplete="off"></label>
     </div>
     <label class="check"><input type="checkbox" name="useFiles" value="1"{{if $f.UseFiles}} checked{{end}} data-toggles="files"> Inline files <span class="muted small">(up to 512 KB in all; bigger content belongs in git)</span></label>
+    <p class="muted small" data-toggled-note="files">Paths are under <span class="mono">/data/repo/</span>, where the tool looks (a leading <span class="mono">/</span> means under <span class="mono">/data</span>). With a template, its main-file parameter (k6's <span class="mono">script</span>, JMeter's <span class="mono">plan</span>, …) points at the first file unless you set it.</p>
     <div data-toggled="files" id="files">
       {{range $f.Files}}
       <div class="file-row">
-        <input type="text" name="file.path" value="{{.Path}}" placeholder="repo/script.js" class="mono" autocomplete="off">
+        <label class="path"><span class="muted mono">/data/repo/</span><input type="text" name="file.path" value="{{.Path}}" placeholder="load.js" class="mono" autocomplete="off" aria-label="Path under /data/repo/"></label>
         <textarea name="file.content" rows="10" class="markdown" spellcheck="false">{{.Content}}</textarea>
       </div>
       {{end}}

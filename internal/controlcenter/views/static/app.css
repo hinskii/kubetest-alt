@@ -314,3 +314,5 @@ fieldset.params legend { font-weight: 600; padding: 0; }
 .wizard-nav { display: flex; gap: 0.6rem; justify-content: flex-end; margin-top: 1rem; }
 .actions.wrap { flex-wrap: wrap; gap: 0.6rem; margin-top: 0.75rem; }
 .yaml-editor { min-height: 24rem; }
+.file-row .path { display: flex; align-items: center; gap: 0.3rem; }
+.file-row .path input { flex: 1; }

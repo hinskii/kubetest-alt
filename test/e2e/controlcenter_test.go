@@ -107,8 +107,9 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	//    admission webhooks, then the Test is created, managed in the GUI.
 	wizard := url.Values{
 		"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-k6"}, "template": {"k6"},
-		"param.k6.script": {"live.js"}, "param.k6.dashboardPeriod": {"1s"},
-		"useFiles": {"1"}, "file.path": {"repo/live.js"},
+		"param.k6.dashboardPeriod": {"1s"},
+		// Just the inline file: the wizard points k6's script at it.
+		"useFiles": {"1"}, "file.path": {"live.js"},
 		"file.content": {"import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"},
 	}
 	newPage := ccPage(t, ui+"/clusters/local/tests/new?namespace="+workloadNS, ccDeveloper)

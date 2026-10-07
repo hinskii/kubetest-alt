@@ -22,6 +22,7 @@ import (
 	"maps"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -171,7 +172,7 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 	}
 	for _, file := range s.Content.Files {
 		if file.ContentFrom == nil {
-			f.Files = append(f.Files, fileField{Path: file.Path, Content: file.Content})
+			f.Files = append(f.Files, fileField{Path: formPath(file.Path), Content: file.Content})
 		}
 	}
 	f.UseFiles = len(f.Files) > 0
@@ -368,7 +369,7 @@ func (b *builder) content(was *testsv1alpha1.GitContent) {
 				b.fail("Files: every file needs a path.")
 				continue
 			}
-			files = append(files, testsv1alpha1.FileContent{Path: file.Path, Content: file.Content})
+			files = append(files, testsv1alpha1.FileContent{Path: dataPath(file.Path), Content: file.Content})
 		}
 	}
 	c.Files = files
@@ -386,8 +387,12 @@ func (b *builder) params(tmpl *testsv1alpha1.TestTemplate, changed bool) {
 			}
 		}
 	}
+	entry := entryParam(tmpl)
 	for _, name := range slices.Sorted(maps.Keys(tmpl.Spec.Config)) {
 		p, v := tmpl.Spec.Config[name], b.form.Params[name]
+		if name == entry {
+			v = b.entryValue(p, v)
+		}
 		if v == "" || v == p.Default {
 			delete(s.Config, name)
 			continue
@@ -403,6 +408,70 @@ func (b *builder) params(tmpl *testsv1alpha1.TestTemplate, changed bool) {
 		p.Default = v
 		s.Config[name] = p
 	}
+}
+
+// repoDir is where a template's tool looks for the Test's files
+// (/data/repo/, CLAUDE.md §12); the editor's file paths are relative to it.
+const repoDir = "repo/"
+
+// dataPath turns an editor file path into the Test's (relative to /data):
+// "load.js" → "repo/load.js"; a leading "/" means under /data itself
+// ("/x.json" → "x.json"), and "/data/…" is understood too.
+func dataPath(p string) string {
+	p = strings.TrimSpace(p)
+	if rest, ok := strings.CutPrefix(p, "/data/"); ok {
+		return rest
+	}
+	if strings.HasPrefix(p, "/") {
+		return strings.TrimLeft(p, "/")
+	}
+	return repoDir + p
+}
+
+// formPath is dataPath's inverse, for the form.
+func formPath(p string) string {
+	if rest, ok := strings.CutPrefix(p, repoDir); ok {
+		return rest
+	}
+	return "/" + p
+}
+
+// entryArg finds the template parameter naming the tool's main file in
+// its arguments: k6's "/data/repo/{{ config.script }}", JMeter's plan,
+// newman's collection, … Read from the template, so the editor knows no
+// tool by name.
+var entryArg = regexp.MustCompile(`/data/repo/\{\{\s*config\.([A-Za-z0-9_]+)\s*\}\}`)
+
+// entryParam is the template's main-file parameter, or "".
+func entryParam(tmpl *testsv1alpha1.TestTemplate) string {
+	for _, arg := range slices.Concat(tmpl.Spec.Container.Command, tmpl.Spec.Container.Args) {
+		if m := entryArg.FindStringSubmatch(arg); m != nil {
+			if _, ok := tmpl.Spec.Config[m[1]]; ok {
+				return m[1]
+			}
+		}
+	}
+	return ""
+}
+
+// entryValue points the main-file parameter at the first inline file
+// when the Test's content is inline (no git) and the parameter, left
+// empty or at the template's default, names none of its files. A value
+// the user typed is kept.
+func (b *builder) entryValue(p testsv1alpha1.Parameter, v string) string {
+	if b.form.UseGit || (v != "" && v != p.Default) {
+		return v
+	}
+	var inline []string
+	for _, file := range b.t.Spec.Content.Files {
+		if rest, ok := strings.CutPrefix(file.Path, repoDir); ok {
+			inline = append(inline, rest)
+		}
+	}
+	if len(inline) == 0 || (v != "" && slices.Contains(inline, v)) {
+		return v
+	}
+	return inline[0]
 }
 
 // pod sets the service account, annotations and labels; the rest of the

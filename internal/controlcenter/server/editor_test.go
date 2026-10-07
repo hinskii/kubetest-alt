@@ -268,3 +268,43 @@ func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
 	assert.NotContains(t, out, "resources")
 	assert.NotContains(t, out, "managed-by")
 }
+
+func TestEditor_InlineScriptBindsTheMainFileParameter(t *testing.T) {
+	w := newWorld(t, k6Template())
+	form := url.Values{"action": {actSave}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"inline"},
+		"template": {"k6"}, "param.k6.script": {""}, "useFiles": {"1"},
+		"file.path": {"load.js", "/data/fixtures/users.csv", ""}, "file.content": {"export default function () {}", "id\n1\n", ""}}
+	rec := w.post(t, newURL, developer, form)
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	got := w.test(t, "inline")
+	assert.Equal(t, "load.js", got.Spec.Config["script"].Default, "k6's script points at the inline file")
+	paths := []string{got.Spec.Content.Files[0].Path, got.Spec.Content.Files[1].Path}
+	assert.Equal(t, []string{"repo/load.js", "fixtures/users.csv"}, paths, "paths are under /data/repo/ unless absolute")
+
+	// The editor shows them back the same way.
+	page := w.get(t, clusterURL+"/tests/team-a/inline/edit", developer).Body.String()
+	assert.Contains(t, page, `name="file.path" value="load.js"`)
+	assert.Contains(t, page, `name="file.path" value="/fixtures/users.csv"`)
+
+	// A value the user typed stays; with git the files aren't the entry.
+	form.Set("name", "typed")
+	form.Set("param.k6.script", "main.js")
+	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
+	assert.Equal(t, "main.js", w.test(t, "typed").Spec.Config["script"].Default)
+	form.Set("name", "from-git")
+	form.Set("param.k6.script", "")
+	form.Set("useGit", "1")
+	form.Set("gitURI", "https://github.com/org/perf")
+	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
+	assert.NotContains(t, w.test(t, "from-git").Spec.Config, "script")
+}
+
+func TestEntryParam_FromTheTemplatesArguments(t *testing.T) {
+	assert.Equal(t, "script", entryParam(k6Template()))
+	plain := k6Template()
+	plain.Spec.Container.Args = []string{"run", "{{ config.script }}"}
+	assert.Empty(t, entryParam(plain), "not under /data/repo/")
+	missing := k6Template()
+	delete(missing.Spec.Config, "script")
+	assert.Empty(t, entryParam(missing), "not a parameter of the template")
+}
