@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -269,31 +270,29 @@ func listChildren(t *testing.T, ctx context.Context, ns, parent string) []testsv
 // and set it directly — the parent's watch picks it up.
 func forceChildPhase(t *testing.T, ctx context.Context, ns, name string, phase testsv1alpha1.Phase) {
 	t.Helper()
-	var child testsv1alpha1.TestRun
-	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &child))
-	// Snapshot a minimal resolvedSpec so the leaf reconciler won't
-	// re-enter setup and race us.
-	if child.Status.ResolvedSpec == "" {
-		snap := testsv1alpha1.TestSpec{Container: testsv1alpha1.ContainerConfig{Image: "x", Args: []string{"y"}}}
-		b, _ := json.Marshal(snap)
-		child.Status.ResolvedSpec = string(b)
-	}
-	child.Status.Phase = phase
-	now := metav1.Now()
-	if child.Status.StartedAt == nil {
-		child.Status.StartedAt = &now
-	}
-	child.Status.FinishedAt = &now
-	if err := k8sClient.Status().Update(ctx, &child); err != nil {
-		// Retry once on conflict (concurrent reconcile writes are expected).
-		var latest testsv1alpha1.TestRun
-		require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &latest))
-		latest.Status.Phase = phase
-		latest.Status.ResolvedSpec = child.Status.ResolvedSpec
-		latest.Status.StartedAt = child.Status.StartedAt
-		latest.Status.FinishedAt = child.Status.FinishedAt
-		require.NoError(t, k8sClient.Status().Update(ctx, &latest), fmt.Sprintf("force phase %s on %s", phase, name))
-	}
+	// The child's own reconciler writes its status too: retry on conflict
+	// until our write lands on the latest version.
+	err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+		var child testsv1alpha1.TestRun
+		if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: name}, &child); err != nil {
+			return err
+		}
+		// Snapshot a minimal resolvedSpec so the leaf reconciler won't
+		// re-enter setup and race us.
+		if child.Status.ResolvedSpec == "" {
+			snap := testsv1alpha1.TestSpec{Container: testsv1alpha1.ContainerConfig{Image: "x", Args: []string{"y"}}}
+			b, _ := json.Marshal(snap)
+			child.Status.ResolvedSpec = string(b)
+		}
+		child.Status.Phase = phase
+		now := metav1.Now()
+		if child.Status.StartedAt == nil {
+			child.Status.StartedAt = &now
+		}
+		child.Status.FinishedAt = &now
+		return k8sClient.Status().Update(ctx, &child)
+	})
+	require.NoError(t, err, fmt.Sprintf("force phase %s on %s", phase, name))
 }
 
 // fixes.md #16: steps[].retry re-creates a failed child (<child>-r<N>);
