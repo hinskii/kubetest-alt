@@ -174,14 +174,18 @@ final. Pod events and composite child links remain for later.
 - All phases: queued, running, paused, passed, failed, aborted, error.
 
 ### 18f — Analytics (generic)
+**Decisions (user, 2026-10-07):** no legacy import — history starts fresh
+with kubetest (the tool is about to be rolled out; the old Control
+Center's k6 results are not carried over). No Critical Path parsing.
+Analytics cover **every catalog tool**, not only k6.
+
 - Computed from kubetest run history (`GET /runs` with `metrics`,
-  `testCounts`, `config`) — no copy in Control Center.
-- Legacy import: one-off kubetest command reads the reference app's
-  `dashboard_k6_analytics_results` table (if present) and writes rows
-  into the kubetest run store (k6 fields → metric vocabulary,
-  critical-path → test_counts, tag `legacy-source=testkube`).
-- One comparison builder for table + Markdown export; columns = metric
-  keys present on the selected runs.
+  `testCounts`, `config`, `tool`) — no copy in Control Center.
+- Tool-agnostic: per Test, trends of whatever the runs carry — pass rate
+  and duration for all tools, `testCounts` for JUnit-reporting tools,
+  `metrics` (pkg/report vocabulary) for load tools; columns/series =
+  metric keys present on the selected runs, never a per-tool layout.
+- One comparison builder for table + Markdown export over selected runs.
 
 ### 18g — Schedules, cleanup, k6 extras
 - One-shot schedules = TestRun with `spec.notBefore` (18d2); list =
