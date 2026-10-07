@@ -193,6 +193,24 @@ func TestIntegration_IdempotentUpsertByUID(t *testing.T) {
 // TestIntegration_Delete covers user-driven cleanup: the row disappears,
 // a second delete reports ErrNotFound, and a malformed UID is ErrNotFound
 // (not a uuid cast error surfacing as a 500 in the API server).
+func TestIntegration_GetByName(t *testing.T) {
+	ctx := t.Context()
+	p := NewPostgres(harness.pool)
+	at := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, p.EnsurePartitions(ctx, PartitionsToCreate(at, 0, 0)))
+	older := newRun("aaaaaaaa-0000-0000-0000-0000000000e1", "same-name", testsv1alpha1.PhaseFailed, at)
+	newer := newRun("aaaaaaaa-0000-0000-0000-0000000000e2", "same-name", testsv1alpha1.PhasePassed, at.Add(time.Hour))
+	older.Name, newer.Name = "same-name", "same-name" // a name reused after the first TestRun was deleted
+	require.NoError(t, p.SaveFinished(ctx, older))
+	require.NoError(t, p.SaveFinished(ctx, newer))
+
+	got, err := p.GetByName(ctx, newer.Namespace, "same-name")
+	require.NoError(t, err)
+	assert.Equal(t, string(newer.UID), got.UID, "a reused name resolves to the newest run")
+	_, err = p.GetByName(ctx, "elsewhere", "same-name")
+	assert.ErrorIs(t, err, ErrNotFound, "namespace-scoped")
+}
+
 func TestIntegration_Delete(t *testing.T) {
 	ctx := t.Context()
 	finished := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
@@ -201,6 +219,7 @@ func TestIntegration_Delete(t *testing.T) {
 
 	uid := "aaaaaaaa-0000-0000-0000-0000000000d1"
 	run := newRun(uid, "to-delete", testsv1alpha1.PhasePassed, finished)
+	run.Name = "to-delete-run" // fixture names repeat across tests (uid[:8])
 	require.NoError(t, p.SaveFinished(ctx, run))
 	require.NoError(t, p.SaveTestCases(ctx, run, []executor.TestCase{{Name: "login", Status: executor.CasePassed}}))
 
@@ -210,6 +229,9 @@ func TestIntegration_Delete(t *testing.T) {
 	cases, err := p.RunCases(ctx, uid, false)
 	require.NoError(t, err)
 	assert.Empty(t, cases, "the run's test cases go with it")
+
+	_, err = p.GetByName(ctx, run.Namespace, run.Name)
+	assert.ErrorIs(t, err, ErrNotFound)
 
 	assert.ErrorIs(t, p.Delete(ctx, uid), ErrNotFound, "repeat delete")
 	assert.ErrorIs(t, p.Delete(ctx, "not-a-uuid"), ErrNotFound)

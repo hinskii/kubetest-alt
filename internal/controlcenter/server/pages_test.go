@@ -44,6 +44,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -410,4 +411,53 @@ func TestRunPage_OpenReport(t *testing.T) {
 
 	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
 	assert.NotContains(t, plain.get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String(), "Open report")
+}
+
+func TestRunAgain(t *testing.T) {
+	old := runOf("smoke-abcde", testsv1alpha1.PhaseFailed)
+	old.Spec.Config = map[string]string{"vus": "50", "target": "http://shop", "gone": "x"}
+	w := newWorld(t, smokeTest(), old)
+	page := "/clusters/dev/runs/team-a/smoke-abcde"
+
+	assert.Contains(t, w.get(t, page, developer).Body.String(), `action="/clusters/dev/runs/team-a/smoke-abcde/rerun"`)
+	assert.NotContains(t, w.get(t, page, "").Body.String(), "Run again", "viewers can't start runs")
+	assert.Equal(t, http.StatusForbidden, w.post(t, page+"/rerun", "", nil).Code)
+
+	rec := w.post(t, page+"/rerun", developer, nil)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Contains(t, rec.Header().Get("Location"), "Run+started+again+with+the+parameters+of+smoke-abcde")
+	var runs testsv1alpha1.TestRunList
+	require.NoError(t, w.k8s.List(context.Background(), &runs))
+	var again *testsv1alpha1.TestRun
+	for i := range runs.Items {
+		if runs.Items[i].Name != "smoke-abcde" {
+			again = &runs.Items[i]
+		}
+	}
+	require.NotNil(t, again, "a new run was created")
+	assert.Equal(t, "smoke", again.Spec.TestRef)
+	assert.Equal(t, map[string]string{"vus": "50", "target": "http://shop"}, again.Spec.Config,
+		"the old values; parameters the Test dropped are left out")
+	assert.Equal(t, developer, again.Spec.Tags["kubetest.io/created-by"])
+
+	orphan := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
+	orphan.Spec.TestRef = "deleted-test"
+	rec = newWorld(t, smokeTest(), orphan).post(t, page+"/rerun", developer, nil)
+	assert.Contains(t, rec.Header().Get("Location"), "no+longer+exists")
+}
+
+// Run again works from run history once the TestRun has left the cluster.
+func TestRunAgain_FromHistory(t *testing.T) {
+	archive := &archiveStore{rows: map[string]store.Row{runUID: {UID: runUID, Name: "smoke-old", Namespace: "team-a",
+		TestRef: "smoke", Phase: "passed", FinishedAt: time.Now().Add(-48 * time.Hour).UTC(),
+		Config: map[string]string{"vus": "10", "target": "http://shop"}}}}
+	w := newWorldWithArchive(t, archive, smokeTest())
+
+	rec := w.post(t, "/clusters/dev/runs/team-a/smoke-old/rerun", developer, nil)
+	require.Equal(t, http.StatusSeeOther, rec.Code)
+	assert.Contains(t, rec.Header().Get("Location"), "Run+started+again")
+	var runs testsv1alpha1.TestRunList
+	require.NoError(t, w.k8s.List(context.Background(), &runs))
+	require.Len(t, runs.Items, 1)
+	assert.Equal(t, map[string]string{"target": "http://shop"}, runs.Items[0].Spec.Config, "vus=10 is today's default")
 }

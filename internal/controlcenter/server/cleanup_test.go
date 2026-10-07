@@ -167,6 +167,17 @@ func (a *archiveStore) Get(_ context.Context, uid string) (*store.Row, error) {
 	return &r, nil
 }
 
+func (a *archiveStore) GetByName(_ context.Context, namespace, name string) (*store.Row, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, r := range a.rows {
+		if r.Namespace == namespace && r.Name == name {
+			return &r, nil
+		}
+	}
+	return nil, store.ErrNotFound
+}
+
 func (a *archiveStore) List(_ context.Context, f store.Filter, p store.Page) ([]store.Row, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

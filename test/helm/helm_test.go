@@ -157,6 +157,15 @@ func TestHelmTemplate_RetentionNeedsPostgres(t *testing.T) {
 	assert.Contains(t, got, "--retention-days=90")
 }
 
+// Finished TestRuns leave the cluster only once run history keeps them.
+func TestHelmTemplate_FinishedRunTTLNeedsPostgres(t *testing.T) {
+	assert.NotContains(t, helmTemplate(t), "--finished-run-ttl")
+	got := helmTemplate(t, "--set", "postgresql.dsn=postgres://x/y")
+	assert.Equal(t, 1, strings.Count(got, "--finished-run-ttl=1h"), "operator only, 1h by default")
+	got = helmTemplate(t, "--set", "postgresql.dsn=postgres://x/y", "--set", "runs.finishedTTL=0")
+	assert.Contains(t, got, "--finished-run-ttl=0")
+}
+
 // GCS: no Secret anywhere (Workload Identity), SA annotations rendered.
 func TestHelmTemplate_StorageGCS(t *testing.T) {
 	got := helmTemplate(t,

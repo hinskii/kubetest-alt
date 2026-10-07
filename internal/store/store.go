@@ -56,6 +56,11 @@ type RunStore interface {
 	// Get returns the row for a UID or ErrNotFound.
 	Get(ctx context.Context, uid string) (*Row, error)
 
+	// GetByName returns the newest row with this name in namespace, or
+	// ErrNotFound — finds a run whose TestRun is gone by the name links
+	// and Test.status.latestRun carry.
+	GetByName(ctx context.Context, namespace, name string) (*Row, error)
+
 	// List returns rows matching the filter, sorted newest-first by
 	// finished_at (DESC), with stable pagination via keyset semantics
 	// (Page.After). Stable across concurrent inserts.

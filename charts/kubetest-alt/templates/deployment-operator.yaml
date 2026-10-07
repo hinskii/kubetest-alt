@@ -50,6 +50,7 @@ spec:
             {{- if .Values.postgresql.dsn }}
             - --postgres-dsn={{ .Values.postgresql.dsn }}
             - --retention-days={{ .Values.retention.days }}
+            - --finished-run-ttl={{ .Values.runs.finishedTTL }}
             {{- end }}
             {{- range .Values.operator.extraArgs }}
             - {{ . | quote }}

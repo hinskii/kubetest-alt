@@ -303,10 +303,13 @@ open.
    Test). Found on the way: the store left a deleted run's test cases
    behind (now one transaction), and Control Center linked archived runs
    by name although the API finds them by UID (`views.RunID`).
-   **Open decision:** finished TestRun CRs are never deleted by kubetest —
-   retention drops history rows and objects, the CRs stay in etcd. A
-   finished-run TTL in the operator (delete the CR once it is in run
-   history) is the natural fix.
+   **Decided (user, 2026-10-07):** finished TestRuns leave the cluster —
+   `--finished-run-ttl` / `runs.finishedTTL`, default 1h after finishing,
+   only once in run history (never without Postgres); composite children
+   go with their parent. The API resolves runs from history by name too
+   (store `GetByName`, migration 0006), so name links keep working, and
+   the run page has "Run again" (same Test, that run's parameters; works
+   from history).
 4. **Live view.** A template declares the port of its live UI; Control
    Center proxies it (K8s pod proxy) while the pod runs. k6 only for now
    (web dashboard, xk6-dashboard#258 shim); Locust's UI would need

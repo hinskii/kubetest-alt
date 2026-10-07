@@ -148,6 +148,25 @@ func (p *Postgres) Get(ctx context.Context, uid string) (*Row, error) {
 	return &list[0], nil
 }
 
+// GetByName implements RunStore.
+func (p *Postgres) GetByName(ctx context.Context, namespace, name string) (*Row, error) {
+	const q = `SELECT ` + selectCols + ` FROM test_runs WHERE namespace = $1 AND name = $2
+		ORDER BY finished_at DESC LIMIT 1`
+	rows, err := p.pool.Query(ctx, q, namespace, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	list, err := scanRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, ErrNotFound
+	}
+	return &list[0], nil
+}
+
 // Delete implements RunStore. uid is also the partition key's companion
 // in the primary key, so the DELETE is routed across partitions by
 // Postgres; a malformed uid yields ErrNotFound rather than a cast error.

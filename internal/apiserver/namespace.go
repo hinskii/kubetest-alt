@@ -123,10 +123,14 @@ func (s *Server) findRun(ctx context.Context, namespace, id string) (runRef, err
 	if s.Store == nil {
 		return runRef{}, errRunNotFound
 	}
-	if _, perr := uuid.Parse(id); perr != nil {
-		return runRef{}, errRunNotFound
+	// Run history by UID, else by name: a finished TestRun leaves the
+	// cluster (--finished-run-ttl) while links keep its name.
+	var row *store.Row
+	if _, perr := uuid.Parse(id); perr == nil {
+		row, err = s.Store.Get(ctx, id)
+	} else {
+		row, err = s.Store.GetByName(ctx, namespace, id)
 	}
-	row, err := s.Store.Get(ctx, id)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return runRef{}, errRunNotFound

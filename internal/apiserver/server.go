@@ -138,6 +138,7 @@ type AuditLog interface {
 // Kept small so tests inject a hand-rolled fake without pulling pgx.
 type RunReader interface {
 	Get(ctx context.Context, uid string) (*store.Row, error)
+	GetByName(ctx context.Context, namespace, name string) (*store.Row, error)
 	List(ctx context.Context, f store.Filter, p store.Page) ([]store.Row, error)
 }
 

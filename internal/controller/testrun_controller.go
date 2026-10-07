@@ -92,6 +92,13 @@ type TestRunReconciler struct {
 	// so we still get a retry — the RunStore's UID upsert keeps it idempotent).
 	RunStore RunStorePersister
 
+	// FinishedRunTTL is how long a finished TestRun stays in the cluster
+	// once it is in run history; then the operator deletes the CR (logs,
+	// artifacts and the history row stay until retention). Zero keeps
+	// finished runs. Ignored without a RunStore: the CR would be the only
+	// record of the run.
+	FinishedRunTTL time.Duration
+
 	// APIReader is a cache-bypassing client used ONLY to disambiguate the
 	// informer-lag race before acting on a NotFound (orphan-job detection,
 	// a just-created Test in setup): after createJob() sets
@@ -337,7 +344,7 @@ func (r *TestRunReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	// short-circuits every subsequent call cheaply.
 	if IsTerminalPhase(run.Status.Phase) {
 		r.persistFinished(ctx, &run)
-		return ctrl.Result{}, nil
+		return r.expireFinished(ctx, &run)
 	}
 
 	// Abort requested (GUI/API, Replace concurrency, or composite parent).
@@ -1167,6 +1174,55 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, nil
+}
+
+// expireFinished deletes a finished TestRun FinishedRunTTL after it
+// finished, once it is in run history — the API and Control Center then
+// show it from there. Composite children are left to their parent: the
+// parent's steps are aggregated from them, and they go with it (owner
+// reference) once every one of them is in history too.
+func (r *TestRunReconciler) expireFinished(ctx context.Context, run *testsv1alpha1.TestRun) (ctrl.Result, error) {
+	if r.FinishedRunTTL <= 0 || r.RunStore == nil || run.Status.FinishedAt == nil ||
+		run.Labels[compiler.LabelParentRun] != "" {
+		return ctrl.Result{}, nil
+	}
+	if !r.isPersisted(run) {
+		// persistFinished failed (store down): try again later.
+		return ctrl.Result{RequeueAfter: expireRetry}, nil
+	}
+	if left := run.Status.FinishedAt.Add(r.FinishedRunTTL).Sub(r.Now().Time); left > 0 {
+		return ctrl.Result{RequeueAfter: left}, nil
+	}
+	if isCompositeRun(run) {
+		kids, err := r.listChildRuns(ctx, run)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		for i := range kids {
+			if !IsTerminalPhase(kids[i].Status.Phase) || !r.isPersisted(&kids[i]) {
+				return ctrl.Result{RequeueAfter: expireRetry}, nil
+			}
+		}
+	}
+	if err := r.Delete(ctx, run, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil &&
+		!apierrors.IsNotFound(err) {
+		return ctrl.Result{}, err
+	}
+	log.FromContext(ctx).Info("deleted finished TestRun; it stays in run history",
+		"run", run.Name, "namespace", run.Namespace, "finishedAt", run.Status.FinishedAt.UTC().Format(time.RFC3339))
+	return ctrl.Result{}, nil
+}
+
+// expireRetry is how soon expireFinished looks again at a run it can't
+// delete yet (not in run history, or children still finishing).
+const expireRetry = time.Minute
+
+// isPersisted reports whether run reached run history in this operator's
+// lifetime. After a restart the terminal reconcile of every run (the
+// informer's initial list) persists it again first, so this fills up.
+func (r *TestRunReconciler) isPersisted(run *testsv1alpha1.TestRun) bool {
+	_, ok := r.persistedRuns.Load(types.NamespacedName{Namespace: run.Namespace, Name: run.Name})
+	return ok
 }
 
 // tailerID keys the log registry. Namespace-qualified so same-named runs in

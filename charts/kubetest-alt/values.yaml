@@ -109,6 +109,15 @@ operator:
 retention:
   days: 30
 
+# Finished TestRuns (needs postgresql.dsn): once a run is in run history,
+# its TestRun is deleted from the cluster this long after it finished, so
+# etcd doesn't keep every run forever. The run stays in Control Center and
+# the API (history, logs, artifacts) until retention. The delay lets
+# `kubectl wait` / `kubectl get testrun` read the result first. "0" keeps
+# finished TestRuns.
+runs:
+  finishedTTL: 1h
+
 apiserver:
   replicas: 1
   service:

@@ -112,6 +112,21 @@ func (f *fakeRunStore) Get(_ context.Context, uid string) (*store.Row, error) {
 	return &r, nil
 }
 
+func (f *fakeRunStore) GetByName(_ context.Context, namespace, name string) (*store.Row, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var best *store.Row
+	for _, r := range f.rows {
+		if r.Namespace == namespace && r.Name == name && (best == nil || r.FinishedAt.After(best.FinishedAt)) {
+			best = &r
+		}
+	}
+	if best == nil {
+		return nil, store.ErrNotFound
+	}
+	return best, nil
+}
+
 func (f *fakeRunStore) Delete(_ context.Context, uid string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

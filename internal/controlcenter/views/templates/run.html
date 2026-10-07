@@ -6,6 +6,7 @@
   {{with $r.Tool}}<span class="chip">{{.}}</span>{{end}}
   {{with $r.Report}}<a class="button" href="{{$d.Path}}/artifacts/{{artifactPath .}}" target="_blank" rel="noopener">Open report</a>{{end}}
   {{if terminal $r.Phase}}<a class="button secondary" href="{{$d.Path}}/compare">Compare with another run</a>{{end}}
+  {{if canRun $.User}}<form method="post" action="{{$d.Path}}/rerun"><button type="submit" class="button secondary" title="Start {{$r.TestRef}} again with this run's parameters">Run again</button></form>{{end}}
 </div>
 {{with $r.Message}}<p class="message">{{.}}</p>{{end}}
 

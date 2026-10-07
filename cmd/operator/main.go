@@ -171,6 +171,12 @@ func main() {
 		"Days to keep finished runs (history rows, their logs/artifacts/results) and audit entries; "+
 			"removal is per month, so runs live up to a month longer. 0 keeps everything.")
 
+	// Finished TestRuns leave the cluster once they're in run history.
+	var finishedRunTTL time.Duration
+	flag.DurationVar(&finishedRunTTL, "finished-run-ttl", time.Hour,
+		"How long a finished TestRun stays in the cluster after it reached run history; then it is deleted "+
+			"(history, logs and artifacts stay until retention). 0 keeps finished TestRuns. Needs --postgres-dsn.")
+
 	// Step 12 tuning knobs. Defaults match the plan: cron tick every 30s,
 	// trigger gate evaluation every 1s. Both are safe to leave at defaults
 	// in production — testing knobs are here for kind runs / debugging.
@@ -429,6 +435,8 @@ func main() {
 		Results:      resultReader, // object storage reader when configured
 		LogRegistry:  logRegistry,  // step 08: nil when --logs-enabled=false
 		RunStore:     runStore,     // step 09: nil when --postgres-dsn empty
+		// Finished CRs leave etcd once in run history (no-op without a store).
+		FinishedRunTTL: finishedRunTTL,
 		// Step 13: template resolution. Store reads TestTemplates from the
 		// manager cache; ResolverEnv is intentionally empty by default —
 		// the operator does NOT project os.Environ() into `{{ env.* }}`

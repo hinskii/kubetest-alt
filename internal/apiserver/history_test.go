@@ -30,6 +30,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -181,6 +182,24 @@ func TestDeleteRun_ArchivedRemovesRowAndObjects(t *testing.T) {
 	assert.True(t, up.has(storageKeysFor("keep").LogChunk(0)), "other runs untouched")
 
 	assert.Equal(t, http.StatusNotFound, del(t, s.Handler(), "/runs/"+testUID("old")).Code, "now gone")
+}
+
+// A finished TestRun leaves the cluster (--finished-run-ttl) while links
+// and Test.status.latestRun keep its name: the API finds it in run history
+// by name too.
+func TestRunByName_FromHistoryOnceTheTestRunIsGone(t *testing.T) {
+	s, _, _ := mkStorageServer(t, []store.Row{archivedRow("gone")})
+	h := s.Handler()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/gone", nil))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got apiclient.Run
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, testUID("gone"), got.UID)
+	assert.Equal(t, "archive", got.Origin)
+
+	require.Equal(t, http.StatusNoContent, del(t, h, "/runs/gone").Code, "delete by name works too")
 }
 
 func TestDeleteRun_TerminalCRRemovesCRAndRow(t *testing.T) {

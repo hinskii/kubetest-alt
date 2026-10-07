@@ -94,6 +94,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/logs.txt", s.runLogDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/artifacts/{path...}", s.runArtifact)
 	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/abort", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.abortRun)))
+	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/rerun", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.rerunRun)))
 	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/comment", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.commentRun)))
 	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/delete", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.deleteRun)))
 }
@@ -367,6 +368,53 @@ func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
 		notice = "Run scheduled for " + run.Spec.NotBefore.UTC().Format("2006-01-02 15:04 UTC") + "."
 	}
 	redirect(w, r, runPath(c.Name, ns, created.Name), notice)
+}
+
+// rerunRun starts the run's Test again with the parameters that run used
+// (its effective config from run history, so it works after the TestRun
+// left the cluster). Parameters the Test no longer has are dropped;
+// values equal to today's defaults are left to the default.
+func (s *Server) rerunRun(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.cluster(w, r)
+	if !ok {
+		return
+	}
+	ns, id := r.PathValue("ns"), r.PathValue("id")
+	back := runPath(c.Name, ns, id)
+	client := api(r, c)
+	old, err := client.GetRun(r.Context(), ns, id)
+	if err != nil {
+		redirect(w, r, back, "Could not read the run: "+messageOf(err))
+		return
+	}
+	t, err := client.GetResolvedTest(r.Context(), ns, old.TestRef)
+	if err != nil {
+		if apiclient.IsNotFound(err) {
+			redirect(w, r, back, fmt.Sprintf("Test %s no longer exists.", old.TestRef))
+			return
+		}
+		redirect(w, r, back, "Could not read the Test: "+messageOf(err))
+		return
+	}
+	overrides := map[string]string{}
+	for _, p := range paramsOf(t.Spec) {
+		v, had := old.Config[p.Name]
+		switch {
+		case had && v != p.Default:
+			overrides[p.Name] = v
+		case !had && p.Required:
+			redirect(w, r, back, fmt.Sprintf("The Test now requires parameter %s — start it from the Test page.", p.Name))
+			return
+		}
+	}
+	run := &testsv1alpha1.TestRun{Spec: testsv1alpha1.TestRunSpec{TestRef: old.TestRef, Config: overrides}}
+	run.GenerateName = generatePrefix(old.TestRef)
+	created, err := client.CreateRun(r.Context(), ns, run)
+	if err != nil {
+		redirect(w, r, back, "Could not start the run: "+messageOf(err))
+		return
+	}
+	redirect(w, r, runPath(c.Name, ns, created.Name), "Run started again with the parameters of "+old.Name+".")
 }
 
 // generatePrefix keeps generateName within the 63-character run name

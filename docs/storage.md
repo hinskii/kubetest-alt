@@ -115,6 +115,20 @@ Without Postgres the operator has no list of runs to expire: give the
 bucket a lifecycle rule instead (S3 `Expiration` on prefix `runs/`, GCS
 `Delete` with `age` and `matchesPrefix: [runs/]`).
 
+## Finished TestRuns
+
+With `postgresql.dsn` set, a finished TestRun is deleted from the cluster
+`runs.finishedTTL` (default `1h`) after it finished, once it is in run
+history — etcd holds the runs in progress and the last hour, not every run
+ever. The run stays in Control Center and the API (`GET /runs`,
+`/runs/{name}` — found by name or UID) with its logs, artifacts and test
+cases until retention, and "Run again" works from there. The hour lets
+`kubectl wait --for=jsonpath='{.status.phase}'=passed testrun/<name>` and
+CI scripts read the result first. Composite runs go as a whole: children
+are never deleted while their parent runs, and leave with it.
+`runs.finishedTTL: 0` keeps finished TestRuns; without Postgres they are
+always kept (the TestRun is the only record).
+
 ## Verification
 
 - `pkg/storage/backends_integration_test.go` runs one conformance suite
