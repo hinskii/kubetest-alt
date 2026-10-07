@@ -116,6 +116,27 @@ func (c *Client) GetTest(ctx context.Context, namespace, name string) (*testsv1a
 	return &out, nil
 }
 
+// PatchTest applies a JSON merge patch to a Test and returns the result.
+// Only Tests managed in the GUI (app.kubernetes.io/managed-by=ui) can be
+// patched; any other is a 409 (IsConflict) — its definition lives in Git.
+func (c *Client) PatchTest(ctx context.Context, namespace, name string, patch any) (*testsv1alpha1.Test, error) {
+	var out testsv1alpha1.Test
+	if err := c.sendJSON(ctx, http.MethodPatch, "/tests/"+url.PathEscape(name), ns(namespace), patch, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetTestSchedule sets Test.spec.schedule (a cron expression), or clears
+// it when schedule is "".
+func (c *Client) SetTestSchedule(ctx context.Context, namespace, name, schedule string) (*testsv1alpha1.Test, error) {
+	var value any // JSON null removes the field
+	if schedule != "" {
+		value = schedule
+	}
+	return c.PatchTest(ctx, namespace, name, map[string]any{"spec": map[string]any{"schedule": value}})
+}
+
 // GetResolvedTest returns the Test merged with its templates.
 func (c *Client) GetResolvedTest(ctx context.Context, namespace, name string) (*ResolvedTest, error) {
 	var out ResolvedTest

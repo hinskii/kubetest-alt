@@ -284,9 +284,17 @@ open.
    headless Chrome (blank under the old plain `sandbox`). k6 writes its
    report only after two dashboard periods → `config.dashboardPeriod`
    (default 10s).
-2. **Schedules.** One-shot = TestRun with `spec.notBefore` (18d2); list =
+2. **Schedules** ✅. One-shot = TestRun with `spec.notBefore` (18d2); list =
    queued runs with a future notBefore, cancellable. Recurring = kubetest
    `Test.spec.schedule` (editable only for `managed-by=ui`).
+   Built: cluster page `/clusters/{c}/schedules` (recurring with the next
+   three fire times and last run; one-time runs soonest first, Cancel =
+   abort, back to the page); a Schedule panel on the Test page, editable
+   by developers for GUI-managed Tests (`PATCH /tests/{name}` via
+   `apiclient.SetTestSchedule`, audited as test.update), read-only with a
+   pointer to Git otherwise. Schedules are UTC unless `CRON_TZ=` — the
+   operator's scheduler and Control Center now pin UTC instead of using
+   the process's zone (a pod `TZ` used to shift every schedule).
 3. **Cleanup policy** → `DELETE /runs/{uid}` (audited by kubetest);
    no-bound guard kept.
 4. **Live view.** A template declares the port of its live UI; Control

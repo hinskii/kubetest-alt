@@ -38,6 +38,33 @@
 </section>
 {{end}}
 
+{{$editable := and (not $t.GitOpsLocked) (canRun $.User)}}
+{{if or $d.Schedule $editable}}
+<section class="panel">
+  <h2>Schedule</h2>
+  {{with $d.Schedule}}
+    <p>Runs on <span class="mono">{{.Expr}}</span>{{with .Err}} — <span class="status status-error">invalid</span> <span class="muted">{{.}}</span>{{end}}</p>
+    {{with .Next}}<p class="muted">Next: {{range $i, $n := .}}{{if $i}} · {{end}}{{when $n}}{{end}}</p>{{end}}
+  {{else}}
+    <p class="muted">No recurring schedule — the Test runs only when started.</p>
+  {{end}}
+  {{if $editable}}
+  <form method="post" action="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/schedule" class="run-form">
+    <label>
+      <span>Cron <span class="muted">5 fields, UTC — or prefix <span class="mono">CRON_TZ=Europe/Warsaw</span></span></span>
+      <input type="text" name="schedule" class="mono" value="{{with $d.Schedule}}{{.Expr}}{{end}}" placeholder="0 2 * * 1-5" maxlength="200">
+    </label>
+    <div class="actions">
+      <button type="submit" class="button secondary">Save schedule</button>
+      {{if $d.Schedule}}<button type="submit" name="remove" value="1" class="button danger">Remove schedule</button>{{end}}
+    </div>
+  </form>
+  {{else if $t.GitOpsLocked}}
+    <p class="muted small">Managed in Git: change <span class="mono">spec.schedule</span> there.</p>
+  {{end}}
+</section>
+{{end}}
+
 <section class="panel">
   <div class="title-row">
     <h2>Runs</h2>

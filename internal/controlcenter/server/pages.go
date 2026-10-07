@@ -43,6 +43,8 @@ import (
 const (
 	labelTool      = "kubetest.io/tool"
 	labelManagedBy = "app.kubernetes.io/managed-by"
+	// managedByUI marks a Test the GUI may edit (CLAUDE.md §7).
+	managedByUI = "ui"
 )
 
 // HTML input types of parameter fields (inputNumber is also the
@@ -78,6 +80,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
+	mux.HandleFunc("GET /clusters/{cluster}/schedules", s.schedulesPage)
+	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/schedule", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.setSchedule)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}", s.runPage)
@@ -219,7 +223,7 @@ func (s *Server) testsPage(w http.ResponseWriter, r *http.Request) {
 		}
 		groups[tool] = append(groups[tool], testRow{
 			Name: t.Name, Namespace: t.Namespace, Tool: tool,
-			Locked:    t.Labels[labelManagedBy] != "ui",
+			Locked:    t.Labels[labelManagedBy] != managedByUI,
 			LatestRun: t.Status.LatestRun,
 		})
 		data.Shown++
@@ -255,6 +259,8 @@ type testData struct {
 	PageCursor string
 	// ShowCommit: some run on the page checked out a git commit.
 	ShowCommit bool
+	// Schedule is the Test's recurring schedule (spec.schedule), if any.
+	Schedule *scheduleView
 }
 
 func paramsOf(spec *testsv1alpha1.TestSpec) []param {
@@ -299,6 +305,9 @@ func (s *Server) testPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := testData{Cluster: c.Name, Test: t, Params: paramsOf(t.Spec), Runs: runs.Runs,
 		NextCursor: runs.NextCursor, PageCursor: cursor}
+	if t.Spec != nil {
+		data.Schedule = viewSchedule(t.Spec.Schedule, time.Now())
+	}
 	data.ShowCommit = slices.ContainsFunc(runs.Runs, func(r apiclient.Run) bool { return r.Git != nil && r.Git.Commit != "" })
 	s.page(w, r, "test", name, clusterCrumbs(c), data)
 }
@@ -560,6 +569,9 @@ func (s *Server) abortRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ns, id := r.PathValue("ns"), r.PathValue("id")
 	back := runPath(c.Name, ns, id)
+	if r.PostFormValue("back") == backToSchedules {
+		back = schedulesPath(c.Name)
+	}
 	if _, err := api(r, c).AbortRun(r.Context(), ns, id, strings.TrimSpace(r.PostFormValue("message"))); err != nil {
 		redirect(w, r, back, "Could not abort: "+messageOf(err))
 		return

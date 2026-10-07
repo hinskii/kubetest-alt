@@ -191,6 +191,10 @@ func (s *Scheduler) evaluate(ctx context.Context, t *testsv1alpha1.Test, now tim
 		// through (older CRs from a webhook-off env, for instance).
 		return nil
 	}
+	// The cron library evaluates a schedule without CRON_TZ in the zone of
+	// the time it is given. Schedules are UTC by contract (Control Center
+	// shows them so), not whatever TZ the operator pod happens to have.
+	now = now.UTC()
 	prev := prevSchedule(sched, now)
 	if prev.IsZero() {
 		return nil

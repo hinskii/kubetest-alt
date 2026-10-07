@@ -78,6 +78,27 @@ func TestContract_TestsAndResolved(t *testing.T) {
 	assert.Equal(t, apiclient.ReasonNotFound, apiErr.Reason)
 }
 
+func TestContract_SetTestSchedule(t *testing.T) {
+	s, _, _ := mkStorageServer(t, nil)
+	require.NoError(t, s.K8sClient.Create(t.Context(), mkTest("nightly", "ui")))
+	require.NoError(t, s.K8sClient.Create(t.Context(), mkTest("owned", "gitops")))
+	c := mkContractClient(t, s)
+	ctx := t.Context()
+
+	got, err := c.SetTestSchedule(ctx, "", "nightly", "0 2 * * *")
+	require.NoError(t, err)
+	assert.Equal(t, "0 2 * * *", got.Spec.Schedule)
+	assert.Equal(t, "ui", got.Labels[LabelManagedBy], "the rest of the Test is untouched")
+
+	got, err = c.SetTestSchedule(ctx, "", "nightly", "")
+	require.NoError(t, err)
+	assert.Empty(t, got.Spec.Schedule, "an empty schedule clears it")
+
+	_, err = c.SetTestSchedule(ctx, "", "owned", "0 2 * * *")
+	require.Error(t, err)
+	assert.True(t, apiclient.IsConflict(err), "a Git-managed Test is read-only: %v", err)
+}
+
 func TestContract_CreateRunRecordsUser(t *testing.T) {
 	s, _, _ := mkStorageServer(t, nil)
 	c := mkContractClient(t, s).AsUser("alice@example.com")

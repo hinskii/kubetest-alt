@@ -1,6 +1,6 @@
 {{define "content"}}
 {{$d := .Data}}
-<h1>{{$d.ClusterDisplayName}}</h1>
+<div class="title-row"><h1>{{$d.ClusterDisplayName}}</h1><a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/schedules">Schedules</a></div>
 <p class="muted">{{$d.Shown}} of {{$d.Total}} tests</p>
 
 <form class="filters" method="get">

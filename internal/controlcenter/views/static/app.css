@@ -278,3 +278,4 @@ input, select {
 .compare-table tr.section th { color: var(--text); background: var(--surface-muted); }
 .markdown { width: 100%; font-family: var(--mono); font-size: 0.8rem; background: var(--surface-muted); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; }
 .title-row .button + .button { margin-left: 0; }
+.actions .button { white-space: nowrap; }

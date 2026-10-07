@@ -1,0 +1,54 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="title-row"><h1>Schedules</h1></div>
+<p class="muted">Recurring runs come from a Test's <span class="mono">spec.schedule</span> (cron, UTC unless it starts with <span class="mono">CRON_TZ=</span>); one-time runs wait for their start time. Times are UTC.</p>
+
+<section class="panel">
+  <h2>Recurring <span class="muted">{{len $d.Recurring}}</span></h2>
+  {{if $d.Recurring}}
+  <table class="table">
+    <thead><tr><th>Test</th><th>Schedule</th><th>Next runs</th><th>Last run</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.Recurring}}
+      <tr>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a> <span class="muted">{{.Namespace}}</span>{{with .Tool}} <span class="chip">{{.}}</span>{{end}}</td>
+        <td class="mono">{{.Schedule.Expr}}</td>
+        <td>{{with .Schedule.Err}}<span class="status status-error">invalid</span> <span class="muted small">{{.}}</span>{{else}}{{range $i, $t := .Schedule.Next}}{{if $i}}<br>{{end}}<span{{if $i}} class="muted"{{end}}>{{when $t}}</span>{{end}}{{end}}</td>
+        <td>{{template "latest" (dict "Cluster" $d.Cluster "Namespace" .Namespace "Run" .LatestRun)}}</td>
+        <td>{{if .Locked}}<span class="chip" title="Defined in Git: edit spec.schedule there">read-only</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No Test has a recurring schedule. Set one on a Test's page (Tests created in Control Center) or in its <span class="mono">spec.schedule</span>.</p>
+  {{end}}
+</section>
+
+<section class="panel">
+  <h2>One-time <span class="muted">{{len $d.OneShot}}</span></h2>
+  {{with $d.QueuedErr}}<p class="muted">Scheduled runs unavailable: {{.}}</p>{{end}}
+  {{if $d.OneShot}}
+  <table class="table">
+    <thead><tr><th>Starts</th><th>Run</th><th>Test</th><th>Requested by</th><th></th></tr></thead>
+    <tbody>
+    {{range $d.OneShot}}
+      <tr>
+        <td>{{when .NotBefore}}</td>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .TestRef}}">{{.TestRef}}</a> <span class="muted">{{.Namespace}}</span></td>
+        <td class="muted">{{index .Tags "kubetest.io/created-by"}}</td>
+        <td>{{if canRun $.User}}<form method="post" action="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}/abort">
+          <input type="hidden" name="back" value="{{$d.Back}}"><input type="hidden" name="message" value="cancelled before its start time">
+          <button type="submit" class="button secondary small">Cancel</button></form>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else if not $d.QueuedErr}}
+  <p class="muted">No runs waiting for a start time. Pick “Start at” in a Test's run form to schedule one.</p>
+  {{end}}
+</section>
+{{end}}
+
+{{define "latest"}}{{with .Run}}<a href="/clusters/{{pathEscape $.Cluster}}/runs/{{pathEscape $.Namespace}}/{{pathEscape .Name}}"><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></a>{{with .FinishedAt}} <span class="muted small">{{when .Time}}</span>{{end}}{{else}}<span class="muted">—</span>{{end}}{{end}}

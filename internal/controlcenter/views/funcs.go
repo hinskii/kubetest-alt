@@ -71,6 +71,9 @@ func FormatNumber(v float64) string {
 // renders the same values outside a template (Markdown export).
 func Duration(ms int64) string { return duration(ms) }
 
+// When: see when.
+func When(t time.Time) string { return when(t) }
+
 // ShortSHA: see shortSHA.
 func ShortSHA(sha string) string { return shortSHA(sha) }
 

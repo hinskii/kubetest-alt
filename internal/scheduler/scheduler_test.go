@@ -119,6 +119,20 @@ func TestScheduler_FiresAtBoundary(t *testing.T) {
 	assert.NotEmpty(t, run.Annotations[AnnotationScheduledAt])
 }
 
+// TestScheduler_SchedulesAreUTC: a pod with a non-UTC TZ must not shift
+// schedules — "0 2 * * *" fires at 02:00 UTC whatever zone "now" is in.
+func TestScheduler_SchedulesAreUTC(t *testing.T) {
+	warsaw, err := time.LoadLocation("Europe/Warsaw")
+	require.NoError(t, err)
+	scheme := buildScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(newTest("nightly", "0 2 * * *", t0)).Build()
+	s := &Scheduler{Client: c}
+
+	at := time.Date(2026, 1, 2, 2, 0, 30, 0, time.UTC) // 03:00:30 in Warsaw
+	require.NoError(t, s.Tick(context.Background(), at.In(warsaw)))
+	assert.Equal(t, []string{fmt.Sprintf("nightly-%d", time.Date(2026, 1, 2, 2, 0, 0, 0, time.UTC).Unix())}, listRuns(t, c))
+}
+
 // TestScheduler_DoubleFireIdempotent proves §15.6: two Scheduler instances
 // firing on the exact same tick produce EXACTLY ONE TestRun (the second's
 // Create returns AlreadyExists and is swallowed).
