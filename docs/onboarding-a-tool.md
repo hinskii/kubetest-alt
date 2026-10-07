@@ -133,6 +133,26 @@ artifacts:
 `internal/controller/catalog_apply_test.go::TestCatalog_OutputPathsMatchWorkingDir`
 fails on globs that can't match.
 
+If the tool writes a human-readable report (an HTML dashboard), name it in
+`spec.artifacts.report` — a path or glob, relative like `paths`, that one
+of `paths` also collects. The run then gets an "Open report" button in
+Control Center (the API returns the first matching artifact as
+`Run.report`). Collect the report's whole folder when it has assets next
+to it (`js/`, `style/`), not just `index.html`:
+
+```yaml
+artifacts:
+  paths:
+    - "repo/results/**/*.jtl"
+    - "repo/results/report/**"
+  report: "repo/results/report/index.html"
+```
+
+Make sure the tool never waits on a report viewer at the end of a run
+(Playwright: `PLAYWRIGHT_HTML_OPEN=never`). `TestCatalog_ReportIsCollected`
+fails when the report is outside every `paths` glob; the catalog e2e case
+sets `report: true` to assert a real run produced it.
+
 ### 4b. Metrics (load tools)
 
 If the tool produces a machine-readable report, point `spec.metrics` at it

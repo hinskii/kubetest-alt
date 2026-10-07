@@ -32,6 +32,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
@@ -87,6 +88,9 @@ type expectation struct {
 	MetricsRange map[string][2]float64 `json:"metricsRange"`
 	// Artifacts: each glob must match at least one scraped artifact path.
 	Artifacts []string `json:"artifacts"`
+	// Report: the template's spec.artifacts.report must match a scraped
+	// artifact — the run has an "Open report" button.
+	Report bool `json:"report"`
 }
 
 func TestCatalog(t *testing.T) {
@@ -253,6 +257,17 @@ func assertCase(t *testing.T, tool string, want expectation, run *testsv1alpha1.
 			return m
 		})
 		ok = assert.True(t, matched, "%s: no artifact matches %q (have %v)", tool, glob, paths) && ok
+	}
+	if want.Report {
+		var spec testsv1alpha1.TestSpec
+		require.NoError(t, json.Unmarshal([]byte(run.Status.ResolvedSpec), &spec))
+		require.NotNil(t, spec.Artifacts, "%s: no spec.artifacts", tool)
+		pattern := spec.Artifacts.Report
+		matched := pattern != "" && slices.ContainsFunc(paths, func(p string) bool {
+			m, _ := doublestar.Match(pattern, p)
+			return m
+		})
+		ok = assert.True(t, matched, "%s: report %q matches no artifact (have %v)", tool, pattern, paths) && ok
 	}
 	return ok
 }

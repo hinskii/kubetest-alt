@@ -64,6 +64,7 @@ spec:
   artifacts:
     paths:
       - "repo/results/**/zap-report.*"
+    report: "repo/results/zap-report.html"
   # Alert types by risk → status.metrics (alerts_high/medium/low/info/total).
   metrics:
     from: zapJson

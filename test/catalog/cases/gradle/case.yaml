@@ -4,4 +4,5 @@ expect:
   phase: failed            # one JUnit test fails on purpose
   testCounts: {total: 2, failed: 1}
   artifacts: ["build/test-results/**/*.xml"]
+  report: true
 timeout: 15m

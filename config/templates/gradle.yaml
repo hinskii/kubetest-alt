@@ -27,6 +27,7 @@ spec:
     paths:
       - "**/build/test-results/**/*.xml"
       - "**/build/reports/tests/**/*"
+    report: "**/build/reports/tests/test/index.html"
   config:
     projectDir:
       type: string

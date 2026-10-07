@@ -21,13 +21,17 @@ spec:
     # entrypoint. Run npx playwright from the user's project root.
     command: ["sh", "-c"]
     args:
-      - "cd /data/repo/{{ config.projectDir }} && npm ci --silent && PLAYWRIGHT_JUNIT_OUTPUT_NAME=/data/repo/results/junit.xml npx playwright test --reporter=junit"
+      - "cd /data/repo/{{ config.projectDir }} && npm ci --silent && PLAYWRIGHT_JUNIT_OUTPUT_NAME=/data/repo/results/junit.xml PLAYWRIGHT_HTML_OUTPUT_DIR=/data/repo/results/playwright-report PLAYWRIGHT_HTML_OPEN=never npx playwright test --reporter=junit,html"
     workingDir: "/data/repo"
   artifacts:
     paths:
       - "results/**/*.xml"
+      # HTML report (--reporter=html above; PLAYWRIGHT_HTML_OPEN=never so
+      # a failed run doesn't wait on a report server).
+      - "results/playwright-report/**"
       - "test-results/**/*"
       - "playwright-report/**/*"
+    report: "results/playwright-report/index.html"
   config:
     projectDir:
       type: string

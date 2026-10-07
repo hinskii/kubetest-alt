@@ -246,3 +246,34 @@ func TestResolvedTest_Errors(t *testing.T) {
 	assert.Equal(t, http.StatusUnprocessableEntity, get(t, s.Handler(), "/tests/broken/resolved").Code)
 	assert.Equal(t, http.StatusNotFound, get(t, s.Handler(), "/tests/nope/resolved").Code)
 }
+
+func TestReportArtifact(t *testing.T) {
+	paths := []string{"repo/results/jmeter.jtl", "repo/results/report/content/js/x.js", "repo/results/report/index.html"}
+	assert.Equal(t, "repo/results/report/index.html", reportArtifact("repo/results/report/index.html", paths))
+	assert.Equal(t, "repo/results/report/index.html", reportArtifact("repo/results/**/index.html", paths))
+	assert.Empty(t, reportArtifact("repo/results/missing.html", paths), "declared but not produced")
+	assert.Empty(t, reportArtifact("", paths))
+
+	gatling := []string{"repo/results/sim-2/index.html", "repo/results/sim-1/index.html"}
+	assert.Equal(t, "repo/results/sim-1/index.html", reportArtifact("repo/results/**/index.html", gatling), "first match, sorted")
+
+	workers := []string{"workers/1/artifacts/repo/results/r.html", "workers/0/artifacts/repo/results/r.html"}
+	assert.Equal(t, "workers/0/artifacts/repo/results/r.html", reportArtifact("repo/results/r.html", workers),
+		"a parallel run's report is its first worker's")
+}
+
+func TestRunEnvelope_Report(t *testing.T) {
+	cr := liveRun("rep", testsv1alpha1.PhasePassed)
+	cr.Status.ResolvedSpec = `{"artifacts":{"paths":["repo/results/**"],"report":"repo/results/**/index.html"}}`
+	cr.Status.ArtifactRefs = []testsv1alpha1.ArtifactRef{{Path: "repo/results/jmeter.jtl"}, {Path: "repo/results/report/index.html"}}
+	assert.Equal(t, "repo/results/report/index.html", runEnvelopeFromCR(cr).Report)
+
+	r := row("old", 1, func(r *store.Row) {
+		r.ResolvedSpec = map[string]any{"artifacts": map[string]any{"report": "repo/results/**/index.html"}}
+		r.ArtifactRefs = []store.ArtifactRef{{Path: "repo/results/report/index.html"}}
+	})
+	assert.Equal(t, "repo/results/report/index.html", runEnvelopeFromRow(&r).Report)
+
+	plain := row("plain", 1, func(r *store.Row) { r.ArtifactRefs = []store.ArtifactRef{{Path: "a.html"}} })
+	assert.Empty(t, runEnvelopeFromRow(&plain).Report, "no report declared")
+}

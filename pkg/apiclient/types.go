@@ -91,6 +91,9 @@ type Run struct {
 	// Git is the code the run checked out, for a Test with a git source.
 	// Set once the run has finished.
 	Git *GitCheckout `json:"git,omitempty"`
+	// Report is the artifact path of the run's main report
+	// (spec.artifacts.report), when the run produced one.
+	Report string `json:"report,omitempty"`
 }
 
 // GitCheckout is what a run's content fetcher checked out.

@@ -241,6 +241,28 @@ func TestEnvtest_MetricsPathMustStayInWorkingDir(t *testing.T) {
 	assert.Contains(t, err.Error(), "must not contain '..'")
 }
 
+// TestEnvtest_ArtifactsReportMustBeAValidGlob is the sentinel for the
+// spec.artifacts.report rule: glob validity is not expressible in the CRD
+// schema, so this only passes with the validating webhook on the path.
+func TestEnvtest_ArtifactsReportMustBeAValidGlob(t *testing.T) {
+	ctx := context.Background()
+	obj := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "report-glob", Namespace: "default"},
+		Spec: testsv1alpha1.TestSpec{
+			Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Args: []string{"run", "s.js"}},
+			Artifacts: &testsv1alpha1.ArtifactSpec{Paths: []string{"repo/results/**"}, Report: "repo/results/[report.html"},
+		},
+	}
+	err := k8sClient.Create(ctx, obj)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.artifacts.report")
+	assert.Contains(t, err.Error(), "not a valid glob pattern")
+
+	obj.Spec.Artifacts.Report = "repo/results/**/index.html"
+	require.NoError(t, k8sClient.Create(ctx, obj), "a valid report glob is admitted")
+	t.Cleanup(func() { _ = k8sClient.Delete(ctx, obj) })
+}
+
 // TestEnvtest_PodConfigAnnotationsPassThrough is the §8 regression guard at
 // the envtest layer: after a round-trip through defaulting + validating +
 // api-server storage, every user-supplied annotation/label must survive

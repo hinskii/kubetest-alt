@@ -177,6 +177,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if err := validateMetrics(spec.Metrics); err != nil {
 		return err
 	}
+	if err := validateArtifacts(spec.Artifacts); err != nil {
+		return err
+	}
 	if err := validateRetry("spec.retry", spec.Retry); err != nil {
 		return err
 	}
@@ -446,17 +449,29 @@ func validateMetrics(m *testsv1alpha1.MetricsSpec) error {
 	if m == nil {
 		return nil
 	}
-	p := m.Path
+	return validateRelativeGlob("spec.metrics.path", m.Path)
+}
+
+// validateArtifacts checks spec.artifacts.report the same way: a report
+// pattern that can never match is a typo, not an empty report.
+func validateArtifacts(a *testsv1alpha1.ArtifactSpec) error {
+	if a == nil || a.Report == "" {
+		return nil
+	}
+	return validateRelativeGlob("spec.artifacts.report", a.Report)
+}
+
+func validateRelativeGlob(field, p string) error {
 	if strings.HasPrefix(p, "/") {
-		return fmt.Errorf("spec.metrics.path %q must be relative to the working directory", p)
+		return fmt.Errorf("%s %q must be relative to the working directory", field, p)
 	}
 	for seg := range strings.SplitSeq(p, "/") {
 		if seg == ".." {
-			return fmt.Errorf("spec.metrics.path %q must not contain '..'", p)
+			return fmt.Errorf("%s %q must not contain '..'", field, p)
 		}
 	}
 	if !doublestar.ValidatePattern(p) {
-		return fmt.Errorf("spec.metrics.path %q is not a valid glob pattern", p)
+		return fmt.Errorf("%s %q is not a valid glob pattern", field, p)
 	}
 	return nil
 }

@@ -3,4 +3,5 @@ expect:
   phase: failed            # one spec fails on purpose
   testCounts: {total: 2, failed: 1}
   artifacts: ["results/junit.xml"]
+  report: true
 timeout: 15m

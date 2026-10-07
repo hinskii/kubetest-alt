@@ -430,6 +430,10 @@ func OpenAPISpec() map[string]any {
 								"commit":   map[string]any{"type": "string", "description": "Checked-out commit SHA."},
 							},
 						},
+						"report": map[string]any{
+							"type":        "string",
+							"description": "Artifact path of the run's main report (spec.artifacts.report), when it produced one.",
+						},
 					},
 				},
 				"Comment": map[string]any{

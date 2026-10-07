@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/google/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -405,6 +406,13 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 			if c := cr.Status.Content; c != nil && spec.Content.Git != nil {
 				e.Git = gitCheckout(spec.Content.Git.URI, c.GitRevision, c.GitCommit)
 			}
+			if spec.Artifacts != nil {
+				paths := make([]string, len(cr.Status.ArtifactRefs))
+				for i, a := range cr.Status.ArtifactRefs {
+					paths[i] = a.Path
+				}
+				e.Report = reportArtifact(spec.Artifacts.Report, paths)
+			}
 		}
 	} else {
 		e.Config = store.EffectiveConfig(nil, cr.Spec.Config)
@@ -471,6 +479,13 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		Metrics:    row.Metrics,
 		Comment:    apiComment(row.Comment),
 	}
+	if pattern, _ := nested(row.ResolvedSpec, "artifacts", "report").(string); pattern != "" {
+		paths := make([]string, len(row.ArtifactRefs))
+		for i, a := range row.ArtifactRefs {
+			paths[i] = a.Path
+		}
+		e.Report = reportArtifact(pattern, paths)
+	}
 	if row.GitCommit != "" || row.GitRevision != "" {
 		uri, _ := nested(row.ResolvedSpec, "content", "git", "uri").(string)
 		e.Git = gitCheckout(uri, row.GitRevision, row.GitCommit)
@@ -484,6 +499,30 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		}
 	}
 	return e
+}
+
+// reportArtifact returns the first artifact path (sorted) that pattern
+// (spec.artifacts.report) matches, or "". A parallel run's artifacts live
+// under workers/<i>/artifacts/, so those match on the rest of the path —
+// the first worker's report stands for the run.
+func reportArtifact(pattern string, paths []string) string {
+	if pattern == "" {
+		return ""
+	}
+	sorted := slices.Clone(paths)
+	slices.Sort(sorted)
+	for _, p := range sorted {
+		rel := p
+		if rest, ok := strings.CutPrefix(p, "workers/"); ok {
+			if _, after, found := strings.Cut(rest, "/artifacts/"); found {
+				rel = after
+			}
+		}
+		if ok, _ := doublestar.Match(pattern, rel); ok {
+			return p
+		}
+	}
+	return ""
 }
 
 func gitCheckout(uri, revision, commit string) *apiclient.GitCheckout {

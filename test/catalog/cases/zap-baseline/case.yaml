@@ -7,4 +7,5 @@ expect:
   # reported, not their values (pkg/report fixtures pin the parser).
   metricsPresent: [alerts_high, alerts_medium, alerts_low, alerts_info, alerts_total]
   artifacts: ["repo/results/zap-report.*"]
+  report: true
 timeout: 15m

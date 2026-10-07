@@ -514,6 +514,19 @@ func TestValidateMetrics(t *testing.T) {
 	assert.NoError(t, validateMetrics(nil))
 }
 
+func TestValidateArtifacts_Report(t *testing.T) {
+	spec := func(report string) *testsv1alpha1.TestSpec {
+		s := baseValidSpec()
+		s.Artifacts = &testsv1alpha1.ArtifactSpec{Paths: []string{"results/**"}, Report: report}
+		return &s
+	}
+	require.NoError(t, validateTest(spec("")), "no report is fine")
+	require.NoError(t, validateTest(spec("results/**/index.html")))
+	require.ErrorContains(t, validateTest(spec("../report.html")), "spec.artifacts.report")
+	require.ErrorContains(t, validateTest(spec("/abs/report.html")), "relative")
+	require.ErrorContains(t, validateTest(spec("results/[")), "valid glob")
+}
+
 func TestValidateTest_Retry(t *testing.T) {
 	leaf := func(r *testsv1alpha1.RetryPolicy) *testsv1alpha1.TestSpec {
 		s := baseValidSpec()

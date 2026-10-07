@@ -263,15 +263,40 @@ the Test page):
 - Composite children no longer inherit the parent's `composite` tool
   label, so per-tool numbers count them under their own tool.
 
-### 18g — Schedules, cleanup, k6 extras
-- One-shot schedules = TestRun with `spec.notBefore` (18d2); list =
-  queued runs with a future notBefore. Recurring = kubetest
-  `Test.spec.schedule` (editable only for `managed-by=ui`).
-- Cleanup policy → `DELETE /runs/{uid}` (audited by kubetest); no-bound guard kept.
-- k6 live dashboard reverse proxy (`httputil.ReverseProxy` over the K8s
-  pod proxy), only for `tool=k6`; includes the xk6-dashboard#258 shim.
-- Grafana link only when configured and tool=k6; compiler injects
-  `KUBETEST_RUN_ID`, k6 template tags `testid` with it.
+### 18g — Reports, schedules, cleanup, live view, Grafana link
+Order and scope (user, 2026-10-07): tool extras are generic mechanisms a
+template opts into — operator and Control Center stay tool-agnostic.
+No tool sends metrics anywhere yet; the Grafana link only leaves the door
+open.
+
+1. **HTML reports** ✅. `spec.artifacts.report`: the run's main report, a
+   path or glob relative to the working directory like `artifacts.paths`;
+   the API returns the first matching artifact as `Run.report` and the
+   run page gets an "Open report" button. Artifacts are served with
+   `sandbox allow-scripts` (no `allow-same-origin`) so script-based
+   reports work while staying isolated from Control Center's origin.
+   Catalog: JMeter (`-e -o`), Playwright (html reporter), k6 (exported
+   web dashboard), Locust (`--html`), Gatling, ZAP and Gradle (already
+   produced). Artillery, Cypress, Newman, pytest, Maven, Cucumber, SoapUI
+   would need extra plugins in their images — not done.
+   Verified: catalog e2e on kind for all 7 (`report: true` in the
+   cases); JMeter and k6 reports render under the artifact CSP in
+   headless Chrome (blank under the old plain `sandbox`). k6 writes its
+   report only after two dashboard periods → `config.dashboardPeriod`
+   (default 10s).
+2. **Schedules.** One-shot = TestRun with `spec.notBefore` (18d2); list =
+   queued runs with a future notBefore, cancellable. Recurring = kubetest
+   `Test.spec.schedule` (editable only for `managed-by=ui`).
+3. **Cleanup policy** → `DELETE /runs/{uid}` (audited by kubetest);
+   no-bound guard kept.
+4. **Live view.** A template declares the port of its live UI; Control
+   Center proxies it (K8s pod proxy) while the pod runs. k6 only for now
+   (web dashboard, xk6-dashboard#258 shim); Locust's UI would need
+   `--autostart` instead of `--headless` — opt-in later.
+5. **Grafana link.** Control Center config: a dashboard URL pattern per
+   tool with the run ID (`KUBETEST_RUN_ID`, already injected) as a
+   variable. Templates do not send metrics yet; wiring k6/JMeter/Gatling
+   output waits until the metrics backend is chosen.
 
 ### 18h — Packaging + docs
 - Chart component `controlCenter.enabled` (Deployment, Service, config,

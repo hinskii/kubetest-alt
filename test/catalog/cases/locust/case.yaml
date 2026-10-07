@@ -8,3 +8,4 @@ expect:
   metricsPresent: [requests, errors, error_rate, rps, latency_avg_ms, latency_p95_ms]
   metricsRange: {error_rate: [0.3, 0.7]}
   artifacts: ["repo/results/locust_stats.csv"]
+  report: true

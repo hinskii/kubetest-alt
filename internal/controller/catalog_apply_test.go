@@ -21,10 +21,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -299,6 +301,9 @@ func TestCatalog_OutputPathsMatchWorkingDir(t *testing.T) {
 		var globs []string
 		if tmpl.Spec.Artifacts != nil {
 			globs = append(globs, tmpl.Spec.Artifacts.Paths...)
+			if r := tmpl.Spec.Artifacts.Report; r != "" {
+				globs = append(globs, r)
+			}
 		}
 		if tmpl.Spec.Metrics != nil {
 			globs = append(globs, tmpl.Spec.Metrics.Path)
@@ -308,6 +313,35 @@ func TestCatalog_OutputPathsMatchWorkingDir(t *testing.T) {
 				"%s: %q is relative to /data — tools write under /data/repo", filepath.Base(f), g)
 		}
 	}
+}
+
+// TestCatalog_ReportIsCollected: spec.artifacts.report only names one of
+// the collected artifacts, so a report outside every artifacts glob would
+// never be scraped and the run would have no report. Checked on a concrete
+// path the report pattern stands for (globs replaced by a sample segment).
+func TestCatalog_ReportIsCollected(t *testing.T) {
+	repoRoot, err := findRepoRoot()
+	require.NoError(t, err)
+	files, err := filepath.Glob(filepath.Join(repoRoot, "config", "templates", "*.yaml"))
+	require.NoError(t, err)
+	reports := 0
+	for _, f := range files {
+		tmpl, err := readTestTemplate(f)
+		require.NoError(t, err, f)
+		if tmpl.Spec.Artifacts == nil || tmpl.Spec.Artifacts.Report == "" {
+			continue
+		}
+		reports++
+		sample := strings.NewReplacer("**", "x/y", "*", "x").Replace(tmpl.Spec.Artifacts.Report)
+		matched, err := doublestar.Match(tmpl.Spec.Artifacts.Report, sample)
+		require.NoError(t, err)
+		require.True(t, matched, "%s: sample %q must match its own report pattern", filepath.Base(f), sample)
+		assert.True(t, slices.ContainsFunc(tmpl.Spec.Artifacts.Paths, func(g string) bool {
+			m, _ := doublestar.Match(g, sample)
+			return m
+		}), "%s: report %q is not collected by artifacts.paths", filepath.Base(f), tmpl.Spec.Artifacts.Report)
+	}
+	assert.GreaterOrEqual(t, reports, 7, "the catalog's report-producing templates declare their report")
 }
 
 // TestCatalog_SamplesRunTheCatalogProjects: every sample used to point at

@@ -4,6 +4,7 @@
   <h1>{{$r.Name}}</h1>
   <span class="status {{phaseClass $r.Phase}}" id="run-phase">{{$r.Phase}}</span>
   {{with $r.Tool}}<span class="chip">{{.}}</span>{{end}}
+  {{with $r.Report}}<a class="button" href="{{$d.Path}}/artifacts/{{artifactPath .}}" target="_blank" rel="noopener">Open report</a>{{end}}
   {{if terminal $r.Phase}}<a class="button secondary" href="{{$d.Path}}/compare">Compare with another run</a>{{end}}
 </div>
 {{with $r.Message}}<p class="message">{{.}}</p>{{end}}

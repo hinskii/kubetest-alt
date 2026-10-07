@@ -634,6 +634,11 @@ func evalStringsInSpec(spec *testsv1alpha1.TestSpec, scope expr.Scope) error {
 		} else {
 			spec.Artifacts.Paths = v
 		}
+		if v, err := expr.Eval(spec.Artifacts.Report, scope); err != nil {
+			return fmt.Errorf("resolve spec.artifacts.report: %w", err)
+		} else {
+			spec.Artifacts.Report = v
+		}
 	}
 	for name, svc := range spec.Services {
 		if err := evalService(&svc, scope); err != nil {

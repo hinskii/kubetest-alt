@@ -165,6 +165,12 @@ type ArtifactSpec struct {
 	Paths []string `json:"paths,omitempty"`
 	// +optional
 	Compress string `json:"compress,omitempty"`
+	// Report names the run's main human-readable report (e.g. an HTML
+	// dashboard): a path or glob, relative to the working directory like
+	// paths, that one of paths must also collect. The first matching
+	// artifact (sorted) is the run's report in the API and Control Center.
+	// +optional
+	Report string `json:"report,omitempty"`
 }
 
 // ArtifactRef is a pointer to a scraped artifact in object storage.

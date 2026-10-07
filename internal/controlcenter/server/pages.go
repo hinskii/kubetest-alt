@@ -55,6 +55,9 @@ const (
 // formComment is the comment form's text field.
 const formComment = "text"
 
+// artifactCSP is the Content-Security-Policy of a served artifact.
+const artifactCSP = "sandbox allow-scripts"
+
 // finalPhases are the phases a run never leaves.
 var finalPhases = map[string]bool{
 	string(testsv1alpha1.PhasePassed): true, string(testsv1alpha1.PhaseFailed): true,
@@ -519,7 +522,12 @@ func (s *Server) runArtifact(w http.ResponseWriter, r *http.Request) {
 		ct = cmp.Or(mediaTypes[strings.ToLower(pathpkg.Ext(path))], ct)
 	}
 	h.Set("Content-Type", ct)
-	h.Set("Content-Security-Policy", "sandbox")
+	// Artifacts are test output: HTML reports (JMeter, Gatling,
+	// Playwright, k6) need their scripts, so scripts run — but in a
+	// sandbox without allow-same-origin, i.e. an opaque origin that can't
+	// read Control Center's cookies or pages, submit forms or navigate
+	// the top window.
+	h.Set("Content-Security-Policy", artifactCSP)
 	h.Set("X-Content-Type-Options", "nosniff")
 	disposition := "inline"
 	if r.URL.Query().Get("download") == "1" {

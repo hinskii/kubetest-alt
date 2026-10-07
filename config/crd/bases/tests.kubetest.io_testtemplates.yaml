@@ -53,6 +53,13 @@ spec:
                     items:
                       type: string
                     type: array
+                  report:
+                    description: |-
+                      Report names the run's main human-readable report (e.g. an HTML
+                      dashboard): a path or glob, relative to the working directory like
+                      paths, that one of paths must also collect. The first matching
+                      artifact (sorted) is the run's report in the API and Control Center.
+                    type: string
                 type: object
               config:
                 additionalProperties:

@@ -5,4 +5,5 @@ expect:
   metrics: {requests: 20, errors: 10, error_rate: 0.5}
   metricsPresent: [rps, latency_avg_ms, latency_p95_ms]
   artifacts: ["repo/results/**/js/stats.json"]
+  report: true
 timeout: 15m

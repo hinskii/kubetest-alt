@@ -43,11 +43,10 @@ spec:
   # pre-creates repo/results/ before the tool starts.
   artifacts:
     paths:
-      - "repo/results/**/assertions.json"
-      - "repo/results/**/global_stats.json"
-      - "repo/results/**/stats.json"
-      - "repo/results/**/simulation.log"
-      - "repo/results/**/index.html"
+      # The whole results folder: the HTML report (index.html + js/,
+      # style/ and per-request pages) plus simulation.log and the stats.
+      - "repo/results/**"
+    report: "repo/results/**/index.html"
   # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
   # never affects the verdict.
   metrics:

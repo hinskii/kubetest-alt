@@ -293,7 +293,9 @@ func TestRunArtifact_SandboxedStream(t *testing.T) {
 	rec := w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html", "")
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Equal(t, "<script>x</script>", rec.Body.String())
-	assert.Equal(t, "sandbox", rec.Header().Get("Content-Security-Policy"), "workload HTML can't run as Control Center")
+	csp := rec.Header().Get("Content-Security-Policy")
+	assert.Equal(t, "sandbox allow-scripts", csp, "report scripts run, in an opaque origin")
+	assert.NotContains(t, csp, "allow-same-origin", "workload HTML can't run as Control Center")
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 	assert.Equal(t, `inline; filename="index.html"`, rec.Header().Get("Content-Disposition"))
 	rec = w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html?download=1", "")
@@ -388,4 +390,14 @@ func TestRunAndTestPages_ShowCommit(t *testing.T) {
 	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
 	assert.NotContains(t, plain.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String(), "<th>Commit</th>",
 		"no git source, no commit column")
+}
+
+func TestRunPage_OpenReport(t *testing.T) {
+	run := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
+	run.Status.ResolvedSpec = `{"artifacts":{"report":"report/index.html"}}`
+	body := newWorld(t, smokeTest(), run).get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
+	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html" target="_blank" rel="noopener">Open report</a>`)
+
+	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
+	assert.NotContains(t, plain.get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String(), "Open report")
 }

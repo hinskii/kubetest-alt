@@ -308,6 +308,19 @@ func TestResolve_InterpolatesContainerArgsAndEnv(t *testing.T) {
 	assert.Equal(t, "eu-west-1", spec.Container.Env[1].Value)
 }
 
+func TestResolve_InterpolatesArtifactsReport(t *testing.T) {
+	test := mkTestBase()
+	test.Spec.Artifacts = &testsv1alpha1.ArtifactSpec{
+		Paths:  []string{"{{ config.dir }}/**"},
+		Report: "{{ config.dir }}/report/index.html",
+	}
+	test.Spec.Config = map[string]testsv1alpha1.Parameter{"dir": {Type: "string", Default: "repo/out"}}
+	spec, err := Resolve(test, mkRun(), MapStore{}, Options{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"repo/out/**"}, spec.Artifacts.Paths)
+	assert.Equal(t, "repo/out/report/index.html", spec.Artifacts.Report, "report resolves like paths")
+}
+
 func TestResolve_UnknownRef_ErrorNamesField(t *testing.T) {
 	test := mkTestBase()
 	test.Spec.Container.Args = []string{"--vus", "{{ config.nope }}"}

@@ -51,3 +51,23 @@ that don't fit a shared template. See:
 ## Onboarding a new tool
 
 See [../../docs/onboarding-a-tool.md](../../docs/onboarding-a-tool.md).
+
+## HTML reports (step 18g)
+
+Templates name their main report in `spec.artifacts.report`; Control
+Center shows it as "Open report" on the run page.
+
+| Template | Report | How it is produced |
+|---|---|---|
+| jmeter | `repo/results/report/index.html` | `-e -o` dashboard from the JTL |
+| gatling | `repo/results/**/index.html` | Gatling's own report (whole results folder collected) |
+| k6 | `repo/results/k6-report.html` | built-in web dashboard, `K6_WEB_DASHBOARD_EXPORT`; k6 writes it only after two aggregation periods — `config.dashboardPeriod` (default 10s, so runs under ~20s get none; short tests set e.g. `1s`) |
+| locust | `repo/results/locust-report.html` | `--html` |
+| playwright | `results/playwright-report/index.html` | `--reporter=junit,html`, `PLAYWRIGHT_HTML_OPEN=never` |
+| zap-baseline | `repo/results/zap-report.html` | `-r` |
+| gradle | `**/build/reports/tests/test/index.html` | Gradle's test report |
+
+No report: artillery (HTML reports were removed from Artillery 2.x),
+cypress, newman, pytest, maven, cucumber, soapui, kubepug — they would
+need reporter plugins the vendor images don't ship. Functional tools show
+their test cases, screenshots and videos instead (step 18-2f).

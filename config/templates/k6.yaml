@@ -22,6 +22,17 @@ spec:
     # --summary-export feeds spec.metrics. k6 silently skips it when the
     # directory is missing; the wrapper pre-creates repo/results/.
     args: ["run", "--summary-export", "/data/repo/results/summary.json", "/data/repo/{{ config.script }}"]
+    # The built-in web dashboard, exported as a self-contained HTML report
+    # when the run ends.
+    env:
+      - name: K6_WEB_DASHBOARD
+        value: "true"
+      - name: K6_WEB_DASHBOARD_EXPORT
+        value: "/data/repo/results/k6-report.html"
+      # k6 writes the report only after two aggregation periods: with the
+      # default 10s, runs shorter than ~20s get none. Short tests lower it.
+      - name: K6_WEB_DASHBOARD_PERIOD
+        value: "{{ config.dashboardPeriod }}"
   # Artifact/metrics paths are relative to the wrapper's working
   # directory, /data (no container.workingDir set), and the tool writes
   # under /data/repo/results — hence the repo/ prefix. The wrapper
@@ -31,6 +42,8 @@ spec:
     paths:
       - "repo/results/**/*.json"
       - "repo/results/**/*.xml"
+      - "repo/results/k6-report.html"
+    report: "repo/results/k6-report.html"
   # Load metrics (docs/metrics.md) — parsed by /entry after the tool exits;
   # never affects the verdict.
   metrics:
@@ -41,3 +54,9 @@ spec:
       type: string
       # Required — every k6 Test names its own script.
       # Empty default = required per step-13 semantics.
+    # Web-dashboard aggregation period (Go duration); the HTML report
+    # needs at least two of them, so short runs set e.g. "1s".
+    dashboardPeriod:
+      type: string
+      default: "10s"
+      pattern: "^[0-9]+(ms|s|m)$"

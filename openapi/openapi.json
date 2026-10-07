@@ -254,6 +254,10 @@
             "format": "date-time",
             "type": "string"
           },
+          "report": {
+            "description": "Artifact path of the run's main report (spec.artifacts.report), when it produced one.",
+            "type": "string"
+          },
           "source": {
             "type": "string"
           },
