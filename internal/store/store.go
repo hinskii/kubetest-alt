@@ -141,6 +141,8 @@ type Filter struct {
 	Namespace string
 	Phase     string
 	Source    string
+	// ParentRun: only a composite run's children.
+	ParentRun string
 	// SinceInclusive / UntilExclusive bound finished_at.
 	SinceInclusive *time.Time
 	UntilExclusive *time.Time

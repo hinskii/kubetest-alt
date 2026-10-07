@@ -165,6 +165,7 @@ type ListRunsOptions struct {
 	Test          string
 	Phase         string
 	Source        string
+	Parent        string // a composite run's children only
 	Limit         int
 	After         string     // RunPage.NextCursor of the previous page
 	FinishedAfter *time.Time // finished runs only
@@ -188,6 +189,7 @@ func (c *Client) ListRuns(ctx context.Context, o ListRunsOptions) (*RunPage, err
 	set("test", o.Test)
 	set("phase", o.Phase)
 	set("source", o.Source)
+	set("parent", o.Parent)
 	set("after", o.After)
 	if o.Limit > 0 {
 		q.Set("limit", strconv.Itoa(o.Limit))
@@ -411,6 +413,13 @@ func (c *Client) OpenLiveView(ctx context.Context, namespace, id, path, rawQuery
 		segs[i] = url.PathEscape(seg)
 	}
 	return c.do(ctx, http.MethodGet, "/runs/"+url.PathEscape(id)+"/live/"+strings.Join(segs, "/"), q, nil)
+}
+
+// RunEvents returns the Kubernetes events of a run's objects, oldest first.
+func (c *Client) RunEvents(ctx context.Context, namespace, id string) ([]RunEvent, error) {
+	var out []RunEvent
+	err := c.getJSON(ctx, "/runs/"+url.PathEscape(id)+"/events", ns(namespace), &out)
+	return out, err
 }
 
 // Healthz checks the server is reachable.

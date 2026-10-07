@@ -169,6 +169,9 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	page := ccPage(t, ui+runPath, ccDeveloper)
 	assert.Contains(t, page, ">passed<")
 	assert.NotContains(t, page, "live-view", "no live view once the run is over")
+	// The pod's Kubernetes events (the API server's events RBAC).
+	assert.Contains(t, page, "Kubernetes events")
+	assert.Contains(t, page, ">Scheduled<", "the scheduler's event for the run's pod")
 	logs := ccPage(t, ui+runPath+"/logs.txt", ccDeveloper)
 	assert.Contains(t, logs, "live.js", "the run's log through Control Center")
 	history := ccPage(t, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6", ccDeveloper)

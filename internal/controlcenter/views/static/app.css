@@ -282,3 +282,10 @@ input, select {
 
 /* Live view: the tool's dashboard in a sandboxed frame. */
 .live-view { width: 100%; height: 75vh; min-height: 480px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-muted); }
+
+/* Run page: what Kubernetes says (step 18 follow-up). */
+.activity { margin: 0.25rem 0 0; padding: 0.5rem 0.75rem; border-radius: 8px; background: var(--surface-muted); }
+.activity.warning, .table.events tr.warning td { color: var(--danger-text); }
+.activity.warning { background: var(--danger-bg); }
+h2.inline { display: inline; font-size: inherit; }
+summary { cursor: pointer; }

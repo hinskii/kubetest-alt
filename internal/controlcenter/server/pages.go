@@ -451,6 +451,15 @@ type runData struct {
 	// LiveViewURL is the tool's live UI (spec.liveView) while the run
 	// isn't finished, by signed link.
 	LiveViewURL string
+	// Events are Kubernetes events of the run's objects (about an hour
+	// back); Activity is the newest while the run isn't finished — why a
+	// queued run waits ("Pulling image …").
+	Events    []apiclient.RunEvent
+	EventsErr string
+	Activity  *apiclient.RunEvent
+	Warnings  int
+	// Children are a composite run's child runs.
+	Children []apiclient.Run
 }
 
 func stepKind(key string) string {
@@ -488,6 +497,26 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 		data.Artifacts = arts
 		data.Media, data.MoreMedia = mediaOf(arts)
 	}
+	if events, err := client.RunEvents(r.Context(), ns, id); err != nil {
+		data.EventsErr = messageOf(err)
+	} else {
+		data.Events = events
+		for _, e := range events {
+			if e.Type == "Warning" {
+				data.Warnings++
+			}
+		}
+		if data.Live && len(events) > 0 {
+			data.Activity = &events[len(events)-1]
+		}
+	}
+	if isComposite(run) {
+		if page, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{
+			Namespace: ns, Parent: run.Name, Limit: maxChildren}); err == nil {
+			data.Children = page.Runs
+			slices.SortFunc(data.Children, func(a, b apiclient.Run) int { return views.NaturalCompare(a.Name, b.Name) })
+		}
+	}
 	if !data.Live && run.TestCounts != nil && run.TestCounts.Failed > 0 {
 		// Best effort: without run history there are only the counts.
 		data.FailedCases, _ = client.RunTestCases(r.Context(), ns, id, true)
@@ -497,6 +526,19 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func finished(phase string) bool { return finalPhases[phase] }
+
+// maxChildren bounds a composite run's child list.
+const maxChildren = 200
+
+// isComposite: a composite run's status has per-step aggregates s0, s1, …
+func isComposite(run *apiclient.Run) bool {
+	for k := range run.Steps {
+		if len(k) > 1 && k[0] == 's' && strings.Trim(k[1:], "0123456789") == "" {
+			return true
+		}
+	}
+	return false
+}
 
 func sortedStepKeys(m map[string]apiclient.StepResult) []string {
 	keys := slices.Collect(maps.Keys(m))

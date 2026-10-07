@@ -331,6 +331,7 @@ func TestHelmTemplate_APIServerRoleIsNarrow(t *testing.T) {
 	assert.Contains(t, role, `resources: ["testtemplates"]`)
 	assert.Regexp(t, `resources: \["testtemplates"\]\s+verbs: \["get", "list", "watch"\]`, role,
 		"templates are read-only")
+	assert.Regexp(t, `resources: \["events"\]\s+verbs: \["get", "list"\]`, role, "events are read-only")
 }
 
 // helmTemplateFails renders with args and returns the error output.

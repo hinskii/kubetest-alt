@@ -187,7 +187,7 @@ func (a *archiveStore) List(_ context.Context, f store.Filter, p store.Page) ([]
 	var out []store.Row
 	for _, r := range a.rows {
 		if (f.TestRef == "" || r.TestRef == f.TestRef) && (f.Namespace == "" || r.Namespace == f.Namespace) &&
-			(f.Phase == "" || r.Phase == f.Phase) {
+			(f.Phase == "" || r.Phase == f.Phase) && (f.ParentRun == "" || r.ParentRun == f.ParentRun) {
 			out = append(out, r)
 		}
 	}

@@ -111,6 +111,9 @@ field. The admission webhooks refuse Tests and TestRuns that break it at
 - **The API server's ClusterRole is cluster-wide** (create Tests and
   TestRuns anywhere). A token holder can start runs in any namespace; set
   `apiserver.namespace` to confine it to one.
+  It also reads Events (get/list) for the run page; `/runs/{id}/events`
+  returns only those of the run's Job and pods, but Event messages can
+  name images, nodes and volumes.
 - **The policy covers what a Test can ask for, not everything a pod
   can do.** Running as root inside the container, for example, is allowed.
   For defence in depth, label test namespaces with Pod Security Admission

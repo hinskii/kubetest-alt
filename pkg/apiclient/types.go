@@ -107,6 +107,18 @@ type Run struct {
 	Report string `json:"report,omitempty"`
 }
 
+// RunEvent is a Kubernetes event about one of a run's objects (its Job,
+// pods, workers, services) — GET /runs/{id}/events. Kubernetes keeps events
+// for about an hour.
+type RunEvent struct {
+	Time    time.Time `json:"time"`
+	Type    string    `json:"type"`   // Normal | Warning
+	Reason  string    `json:"reason"` // Pulling, Scheduled, FailedScheduling, BackOff, …
+	Object  string    `json:"object"` // Pod/load-1-x7k2p
+	Message string    `json:"message"`
+	Count   int32     `json:"count,omitempty"`
+}
+
 // GitCheckout is what a run's content fetcher checked out.
 type GitCheckout struct {
 	// URI is the repository (spec.content.git.uri, credentials removed).

@@ -61,6 +61,11 @@ type Server struct {
 	// Empty serves unauthenticated — local development only.
 	AuthToken string
 
+	// EventsReader reads Kubernetes events (GET /runs/{id}/events). Not
+	// the informer cache: events churn and only one run's are wanted.
+	// Nil falls back to K8sClient (tests).
+	EventsReader client.Reader
+
 	// Namespace scopes every read/write. Empty string means "all namespaces"
 	// — accepted for a cluster-scoped API server, callers that need
 	// per-tenant multi-namespace can front this with an auth layer.
@@ -183,6 +188,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /runs", s.createRun)
 	mux.HandleFunc("GET /runs", s.listRuns)
 	mux.HandleFunc("GET /runs/{id}/live/{path...}", s.liveView)
+	mux.HandleFunc("GET /runs/{id}/events", s.listRunEvents)
 	mux.HandleFunc("GET /runs/{id}", s.getRun)
 	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
 	mux.HandleFunc("GET /runs/{id}/testcases", s.listRunCases)

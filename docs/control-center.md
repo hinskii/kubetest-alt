@@ -143,6 +143,16 @@ the pieces it needs: oauth2-proxy lets `GET /live/` through
 (`controlCenter.liveView.existingSecret` to bring your own), shared by all
 replicas.
 
+## Run page: what Kubernetes says
+
+A run that isn't finished shows its newest Kubernetes event under the
+status — "Now: Pulling — Pulling image …", "FailedScheduling — 0/3 nodes
+are available …" — which says why a run sits in `queued`. The page reloads
+when the phase changes, and every 15 s while queued. Below the log, the
+events of the run's Job and pods (`GET /runs/{id}/events`); Kubernetes
+keeps them for about an hour, so older runs have none. A composite run
+lists its child runs, each linked.
+
 ## Operations
 
 - Port `9090` (Service port `ops`): `/healthz`, `/readyz` and `/metrics`,

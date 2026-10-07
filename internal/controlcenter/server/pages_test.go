@@ -30,6 +30,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -460,4 +461,57 @@ func TestRunAgain_FromHistory(t *testing.T) {
 	require.NoError(t, w.k8s.List(context.Background(), &runs))
 	require.Len(t, runs.Items, 1)
 	assert.Equal(t, map[string]string{"target": "http://shop"}, runs.Items[0].Spec.Config, "vus=10 is today's default")
+}
+
+func TestRunPage_EventsAndActivity(t *testing.T) {
+	at := func(m int) metav1.Time { return metav1.NewTime(time.Date(2026, 10, 7, 12, m, 0, 0, time.UTC)) }
+	ev := func(name, obj, typ, reason, msg string, m int) *corev1.Event {
+		return &corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"},
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: obj},
+			Type:           typ, Reason: reason, Message: msg, LastTimestamp: at(m), Count: 1}
+	}
+	live := runOf("smoke-live", testsv1alpha1.PhaseQueued)
+	live.Status.FinishedAt = nil
+	w := newWorld(t, smokeTest(), live,
+		ev("e1", "smoke-live-abc12", corev1.EventTypeNormal, "Scheduled", "Successfully assigned", 1),
+		ev("e2", "smoke-live-abc12", corev1.EventTypeWarning, "Failed", "ErrImagePull <b>", 2),
+		ev("e3", "smoke-live-abc12", corev1.EventTypeNormal, "Pulling", "Pulling image \"mcr/playwright\"", 3),
+		ev("e4", "other-xyz", corev1.EventTypeNormal, "Pulling", "not ours", 4))
+
+	body := w.get(t, "/clusters/dev/runs/team-a/smoke-live", "").Body.String()
+	assert.Contains(t, body, `data-phase="queued"`)
+	assert.Contains(t, body, "Now: <strong>Pulling</strong>", "the newest event is the activity")
+	assert.Contains(t, body, "Kubernetes events")
+	assert.Contains(t, body, "1 warning")
+	assert.Contains(t, body, "ErrImagePull &lt;b&gt;", "messages are escaped")
+	assert.NotContains(t, body, "not ours")
+	assert.Less(t, strings.Index(body, ">Scheduled<"), strings.Index(body, ">Failed<"), "oldest first")
+
+	done := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed)).
+		get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
+	assert.NotContains(t, done, "Now:", "no activity on a finished run")
+	assert.NotContains(t, done, "Kubernetes events", "no panel without events")
+}
+
+func TestRunPage_CompositeChildren(t *testing.T) {
+	parent := runOf("suite-abcde", testsv1alpha1.PhasePassed)
+	parent.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "passed"}, "s1": {Phase: "passed"}}
+	child := func(name string) *testsv1alpha1.TestRun {
+		c := runOf(name, testsv1alpha1.PhasePassed)
+		c.UID = types.UID(name)
+		c.Labels = map[string]string{store.LabelParentRun: "suite-abcde"}
+		return c
+	}
+	stray := runOf("other-1", testsv1alpha1.PhasePassed)
+	stray.UID = "other-1"
+	w := newWorld(t, smokeTest(), parent, child("suite-abcde-s10"), child("suite-abcde-s2"), stray)
+
+	body := w.get(t, "/clusters/dev/runs/team-a/suite-abcde", "").Body.String()
+	assert.Contains(t, body, "Child runs")
+	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/suite-abcde-s2"`)
+	assert.Less(t, strings.Index(body, ">suite-abcde-s2<"), strings.Index(body, ">suite-abcde-s10<"), "natural order")
+	assert.NotContains(t, body, ">other-1<")
+
+	plain := w.get(t, "/clusters/dev/runs/team-a/other-1", "").Body.String()
+	assert.NotContains(t, plain, "Child runs", "not composite")
 }

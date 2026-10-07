@@ -9,6 +9,7 @@
   {{if canRun $.User}}<form method="post" action="{{$d.Path}}/rerun"><button type="submit" class="button secondary" title="Start {{$r.TestRef}} again with this run's parameters">Run again</button></form>{{end}}
 </div>
 {{with $r.Message}}<p class="message">{{.}}</p>{{end}}
+{{with $d.Activity}}<p class="activity{{if eq .Type "Warning"}} warning{{end}}" title="{{.Object}}">Now: <strong>{{.Reason}}</strong> — {{.Message}} <span class="muted small">since {{when .Time}}</span></p>{{end}}
 
 <section class="panel facts">
   <dl>
@@ -33,6 +34,26 @@
   <dl>{{range $k, $v := $r.Metrics}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}</dl>
   {{end}}
 </section>
+
+{{with $d.Children}}
+<section class="panel">
+  <h2>Child runs <span class="muted">{{len .}}</span></h2>
+  <table class="table">
+    <thead><tr><th>Run</th><th>Test</th><th>Phase</th><th>Started</th><th>Duration</th></tr></thead>
+    <tbody>
+    {{range .}}
+      <tr>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></td>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .TestRef}}">{{.TestRef}}</a></td>
+        <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
+        <td class="muted">{{with .StartedAt}}{{when .}}{{end}}</td>
+        <td>{{duration .DurationMs}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
 
 {{with $d.LiveViewURL}}
 <section class="panel">
@@ -85,7 +106,7 @@
     <h2>Log</h2>
     <a class="button secondary" href="{{$d.Path}}/logs.txt">Download</a>
   </div>
-  <pre class="log" id="log" data-src="{{$d.Path}}/log" data-live="{{$d.Live}}">Loading…</pre>
+  <pre class="log" id="log" data-src="{{$d.Path}}/log" data-live="{{$d.Live}}" data-phase="{{$r.Phase}}">Loading…</pre>
 </section>
 
 {{if $d.Media}}
@@ -148,4 +169,28 @@
 </section>
 {{end}}
 <script src="/static/run.js" defer></script>
+{{if or $d.Events $d.EventsErr}}
+<section class="panel">
+  <details{{if or $d.Live $d.Warnings}} open{{end}}>
+    <summary><h2 class="inline">Kubernetes events <span class="muted">{{len $d.Events}}{{with $d.Warnings}} · {{.}} warning{{if gt . 1}}s{{end}}{{end}}</span></h2></summary>
+    {{with $d.EventsErr}}<p class="muted">Events unavailable: {{.}}</p>{{end}}
+    {{if $d.Events}}
+    <table class="table events">
+      <thead><tr><th>Time</th><th>Reason</th><th>Object</th><th>Message</th></tr></thead>
+      <tbody>
+      {{range $d.Events}}
+        <tr{{if eq .Type "Warning"}} class="warning"{{end}}>
+          <td class="muted">{{when .Time}}</td>
+          <td><strong>{{.Reason}}</strong>{{if gt .Count 1}} <span class="muted">×{{.Count}}</span>{{end}}</td>
+          <td class="mono small">{{.Object}}</td>
+          <td>{{.Message}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p class="muted small">From Kubernetes, which keeps events for about an hour.</p>
+    {{end}}
+  </details>
+</section>
+{{end}}
 {{end}}

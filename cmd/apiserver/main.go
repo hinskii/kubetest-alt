@@ -136,6 +136,7 @@ func main() {
 	srv := &apiserver.Server{
 		AuthToken:          token,
 		K8sClient:          cl.GetClient(),
+		EventsReader:       cl.GetAPIReader(), // run events: read directly, never cached
 		Namespace:          namespace,
 		Bucket:             storageCfg.Bucket,
 		PresignedURLExpiry: presignExpiry,

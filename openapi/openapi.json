@@ -536,6 +536,15 @@
             }
           },
           {
+            "description": "Only the children of this composite run (by name).",
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Finished runs per page (default 50, max 500).",
             "in": "query",
             "name": "limit",
@@ -1178,6 +1187,89 @@
         },
         "summary": "Set (replace) the comment of a finished run. The comment lives on the run-history row and is deleted with the run. Author from X-Kubetest-User."
       }
+    },
+    "/runs/{id}/events": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "properties": {
+                      "count": {
+                        "type": "integer"
+                      },
+                      "message": {
+                        "type": "string"
+                      },
+                      "object": {
+                        "description": "Kind/name, e.g. Pod/load-1-x7k2p.",
+                        "type": "string"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "time": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "type": {
+                        "enum": [
+                          "Normal",
+                          "Warning"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "time",
+                      "type",
+                      "reason",
+                      "object",
+                      "message"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Kubernetes events of the run's Job, pods, workers and services (\"Pulling image …\", \"FailedScheduling\", \"BackOff\"), oldest first, at most 200. Kubernetes keeps events for about an hour."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "/runs/{id}/live/{path}": {
       "get": {

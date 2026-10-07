@@ -238,6 +238,10 @@ func (p *Postgres) List(ctx context.Context, f Filter, page Page) ([]Row, error)
 		clauses = append(clauses, fmt.Sprintf(`phase = $%d`, len(args)+1))
 		args = append(args, f.Phase)
 	}
+	if f.ParentRun != "" {
+		clauses = append(clauses, fmt.Sprintf(`parent_run = $%d`, len(args)+1))
+		args = append(args, f.ParentRun)
+	}
 	if f.Source != "" {
 		clauses = append(clauses, fmt.Sprintf(`source = $%d`, len(args)+1))
 		args = append(args, f.Source)

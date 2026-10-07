@@ -1,6 +1,7 @@
 {{/*
 API server ClusterRole — exactly what internal/apiserver uses, nothing
-more. Logs and artifacts come from object storage, so no pods/pods/log.
+more. Logs and artifacts come from object storage, so no pods/pods/log;
+run events are read to explain a run that waits.
 No TestTriggers / Webhooks: the API server never touches them, and write
 access there would let any API caller rewire triggers or exfiltrate run
 events (fixes.md #1).
@@ -21,6 +22,11 @@ rules:
   - apiGroups: ["tests.kubetest.io"]
     resources: ["testruns"]
     verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  # Events: read-only, for GET /runs/{id}/events ("Pulling image …",
+  # "FailedScheduling" for a run's Job). Nothing else of the core group.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list"]
   # TestTemplates: read-only, for GET /tests/{name}/resolved.
   - apiGroups: ["tests.kubetest.io"]
     resources: ["testtemplates"]

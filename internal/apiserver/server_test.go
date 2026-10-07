@@ -154,6 +154,9 @@ func (f *fakeRunStore) List(_ context.Context, filter store.Filter, page store.P
 		if filter.Source != "" && r.Source != filter.Source {
 			continue
 		}
+		if filter.ParentRun != "" && r.ParentRun != filter.ParentRun {
+			continue
+		}
 		if filter.Namespace != "" && r.Namespace != filter.Namespace {
 			continue
 		}

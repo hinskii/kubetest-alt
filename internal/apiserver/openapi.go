@@ -110,6 +110,7 @@ func OpenAPISpec() map[string]any {
 						queryParam("test", "Filter by Test name."),
 						queryParam("phase", "Filter by phase."),
 						queryParam("source", "Filter by source (ui, api, cli, cron, trigger, gitops)."),
+						queryParam("parent", "Only the children of this composite run (by name)."),
 						queryParam("limit", "Finished runs per page (default 50, max 500)."),
 						queryParam("after", "Opaque cursor from the previous page's X-Next-Cursor."),
 						queryParam("finishedAfter", "RFC 3339; only runs finished at or after it (excludes live runs)."),
@@ -314,6 +315,29 @@ func OpenAPISpec() map[string]any {
 				},
 				"parameters": []any{pathParam("id", "TestRun name or UID."),
 					pathParam("path", "Path inside the UI (may contain /)."), namespaceParam()},
+			},
+			"/runs/{id}/events": map[string]any{
+				"get": map[string]any{
+					"summary": "Kubernetes events of the run's Job, pods, workers and services (\"Pulling image …\", " +
+						"\"FailedScheduling\", \"BackOff\"), oldest first, at most 200. Kubernetes keeps events " +
+						"for about an hour.",
+					"responses": map[string]any{
+						"200": jsonResponse(map[string]any{"type": "array", "items": map[string]any{
+							"type":     "object",
+							"required": []string{"time", "type", "reason", "object", "message"},
+							"properties": map[string]any{
+								"time":    map[string]any{"type": "string", "format": "date-time"},
+								"type":    map[string]any{"type": "string", "enum": []string{"Normal", "Warning"}},
+								"reason":  map[string]any{"type": "string"},
+								"object":  map[string]any{"type": "string", "description": "Kind/name, e.g. Pod/load-1-x7k2p."},
+								"message": map[string]any{"type": "string"},
+								"count":   map[string]any{"type": "integer"},
+							},
+						}}),
+						"404": errorSchema(),
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
 			"/runs/{id}/artifacts": map[string]any{
 				"get": map[string]any{

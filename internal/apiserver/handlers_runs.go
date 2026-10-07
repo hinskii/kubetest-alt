@@ -214,6 +214,7 @@ func (s *Server) listRuns(w http.ResponseWriter, r *http.Request) {
 // listRunsQuery is the parsed GET /runs query.
 type listRunsQuery struct {
 	ns, testRef, phase, source string
+	parent                     string // a composite run's children only
 	limit                      int
 	finishedAfter              *time.Time
 	cursor                     *runCursor
@@ -224,7 +225,8 @@ type listRunsQuery struct {
 func (q listRunsQuery) matches(cr *testsv1alpha1.TestRun) bool {
 	return (q.testRef == "" || cr.Spec.TestRef == q.testRef) &&
 		(q.phase == "" || string(cr.Status.Phase) == q.phase) &&
-		(q.source == "" || cr.Spec.Source == q.source)
+		(q.source == "" || cr.Spec.Source == q.source) &&
+		(q.parent == "" || cr.Labels[store.LabelParentRun] == q.parent)
 }
 
 // parseListRunsQuery validates the query; errors are client errors (400).
@@ -234,6 +236,7 @@ func (s *Server) parseListRunsQuery(r *http.Request) (listRunsQuery, error) {
 		testRef: q.Get("test"),
 		phase:   q.Get("phase"),
 		source:  q.Get("source"),
+		parent:  q.Get("parent"),
 		limit:   parseLimitOrDefault(q.Get("limit")),
 	}
 	var err error
@@ -301,7 +304,7 @@ func (s *Server) mergeStoreRuns(ctx context.Context, lq listRunsQuery,
 	}
 	f := store.Filter{
 		TestRef: lq.testRef, Namespace: lq.ns, Phase: lq.phase, Source: lq.source,
-		SinceInclusive: lq.finishedAfter,
+		ParentRun: lq.parent, SinceInclusive: lq.finishedAfter,
 	}
 	page := store.Page{Limit: lq.limit}
 	if lq.cursor != nil {
