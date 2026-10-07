@@ -75,6 +75,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
+	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
+	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}", s.runPage)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/compare", s.compareRuns)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/log", s.runLogPoll)

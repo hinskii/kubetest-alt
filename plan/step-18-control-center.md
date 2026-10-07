@@ -226,7 +226,7 @@ Done as built:
   (URI without credentials). Control Center links the commit on GitHub,
   GitLab and Bitbucket.
 
-### 18f — Analytics (generic)
+### 18f — Analytics (generic) ✅
 **Decisions (user, 2026-10-07):** no legacy import — history starts fresh
 with kubetest (the tool is about to be rolled out; the old Control
 Center's k6 results are not carried over). No Critical Path parsing.
@@ -242,6 +242,26 @@ Analytics cover **every catalog tool**, not only k6.
   columns/series = metric keys present on the selected runs, never a
   per-tool layout.
 - One comparison builder for table + Markdown export over selected runs.
+
+Done as built (`/clusters/{c}/tests/{ns}/{name}/analytics`, linked from
+the Test page):
+- Window of the last 10/30/100 finished runs (`GET /runs?test=`): a
+  phase strip (oldest → newest, each tick links to its run), pass rate
+  (passed of passed+failed+error; aborted runs have no verdict),
+  duration avg and p95, last failure.
+- Trends table: Duration, then `Tests failed` / `Tests total` when runs
+  report JUnit, then every metric key present on the runs (natural
+  order) — latest, change vs the earlier average, min/avg/max and a
+  server-rendered SVG sparkline (no script; CSP stays `default-src
+  'self'`). Only passed and failed runs feed the series.
+- JUnit tools: flaky and failing-now counts from
+  `/tests/{name}/testcases`, linking to the test-cases page.
+- Comparison: tick up to 10 runs → one column per run (oldest first):
+  status, start, duration, commit, test counts, who started it; every
+  metric (change in brackets against the first run); every parameter.
+  The Markdown is on the page and downloadable (`analytics/compare.md`).
+- Composite children no longer inherit the parent's `composite` tool
+  label, so per-tool numbers count them under their own tool.
 
 ### 18g — Schedules, cleanup, k6 extras
 - One-shot schedules = TestRun with `spec.notBefore` (18d2); list =

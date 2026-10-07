@@ -19,9 +19,11 @@ package views
 import (
 	"fmt"
 	"html/template"
+	"math"
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -51,7 +53,26 @@ var funcs = template.FuncMap{
 	"dict":         dict,
 	"shortSHA":     shortSHA,
 	"commitURL":    commitURL,
+	"num":          FormatNumber,
+	"durationF":    func(ms float64) string { return duration(int64(math.Round(ms))) },
+	"inc":          func(n int) int { return n + 1 },
 }
+
+// FormatNumber renders a metric value: integers as such, otherwise up to
+// three decimals.
+func FormatNumber(v float64) string {
+	if v == math.Trunc(v) && math.Abs(v) < 1e15 {
+		return strconv.FormatFloat(v, 'f', 0, 64)
+	}
+	return strconv.FormatFloat(math.Round(v*1000)/1000, 'f', -1, 64)
+}
+
+// Duration and ShortSHA are the template helpers for Go code that
+// renders the same values outside a template (Markdown export).
+func Duration(ms int64) string { return duration(ms) }
+
+// ShortSHA: see shortSHA.
+func ShortSHA(sha string) string { return shortSHA(sha) }
 
 // shortSHA is the 7-character form of a commit SHA.
 func shortSHA(sha string) string {

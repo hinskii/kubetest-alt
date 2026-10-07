@@ -1,0 +1,102 @@
+{{define "content"}}
+{{$d := .Data}}{{$s := $d.Summary}}
+{{$test := printf "/clusters/%s/tests/%s/%s" (pathEscape $d.Cluster) (pathEscape $d.Namespace) (pathEscape $d.Test)}}
+<div class="title-row"><h1>{{$d.Test}} · analytics</h1></div>
+<form class="filters" method="get">
+  <label>Window
+    <select name="runs">{{range $d.Windows}}<option value="{{.}}"{{if eq . $d.Window}} selected{{end}}>last {{.}} runs</option>{{end}}</select>
+  </label>
+  <button type="submit" class="button secondary">Apply</button>
+</form>
+
+{{if not $d.Runs}}
+<p class="muted">No finished runs yet. Trends and comparisons appear once runs of this Test have finished.</p>
+{{else}}
+<section class="panel">
+  <h2>Overview <span class="muted">{{$s.Finished}} finished runs</span></h2>
+  <div class="strip" aria-label="Run phases, oldest first">
+    {{range $d.Strip}}<a class="tick {{phaseClass .Phase}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}" title="{{.Name}} · {{.Phase}}{{with .StartedAt}} · {{when .}}{{end}}"></a>{{end}}
+  </div>
+  <dl class="stats">
+    <div><dt>Pass rate</dt><dd>{{with $s.PassRate}}{{.}}{{else}}—{{end}}</dd></div>
+    <div><dt>Passed · failed · error · aborted</dt><dd>{{$s.Passed}} · {{$s.Failed}} · {{$s.Errored}} · {{$s.Aborted}}</dd></div>
+    <div><dt>Duration avg · p95</dt><dd>{{with duration $s.AvgMs}}{{.}} · {{duration $s.P95Ms}}{{else}}—{{end}}</dd></div>
+    {{with $s.LastFailure}}<div><dt>Last failure</dt><dd><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a>{{with .FinishedAt}} <span class="muted">{{when .}}</span>{{end}}</dd></div>{{end}}
+    {{if $d.HasCases}}<div><dt>Test cases</dt><dd>{{if $d.CasesErr}}<span class="muted">unavailable: {{$d.CasesErr}}</span>{{else}}<a href="{{$test}}/cases?runs={{$d.Window}}&amp;sort=flaky">{{$d.FlakyCount}} flaky · {{$d.FailingNow}} failing now</a>{{end}}</dd></div>{{end}}
+  </dl>
+</section>
+
+{{if $d.Trends}}
+<section class="panel">
+  <h2>Trends <span class="muted">passed and failed runs, oldest → newest</span></h2>
+  <table class="table">
+    <thead><tr><th>Value</th><th>Trend</th><th>Latest</th><th>vs earlier avg</th><th>Min</th><th>Avg</th><th>Max</th><th>Runs</th></tr></thead>
+    <tbody>
+    {{range $d.Trends}}{{$ms := eq .Unit "ms"}}
+      <tr>
+        <td class="mono">{{.Label}}</td>
+        <td><svg class="spark" width="{{.SparkWidth}}" height="{{.SparkTop}}" viewBox="0 0 {{.SparkWidth}} {{.SparkTop}}" role="img" aria-label="{{.Label}} trend">
+          <polyline points="{{.Points}}"/><circle cx="{{.LastX}}" cy="{{.LastY}}" r="2.5"/></svg></td>
+        <td><strong>{{if $ms}}{{durationF .Latest}}{{else}}{{num .Latest}}{{end}}</strong></td>
+        <td class="muted">{{.Delta}}</td>
+        <td class="muted">{{if $ms}}{{durationF .Min}}{{else}}{{num .Min}}{{end}}</td>
+        <td class="muted">{{if $ms}}{{durationF .Avg}}{{else}}{{num .Avg}}{{end}}</td>
+        <td class="muted">{{if $ms}}{{durationF .Max}}{{else}}{{num .Max}}{{end}}</td>
+        <td class="muted">{{len .Values}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}
+
+{{with $d.Compare}}
+<section class="panel">
+  <div class="title-row"><h2>Comparison</h2><a class="button secondary" href="{{$d.MarkdownHref}}">Download Markdown</a></div>
+  {{with .Missing}}<p class="muted">Not runs of this Test (skipped): {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}</p>{{end}}
+  {{if .Runs}}
+  <div class="table-scroll">
+  <table class="table compare-table">
+    <thead><tr><th></th>{{range .Runs}}<th><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></th>{{end}}</tr></thead>
+    <tbody>
+      {{range .Facts}}<tr><th scope="row">{{.Label}}</th>{{range .Cells}}<td>{{.Value}}</td>{{end}}</tr>{{end}}
+      {{with .Metrics}}<tr class="section"><th scope="rowgroup" colspan="{{len $d.Compare.Runs | inc}}">Metrics</th></tr>
+      {{range .}}<tr><th scope="row" class="mono">{{.Label}}</th>{{range .Cells}}<td>{{with .Value}}{{.}}{{else}}<span class="muted">—</span>{{end}}{{with .Delta}} <span class="muted">({{.}})</span>{{end}}</td>{{end}}</tr>{{end}}{{end}}
+      {{with .Params}}<tr class="section"><th scope="rowgroup" colspan="{{len $d.Compare.Runs | inc}}">Parameters</th></tr>
+      {{range .}}<tr><th scope="row" class="mono">{{.Label}}</th>{{range .Cells}}<td>{{with .Value}}{{.}}{{else}}<span class="muted">—</span>{{end}}</td>{{end}}</tr>{{end}}{{end}}
+    </tbody>
+  </table>
+  </div>
+  {{if and .Metrics (gt (len .Runs) 1)}}<p class="muted small">Changes in brackets are against the first (oldest) run.</p>{{end}}
+  <details>
+    <summary>Markdown</summary>
+    <textarea class="markdown" readonly rows="12" aria-label="Comparison as Markdown">{{$d.Markdown}}</textarea>
+  </details>
+  {{end}}
+</section>
+{{end}}
+
+<section class="panel">
+  <h2>Compare runs</h2>
+  <form method="get">
+    <input type="hidden" name="runs" value="{{$d.Window}}">
+    <table class="table">
+      <thead><tr><th></th><th>Run</th><th>Phase</th><th>Started</th><th>Duration</th><th>Note</th></tr></thead>
+      <tbody>
+      {{range $d.Runs}}
+        <tr>
+          <td><input type="checkbox" name="run" value="{{.Name}}" aria-label="compare {{.Name}}"{{if index $d.Selected .Name}} checked{{end}}></td>
+          <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+          <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
+          <td class="muted">{{with .StartedAt}}{{when .}}{{end}}</td>
+          <td>{{duration .DurationMs}}</td>
+          <td>{{with .Comment}}{{.Text}}{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    <p><button type="submit" class="button">Compare selected</button> <span class="muted small">up to 10 runs</span></p>
+  </form>
+</section>
+{{end}}
+{{end}}
