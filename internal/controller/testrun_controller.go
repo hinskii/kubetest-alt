@@ -93,7 +93,8 @@ type TestRunReconciler struct {
 	RunStore RunStorePersister
 
 	// APIReader is a cache-bypassing client used ONLY to disambiguate the
-	// informer-lag race on orphan-job detection: after createJob() sets
+	// informer-lag race before acting on a NotFound (orphan-job detection,
+	// a just-created Test in setup): after createJob() sets
 	// jobName in Status, the very next reconcile may see the Job as
 	// NotFound because the informer hasn't observed it yet. Direct API
 	// reads avoid classifying a healthy run as OrphanJobMissing. Nil is
@@ -433,6 +434,15 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 	testKey := types.NamespacedName{Namespace: run.Namespace, Name: run.Spec.TestRef}
 	if err := r.Get(ctx, testKey, &test); err != nil {
 		if apierrors.IsNotFound(err) {
+			// A Test created just before its run may not be in the
+			// informer cache yet; ending the run with TestNotFound would
+			// fail a run whose Test exists (seen as a CI flake on composite
+			// children). Same cache-lag guard as orphan-job detection.
+			if exists, lerr := r.existsLive(ctx, testKey, &testsv1alpha1.Test{}); lerr != nil {
+				return ctrl.Result{}, lerr
+			} else if exists {
+				return ctrl.Result{RequeueAfter: cacheLagRequeue}, nil
+			}
 			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
 				ReasonTestNotFound,
 				fmt.Sprintf("Test %q not found in namespace %q", run.Spec.TestRef, run.Namespace))
@@ -584,15 +594,12 @@ func (r *TestRunReconciler) observeOrCreateJob(ctx context.Context, logger inter
 			// this race manifested as a false-positive orphan on the
 			// TestCatalog_ApplyAllTemplatesAndSamples run for one of
 			// the samples.
-			if r.APIReader != nil {
-				var live batchv1.Job
-				if lerr := r.APIReader.Get(ctx, jobKey, &live); lerr == nil {
-					// Job exists live — cache is stale, requeue and let
-					// the informer catch up.
-					return ctrl.Result{RequeueAfter: 500 * time.Millisecond}, nil
-				} else if !apierrors.IsNotFound(lerr) {
-					return ctrl.Result{}, lerr
-				}
+			if exists, lerr := r.existsLive(ctx, jobKey, &batchv1.Job{}); lerr != nil {
+				return ctrl.Result{}, lerr
+			} else if exists {
+				// Job exists live — cache is stale, requeue and let the
+				// informer catch up.
+				return ctrl.Result{RequeueAfter: cacheLagRequeue}, nil
 			}
 			// Genuinely gone.
 			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError,
@@ -605,6 +612,27 @@ func (r *TestRunReconciler) observeOrCreateJob(ctx context.Context, logger inter
 	}
 
 	return r.inspectJob(ctx, run, &job)
+}
+
+// cacheLagRequeue is how soon a reconcile that found the informer cache
+// behind the API server tries again.
+const cacheLagRequeue = 500 * time.Millisecond
+
+// existsLive reports whether key exists on the API server, bypassing the
+// informer cache. Used only to confirm a cache NotFound before acting on
+// it irreversibly; without an APIReader the cache's answer stands.
+func (r *TestRunReconciler) existsLive(ctx context.Context, key types.NamespacedName, obj client.Object) (bool, error) {
+	if r.APIReader == nil {
+		return false, nil
+	}
+	switch err := r.APIReader.Get(ctx, key, obj); {
+	case err == nil:
+		return true, nil
+	case apierrors.IsNotFound(err):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 // createJob compiles the resolved spec and creates aux ConfigMap + Job.
