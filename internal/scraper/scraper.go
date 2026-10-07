@@ -115,7 +115,7 @@ func (s *Scraper) Scrape(ctx context.Context, workingDir string, spec executor.S
 		result.Artifacts = append(result.Artifacts, ref)
 
 		if strings.EqualFold(filepath.Ext(m.RelPath), ".xml") {
-			counts = mergeCounts(counts, m.AbsPath)
+			counts = mergeReport(counts, &result, m.AbsPath)
 		}
 	}
 
@@ -232,14 +232,19 @@ func detectContentType(path string, r io.ReadSeeker) string {
 	return "application/octet-stream"
 }
 
-// mergeCounts parses one XML file and folds its counts into acc. Silently
-// returns acc unchanged on parse error or non-JUnit content — the file is
-// still uploaded via the outer loop; we just don't count it.
-func mergeCounts(acc *executor.TestCounts, path string) *executor.TestCounts {
-	c, err := ParseJUnitFile(path)
+// mergeReport parses one XML file, folds its counts into acc and appends
+// its test cases to result (up to executor.MaxTestCases; counts keep
+// going). Silently returns acc unchanged on parse error or non-JUnit
+// content — the file is still uploaded via the outer loop; we just don't
+// count it.
+func mergeReport(acc *executor.TestCounts, result *executor.ScrapeResult, path string) *executor.TestCounts {
+	c, cases, err := ParseJUnitReportFile(path)
 	if err != nil {
 		// Not JUnit (unrelated XML) or malformed — either way, don't count.
 		return acc
+	}
+	if room := executor.MaxTestCases - len(result.TestCases); room > 0 {
+		result.TestCases = append(result.TestCases, cases[:min(room, len(cases))]...)
 	}
 	if acc == nil {
 		return &c

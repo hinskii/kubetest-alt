@@ -117,6 +117,54 @@ type AuditEntry struct {
 	Details   map[string]string `json:"details,omitempty"`
 }
 
+// TestCase is one JUnit test case of a finished run
+// (GET /runs/{id}/testcases).
+type TestCase struct {
+	// Key identifies the case across runs: class (or suite) › name.
+	Key        string `json:"key"`
+	Suite      string `json:"suite,omitempty"`
+	Class      string `json:"class,omitempty"`
+	Name       string `json:"name"`
+	Status     string `json:"status"` // passed | failed | error | skipped
+	DurationMs int64  `json:"durationMs,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Details    string `json:"details,omitempty"`
+	File       string `json:"file,omitempty"`
+}
+
+// CaseStats aggregates one test case over a Test's recent runs
+// (GET /tests/{name}/testcases).
+type CaseStats struct {
+	Key   string `json:"key"`
+	Suite string `json:"suite,omitempty"`
+	Class string `json:"class,omitempty"`
+	Name  string `json:"name"`
+	// Runs is how many of the window's runs had the case.
+	Runs       int       `json:"runs"`
+	Passed     int       `json:"passed"`
+	Failed     int       `json:"failed"` // failed + errored
+	Skipped    int       `json:"skipped"`
+	AvgMs      int64     `json:"avgMs"`
+	MaxMs      int64     `json:"maxMs"`
+	LastStatus string    `json:"lastStatus"`
+	LastAt     time.Time `json:"lastAt"`
+	// Flips counts passed ↔ not-passed changes between consecutive runs.
+	Flips int `json:"flips"`
+	// Flaky: the case both passed and failed within the window.
+	Flaky bool `json:"flaky"`
+}
+
+// CaseRun is one run's result for one test case
+// (GET /tests/{name}/testcases/history).
+type CaseRun struct {
+	RunUID     string    `json:"runUid"`
+	RunName    string    `json:"runName,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Status     string    `json:"status"`
+	DurationMs int64     `json:"durationMs,omitempty"`
+	Message    string    `json:"message,omitempty"`
+}
+
 // Audit actions.
 const (
 	ActionRunCreate    = "run.create"

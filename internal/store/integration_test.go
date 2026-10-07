@@ -41,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 // pgHarness owns the shared Postgres container + pool for the whole
@@ -506,4 +507,72 @@ func TestIntegration_RetentionQueries(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, left, 1)
 	assert.Equal(t, "run.create", left[0].Action)
+}
+
+// Migration 0004: a run's cases round-trip, re-saving replaces them, and
+// stats/history across runs find the failing and the flaky case.
+func TestIntegration_TestCases(t *testing.T) {
+	ctx := t.Context()
+	p := NewPostgres(harness.pool)
+	// A month no other test uses: the end of this test drops it.
+	base := time.Date(2025, 11, 20, 12, 0, 0, 0, time.UTC)
+	ns := "cases-" + time.Now().Format("150405.000000")
+	mkCases := func(flaky string) []executor.TestCase {
+		return []executor.TestCase{
+			{Class: "shop", Name: "login", Status: executor.CasePassed, DurationMs: 100},
+			{Class: "shop", Name: "checkout", Status: flaky, DurationMs: 300, Message: "timeout"},
+			{Class: "shop", Name: "refund", Status: executor.CaseFailed, Message: "500", Details: "stack"},
+		}
+	}
+	statuses := []string{executor.CasePassed, executor.CaseFailed, executor.CasePassed, executor.CaseFailed}
+	var uids []string
+	for i, st := range statuses {
+		uid := fmt.Sprintf("aaaaaaaa-0000-0000-0000-00000000c0%02d", i)
+		run := newRun(uid, "shop-e2e", testsv1alpha1.PhaseFailed, base.Add(time.Duration(i)*time.Hour))
+		run.Namespace = ns
+		require.NoError(t, p.SaveFinished(ctx, run))
+		require.NoError(t, p.SaveTestCases(ctx, run, mkCases(st)))
+		require.NoError(t, p.SaveTestCases(ctx, run, mkCases(st)), "idempotent re-save")
+		uids = append(uids, uid)
+	}
+
+	all, err := p.RunCases(ctx, uids[3], false)
+	require.NoError(t, err)
+	require.Len(t, all, 3, "re-saving replaced, not duplicated")
+	assert.Equal(t, "shop › login", all[0].Key)
+	failed, err := p.RunCases(ctx, uids[3], true)
+	require.NoError(t, err)
+	assert.Len(t, failed, 2)
+	assert.Equal(t, "stack", failed[1].Details)
+
+	stats, err := p.CaseStats(ctx, ns, "shop-e2e", 10)
+	require.NoError(t, err)
+	require.Len(t, stats, 3)
+	assert.Equal(t, "shop › refund", stats[0].Key, "most failures first")
+	assert.Equal(t, 4, stats[0].Failed)
+	assert.False(t, stats[0].Flaky())
+	checkout := stats[1]
+	assert.Equal(t, "shop › checkout", checkout.Key)
+	assert.True(t, checkout.Flaky())
+	assert.Equal(t, 3, checkout.Flips, "pass→fail→pass→fail")
+	assert.Equal(t, executor.CaseFailed, checkout.LastStatus)
+	assert.Equal(t, int64(300), checkout.AvgMs)
+
+	window2, err := p.CaseStats(ctx, ns, "shop-e2e", 2)
+	require.NoError(t, err)
+	for _, s := range window2 {
+		assert.LessOrEqual(t, s.Runs, 2)
+	}
+
+	hist, err := p.CaseHistory(ctx, ns, "shop-e2e", "shop › checkout", 0)
+	require.NoError(t, err)
+	require.Len(t, hist, 4)
+	assert.Equal(t, uids[3], hist[0].RunUID, "newest first")
+	assert.Equal(t, "run-"+uids[3][:8], hist[0].RunName)
+
+	// Retention drops a month of cases with its runs.
+	require.NoError(t, p.DropPartitions(ctx, []Partition{PartitionForTime(base)}))
+	gone, err := p.RunCases(ctx, uids[0], false)
+	require.NoError(t, err)
+	assert.Empty(t, gone)
 }

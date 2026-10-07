@@ -205,6 +205,50 @@ func OpenAPISpec() map[string]any {
 				},
 				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
+			"/runs/{id}/testcases": map[string]any{
+				"get": map[string]any{
+					"summary": "A finished run's JUnit test cases in report order (from run history; empty " +
+						"until the run is persisted or when it reported no JUnit). ?status=failed keeps " +
+						"failed and errored cases.",
+					"parameters": []any{queryParam("status", "failed: only failed and errored cases.")},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonArrayOf("#/components/schemas/TestCase")),
+						"400": errorSchema(),
+						"404": errorSchema(),
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
+			},
+			"/tests/{name}/testcases": map[string]any{
+				"get": map[string]any{
+					"summary": "Every test case of a Test aggregated over its last ?runs=N runs that " +
+						"reported cases (default 30, max 200): pass/fail/skip counts, durations, last " +
+						"status, flips between runs, flaky (both passed and failed). Most failures first.",
+					"parameters": []any{queryParam("runs", "Window of recent runs (1-200, default 30).")},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonArrayOf("#/components/schemas/CaseStats")),
+						"400": errorSchema(),
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+				"parameters": []any{pathParam("name", "Test name."), namespaceParam()},
+			},
+			"/tests/{name}/testcases/history": map[string]any{
+				"get": map[string]any{
+					"summary": "One test case's result in each of the Test's runs, newest first.",
+					"parameters": []any{
+						queryParam("case", "The case key (class or suite › name), from TestCase.key."),
+						queryParam("limit", "Max runs (default and max 200)."),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonArrayOf("#/components/schemas/CaseRun")),
+						"400": errorSchema(),
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+				"parameters": []any{pathParam("name", "Test name."), namespaceParam()},
+			},
 			"/audit": map[string]any{
 				"get": map[string]any{
 					"summary": "User actions recorded by this API server, newest first: runs created, " +
@@ -386,6 +430,48 @@ func OpenAPISpec() map[string]any {
 						"text": map[string]any{"type": "string"},
 						"by":   map[string]any{"type": "string"},
 						"at":   map[string]any{"type": "string", "format": "date-time"},
+					},
+				},
+				"TestCase": map[string]any{
+					"type":     "object",
+					"required": []string{"key", "name", "status"},
+					"properties": map[string]any{
+						"key":        map[string]any{"type": "string", "description": "class (or suite) › name"},
+						"suite":      map[string]any{"type": "string"},
+						"class":      map[string]any{"type": "string"},
+						"name":       map[string]any{"type": "string"},
+						"status":     map[string]any{"type": "string", "enum": []string{"passed", "failed", "error", "skipped"}},
+						"durationMs": map[string]any{"type": "integer"},
+						"message":    map[string]any{"type": "string"},
+						"details":    map[string]any{"type": "string", "description": "Failure text (stack excerpt), trimmed to 4 KiB."},
+						"file":       map[string]any{"type": "string"},
+					},
+				},
+				"CaseStats": map[string]any{
+					"type":     "object",
+					"required": []string{"key", "name", "runs", "passed", "failed", "skipped", "flaky"},
+					"properties": map[string]any{
+						"key": map[string]any{"type": "string"}, "suite": map[string]any{"type": "string"},
+						"class": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
+						"runs": map[string]any{"type": "integer"}, "passed": map[string]any{"type": "integer"},
+						"failed":  map[string]any{"type": "integer", "description": "Failed and errored."},
+						"skipped": map[string]any{"type": "integer"},
+						"avgMs":   map[string]any{"type": "integer"}, "maxMs": map[string]any{"type": "integer"},
+						"lastStatus": map[string]any{"type": "string"},
+						"lastAt":     map[string]any{"type": "string", "format": "date-time"},
+						"flips":      map[string]any{"type": "integer", "description": "passed ↔ not-passed changes between consecutive runs"},
+						"flaky":      map[string]any{"type": "boolean", "description": "Both passed and failed within the window."},
+					},
+				},
+				"CaseRun": map[string]any{
+					"type":     "object",
+					"required": []string{"runUid", "finishedAt", "status"},
+					"properties": map[string]any{
+						"runUid": map[string]any{"type": "string"}, "runName": map[string]any{"type": "string"},
+						"finishedAt": map[string]any{"type": "string", "format": "date-time"},
+						"status":     map[string]any{"type": "string"},
+						"durationMs": map[string]any{"type": "integer"},
+						"message":    map[string]any{"type": "string"},
 					},
 				},
 				"AuditEntry": map[string]any{

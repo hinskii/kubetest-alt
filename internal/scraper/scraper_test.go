@@ -21,6 +21,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -102,6 +103,30 @@ func TestScrape_JUnitCountsMerged(t *testing.T) {
 	require.NotNil(t, res.TestCounts)
 	// Single: 4/2/1/1. Nested: 6/3/2/1. Sum: 10/5/3/2.
 	assert.Equal(t, &executor.TestCounts{Total: 10, Passed: 5, Failed: 3, Skipped: 2}, res.TestCounts)
+	// Every case of both reports, in scrape order (nested.xml < single.xml).
+	require.Len(t, res.TestCases, 10)
+	assert.Equal(t, "Suite1", res.TestCases[0].Suite)
+	assert.Equal(t, "fails", res.TestCases[9].Name)
+	assert.Equal(t, executor.CaseFailed, res.TestCases[9].Status)
+}
+
+// A run with more cases than MaxTestCases keeps the first ones and the
+// full counts.
+func TestScrape_TestCasesAreCapped(t *testing.T) {
+	dir := t.TempDir()
+	var b strings.Builder
+	b.WriteString(`<testsuite name="big">`)
+	for range executor.MaxTestCases + 10 {
+		b.WriteString(`<testcase name="t"/>`)
+	}
+	b.WriteString(`</testsuite>`)
+	writeFile(t, dir, "big.xml", b.String())
+	res, err := New(storage.NewFake(), testBucket).Scrape(context.Background(), dir, executor.ScrapeSpec{
+		StoragePrefix: pfx("run-big"), Paths: []string{"*.xml"},
+	})
+	require.NoError(t, err)
+	assert.Len(t, res.TestCases, executor.MaxTestCases)
+	assert.Equal(t, executor.MaxTestCases+10, res.TestCounts.Total)
 }
 
 // TestScrape_NonJUnitXMLIgnored: a config.xml uploaded alongside real JUnit

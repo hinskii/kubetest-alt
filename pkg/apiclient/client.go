@@ -235,6 +235,45 @@ func (c *Client) DeleteComment(ctx context.Context, namespace, id string) error 
 	return resp.Body.Close()
 }
 
+// ---- Test cases ------------------------------------------------------------
+
+// RunTestCases lists a finished run's JUnit test cases; failedOnly keeps
+// failed and errored ones.
+func (c *Client) RunTestCases(ctx context.Context, namespace, id string, failedOnly bool) ([]TestCase, error) {
+	q := ns(namespace)
+	if failedOnly {
+		q.Set("status", "failed")
+	}
+	var out []TestCase
+	err := c.getJSON(ctx, "/runs/"+url.PathEscape(id)+"/testcases", q, &out)
+	return out, err
+}
+
+// TestCaseStats aggregates a Test's cases over its last `runs` runs
+// (0 = server default).
+func (c *Client) TestCaseStats(ctx context.Context, namespace, test string, runs int) ([]CaseStats, error) {
+	q := ns(namespace)
+	if runs > 0 {
+		q.Set("runs", strconv.Itoa(runs))
+	}
+	var out []CaseStats
+	err := c.getJSON(ctx, "/tests/"+url.PathEscape(test)+"/testcases", q, &out)
+	return out, err
+}
+
+// TestCaseHistory lists one case's results over a Test's runs, newest
+// first (limit 0 = server default).
+func (c *Client) TestCaseHistory(ctx context.Context, namespace, test, caseKey string, limit int) ([]CaseRun, error) {
+	q := ns(namespace)
+	q.Set("case", caseKey)
+	if limit > 0 {
+		q.Set("limit", strconv.Itoa(limit))
+	}
+	var out []CaseRun
+	err := c.getJSON(ctx, "/tests/"+url.PathEscape(test)+"/testcases/history", q, &out)
+	return out, err
+}
+
 // ---- Audit -----------------------------------------------------------------
 
 // ListAuditOptions filters GET /audit. Zero values are unset.

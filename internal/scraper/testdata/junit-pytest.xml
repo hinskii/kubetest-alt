@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="1" skipped="1" tests="4" time="0.010" timestamp="2026-10-07T08:59:50.868785+00:00" hostname="2794a70848bf"><testcase classname="test_sample" name="test_passes" time="0.000" /><testcase classname="test_sample" name="test_fails_on_purpose" time="0.000"><failure message="AssertionError: deliberate failure: the catalog e2e expects one red test&#10;assert (1 + 1) == 3">def test_fails_on_purpose():
+&gt;       assert 1 + 1 == 3, "deliberate failure: the catalog e2e expects one red test"
+E       AssertionError: deliberate failure: the catalog e2e expects one red test
+E       assert (1 + 1) == 3
+
+test_sample.py:6: AssertionError</failure></testcase><testcase classname="test_sample" name="test_skipped_on_purpose" time="0.000"><skipped type="pytest.skip" message="not on this platform">/w/test_sample.py:12: not on this platform</skipped></testcase><testcase classname="test_sample" name="test_errors_in_fixture" time="0.000"><error message="failed on setup with &quot;file /w/test_sample.py, line 17&#10;  def test_errors_in_fixture(missing_fixture):&#10;E       fixture 'missing_fixture' not found&#10;&gt;       available fixtures: cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory&#10;&gt;       use 'pytest --fixtures [testpath]' for help on them.&#10;&#10;/w/test_sample.py:17&quot;">file /w/test_sample.py, line 17
+  def test_errors_in_fixture(missing_fixture):
+E       fixture 'missing_fixture' not found
+&gt;       available fixtures: cache, capfd, capfdbinary, caplog, capsys, capsysbinary, capteesys, doctest_namespace, monkeypatch, pytestconfig, record_property, record_testsuite_property, record_xml_attribute, recwarn, subtests, tmp_path, tmp_path_factory, tmpdir, tmpdir_factory
+&gt;       use 'pytest --fixtures [testpath]' for help on them.
+
+/w/test_sample.py:17</error></testcase></testsuite></testsuites>

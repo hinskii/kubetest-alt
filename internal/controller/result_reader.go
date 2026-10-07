@@ -46,6 +46,10 @@ type RunResult struct {
 	// Attempts lists every try of a retried run (empty for a single try).
 	Attempts []executor.AttemptResult
 
+	// TestCases are the run's JUnit test cases (for run history only —
+	// never projected to the CR, which would bloat etcd).
+	TestCases []executor.TestCase
+
 	// Artifacts is the ref list — path + object-store key + size. Populated
 	// by the scraper. Empty slice means "scraper ran, nothing matched".
 	Artifacts []testsv1alpha1.ArtifactRef

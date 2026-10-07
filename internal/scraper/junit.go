@@ -21,8 +21,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
@@ -44,6 +47,7 @@ type junitSuites struct {
 }
 
 type junitSuite struct {
+	Name     string       `xml:"name,attr"`
 	Tests    int          `xml:"tests,attr"`
 	Failures int          `xml:"failures,attr"`
 	Errors   int          `xml:"errors,attr"`
@@ -52,12 +56,23 @@ type junitSuite struct {
 	Nested   []junitSuite `xml:"testsuite"`
 }
 
-// junitCase is present so we can count files that emit <testcase> without
-// summary attributes on the enclosing <testsuite> — that's newman's default.
+// junitCase is one <testcase>: counted when the enclosing <testsuite> has
+// no summary attributes (newman's default), and reported as a test case.
 type junitCase struct {
-	Skipped *struct{} `xml:"skipped"`
-	Failure *struct{} `xml:"failure"`
-	Errored *struct{} `xml:"error"`
+	Name      string       `xml:"name,attr"`
+	Classname string       `xml:"classname,attr"`
+	Time      string       `xml:"time,attr"`
+	File      string       `xml:"file,attr"`
+	Skipped   *junitResult `xml:"skipped"`
+	Failure   *junitResult `xml:"failure"`
+	Errored   *junitResult `xml:"error"`
+}
+
+// junitResult is a <failure>, <error> or <skipped> element.
+type junitResult struct {
+	Message string `xml:"message,attr"`
+	Type    string `xml:"type,attr"`
+	Text    string `xml:",chardata"`
 }
 
 // IsProbablyJUnit does a cheap top-level element check so we don't fail
@@ -79,32 +94,102 @@ func IsProbablyJUnit(head []byte) bool {
 // counts. Malformed XML returns an error — the scraper logs it and moves on
 // rather than aborting the whole run.
 func ParseJUnit(r io.Reader) (executor.TestCounts, error) {
+	counts, _, err := ParseJUnitReport(r)
+	return counts, err
+}
+
+// ParseJUnitReport is ParseJUnit plus the individual test cases, in
+// document order (failure text trimmed to executor.MaxCase*Len).
+func ParseJUnitReport(r io.Reader) (executor.TestCounts, []executor.TestCase, error) {
 	limited := io.LimitReader(r, MaxJUnitFileBytes)
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		return executor.TestCounts{}, fmt.Errorf("read: %w", err)
+		return executor.TestCounts{}, nil, fmt.Errorf("read: %w", err)
 	}
 	if len(data) == 0 {
-		return executor.TestCounts{}, errors.New("empty file")
+		return executor.TestCounts{}, nil, errors.New("empty file")
 	}
 	if !IsProbablyJUnit(data[:min(len(data), 512)]) {
-		return executor.TestCounts{}, errNotJUnit
+		return executor.TestCounts{}, nil, errNotJUnit
 	}
 
 	// Try <testsuites> first (Cypress, Newman, k6 with junit output).
 	var top junitSuites
 	if err := xml.Unmarshal(data, &top); err == nil && (len(top.Suites) > 0 || len(top.Cases) > 0) {
-		return aggregate(top.Suites, top.Cases), nil
+		return aggregate(top.Suites, top.Cases), collectCases(top.Suites, top.Cases), nil
 	}
 
 	// Fall back to a single <testsuite> root.
 	var single junitSuite
 	if err := xml.Unmarshal(data, &single); err == nil {
-		return aggregate([]junitSuite{single}, nil), nil
+		suites := []junitSuite{single}
+		return aggregate(suites, nil), collectCases(suites, nil), nil
 	}
 
 	// If both parses failed, surface the LAST error verbatim.
-	return executor.TestCounts{}, fmt.Errorf("parse: not a valid JUnit XML document")
+	return executor.TestCounts{}, nil, fmt.Errorf("parse: not a valid JUnit XML document")
+}
+
+// collectCases flattens the report's test cases, each with the name of the
+// innermost suite around it.
+func collectCases(suites []junitSuite, topLevel []junitCase) []executor.TestCase {
+	var out []executor.TestCase
+	for _, c := range topLevel {
+		out = append(out, toTestCase("", c))
+	}
+	var walk func(s junitSuite)
+	walk = func(s junitSuite) {
+		for _, c := range s.Cases {
+			out = append(out, toTestCase(s.Name, c))
+		}
+		for _, n := range s.Nested {
+			walk(n)
+		}
+	}
+	for _, s := range suites {
+		walk(s)
+	}
+	return out
+}
+
+func toTestCase(suite string, c junitCase) executor.TestCase {
+	tc := executor.TestCase{
+		Suite: strings.TrimSpace(suite), Class: strings.TrimSpace(c.Classname),
+		Name: strings.TrimSpace(c.Name), File: c.File, Status: executor.CasePassed,
+	}
+	if sec, err := strconv.ParseFloat(strings.ReplaceAll(c.Time, ",", ""), 64); err == nil && sec > 0 {
+		tc.DurationMs = int64(math.Round(sec * 1000))
+	}
+	var res *junitResult
+	switch {
+	case c.Failure != nil:
+		tc.Status, res = executor.CaseFailed, c.Failure
+	case c.Errored != nil:
+		tc.Status, res = executor.CaseError, c.Errored
+	case c.Skipped != nil:
+		tc.Status, res = executor.CaseSkipped, c.Skipped
+	}
+	if res != nil {
+		msg := strings.TrimSpace(res.Message)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Type)
+		}
+		tc.Message = truncate(msg, executor.MaxCaseMessageLen)
+		tc.Details = truncate(strings.TrimSpace(res.Text), executor.MaxCaseDetailsLen)
+	}
+	return tc
+}
+
+// truncate cuts s to at most max bytes on a UTF-8 boundary, marking the cut.
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max - len("…")
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
 }
 
 // errNotJUnit is a sentinel the scraper checks with errors.Is to tell "not
@@ -157,11 +242,17 @@ func countCases(cases []junitCase, out *executor.TestCounts) {
 // ParseJUnitFile is a thin wrapper for scraper.Scrape use — opens, defers
 // close, delegates to ParseJUnit.
 func ParseJUnitFile(path string) (executor.TestCounts, error) {
+	counts, _, err := ParseJUnitReportFile(path)
+	return counts, err
+}
+
+// ParseJUnitReportFile opens path and delegates to ParseJUnitReport.
+func ParseJUnitReportFile(path string) (executor.TestCounts, []executor.TestCase, error) {
 	// #nosec G304 -- path comes from ExpandGlobs which validated it stays under workingDir.
 	f, err := os.Open(path)
 	if err != nil {
-		return executor.TestCounts{}, err
+		return executor.TestCounts{}, nil, err
 	}
 	defer func() { _ = f.Close() }()
-	return ParseJUnit(f)
+	return ParseJUnitReport(f)
 }

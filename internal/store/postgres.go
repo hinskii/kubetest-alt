@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -437,25 +438,43 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 	return out, rows.Err()
 }
 
+// partitionedTables share partition boundaries and suffixes: a month's
+// test_runs_YYYY_MM and test_cases_YYYY_MM are created and dropped
+// together.
+var partitionedTables = []string{"test_runs", "test_cases"}
+
+// tablePartition is part's name for table (part.Name is test_runs').
+func tablePartition(table string, part Partition) string {
+	return table + strings.TrimPrefix(part.Name, "test_runs")
+}
+
 func (p *Postgres) ensurePartition(ctx context.Context, part Partition) error {
 	// Format literals directly — Postgres CREATE TABLE ... PARTITION OF
 	// doesn't accept parameters for the FROM/TO bound expressions. Values
 	// come from our own PartitionForTime output, never user input.
-	stmt := fmt.Sprintf(
-		`CREATE TABLE IF NOT EXISTS %s PARTITION OF test_runs FOR VALUES FROM ('%s') TO ('%s')`,
-		part.Name,
-		part.Start.Format("2006-01-02 15:04:05Z07:00"),
-		part.End.Format("2006-01-02 15:04:05Z07:00"),
-	)
-	_, err := p.pool.Exec(ctx, stmt)
-	return err
+	for _, table := range partitionedTables {
+		stmt := fmt.Sprintf(
+			`CREATE TABLE IF NOT EXISTS %s PARTITION OF %s FOR VALUES FROM ('%s') TO ('%s')`,
+			tablePartition(table, part), table,
+			part.Start.Format("2006-01-02 15:04:05Z07:00"),
+			part.End.Format("2006-01-02 15:04:05Z07:00"),
+		)
+		if _, err := p.pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (p *Postgres) dropPartition(ctx context.Context, part Partition) error {
 	// DROP TABLE also detaches the partition — no separate DETACH needed.
-	stmt := fmt.Sprintf(`DROP TABLE IF EXISTS %s`, part.Name)
-	_, err := p.pool.Exec(ctx, stmt)
-	return err
+	// test_cases first: a failure leaves the runs (and the retry) in place.
+	for _, table := range slices.Backward(partitionedTables) {
+		if _, err := p.pool.Exec(ctx, fmt.Sprintf(`DROP TABLE IF EXISTS %s`, tablePartition(table, part))); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // jsonbOrNil returns nil (Postgres NULL) for empty containers, else the

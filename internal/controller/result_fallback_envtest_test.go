@@ -170,3 +170,30 @@ func TestReconcile_RetriedRun_AttemptsInSteps(t *testing.T) {
 	assert.Equal(t, testsv1alpha1.StepResult{Phase: "failed", Message: "exit code 1"}, final.Status.Steps[AttemptStepKey(1)])
 	assert.Equal(t, testsv1alpha1.StepPhase("passed"), final.Status.Steps[AttemptStepKey(2)].Phase)
 }
+
+// Step 18-2f: a finished run's JUnit cases reach run history (and never
+// the CR).
+func TestReconcile_TestCasesPersisted(t *testing.T) {
+	fakeResults.Reset()
+	fakeRunStore.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, newTestFixture(ns, "suite")))
+	run := newRunFixture(ns, "suite-run", "suite")
+	require.NoError(t, k8sClient.Create(ctx, run))
+	key := client.ObjectKey{Namespace: ns, Name: run.Name}
+	waitForJob(t, ctx, key, 5*time.Second)
+
+	cases := []executor.TestCase{
+		{Class: "shop", Name: "login", Status: executor.CasePassed},
+		{Class: "shop", Name: "checkout", Status: executor.CaseFailed, Message: "timeout"},
+	}
+	fakeResults.Set(run.Name, &RunResult{Phase: testsv1alpha1.PhaseFailed, TestCases: cases,
+		TestCounts: &testsv1alpha1.TestCounts{Total: 2, Passed: 1, Failed: 1}})
+	patchJobConditions(t, ctx, key, []batchv1.JobCondition{{Type: batchv1.JobComplete, Status: corev1.ConditionTrue}})
+	final := waitForPhase(t, ctx, key, testsv1alpha1.PhaseFailed, 5*time.Second)
+	assert.Eventually(t, func() bool {
+		return len(fakeRunStore.CasesForUID(string(final.UID))) == 2
+	}, 3*time.Second, 50*time.Millisecond)
+	assert.Equal(t, cases, fakeRunStore.CasesForUID(string(final.UID)))
+}

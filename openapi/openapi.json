@@ -36,6 +36,95 @@
         ],
         "type": "object"
       },
+      "CaseRun": {
+        "properties": {
+          "durationMs": {
+            "type": "integer"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "runName": {
+            "type": "string"
+          },
+          "runUid": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runUid",
+          "finishedAt",
+          "status"
+        ],
+        "type": "object"
+      },
+      "CaseStats": {
+        "properties": {
+          "avgMs": {
+            "type": "integer"
+          },
+          "class": {
+            "type": "string"
+          },
+          "failed": {
+            "description": "Failed and errored.",
+            "type": "integer"
+          },
+          "flaky": {
+            "description": "Both passed and failed within the window.",
+            "type": "boolean"
+          },
+          "flips": {
+            "description": "passed ↔ not-passed changes between consecutive runs",
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "lastAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastStatus": {
+            "type": "string"
+          },
+          "maxMs": {
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "runs",
+          "passed",
+          "failed",
+          "skipped",
+          "flaky"
+        ],
+        "type": "object"
+      },
       "Comment": {
         "properties": {
           "at": {
@@ -225,6 +314,51 @@
         "required": [
           "metadata",
           "spec"
+        ],
+        "type": "object"
+      },
+      "TestCase": {
+        "properties": {
+          "class": {
+            "type": "string"
+          },
+          "details": {
+            "description": "Failure text (stack excerpt), trimmed to 4 KiB.",
+            "type": "string"
+          },
+          "durationMs": {
+            "type": "integer"
+          },
+          "file": {
+            "type": "string"
+          },
+          "key": {
+            "description": "class (or suite) › name",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "passed",
+              "failed",
+              "error",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "status"
         ],
         "type": "object"
       },
@@ -1136,6 +1270,80 @@
         }
       ]
     },
+    "/runs/{id}/testcases": {
+      "get": {
+        "parameters": [
+          {
+            "description": "failed: only failed and errored cases.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TestCase"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "A finished run's JUnit test cases in report order (from run history; empty until the run is persisted or when it reported no JUnit). ?status=failed keeps failed and errored cases."
+      },
+      "parameters": [
+        {
+          "description": "TestRun name or UID.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/tests": {
       "get": {
         "responses": {
@@ -1586,6 +1794,143 @@
           }
         },
         "summary": "The Test merged with its TestTemplates (spec.use), for building run forms: full parameter schema incl. template-only parameters, tool, GitOps lock. Expressions are not evaluated. 422 when a referenced template is missing."
+      },
+      "parameters": [
+        {
+          "description": "Test name.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/tests/{name}/testcases": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Window of recent runs (1-200, default 30).",
+            "in": "query",
+            "name": "runs",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaseStats"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "Every test case of a Test aggregated over its last ?runs=N runs that reported cases (default 30, max 200): pass/fail/skip counts, durations, last status, flips between runs, flaky (both passed and failed). Most failures first."
+      },
+      "parameters": [
+        {
+          "description": "Test name.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/tests/{name}/testcases/history": {
+      "get": {
+        "parameters": [
+          {
+            "description": "The case key (class or suite › name), from TestCase.key.",
+            "in": "query",
+            "name": "case",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Max runs (default and max 200).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CaseRun"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "503": {
+            "description": "Run history store not configured."
+          }
+        },
+        "summary": "One test case's result in each of the Test's runs, newest first."
       },
       "parameters": [
         {

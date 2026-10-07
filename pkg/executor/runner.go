@@ -60,6 +60,7 @@ type ScrapeSpec struct {
 type ScrapeResult struct {
 	Artifacts   []ArtifactRef
 	TestCounts  *TestCounts
+	TestCases   []TestCase
 	ScrapeError string
 }
 

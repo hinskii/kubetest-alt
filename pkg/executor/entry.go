@@ -466,6 +466,7 @@ func (e *Entry) runScrape(ctx context.Context, req ExecutionRequest, result *Exe
 		return
 	}
 	result.Artifacts = sr.Artifacts
+	result.TestCases = sr.TestCases
 	if sr.TestCounts != nil && result.TestCounts == nil {
 		// Verdict processor may have already set TestCounts (junit path).
 		// Don't clobber those with scraper counts.

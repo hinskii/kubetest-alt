@@ -65,6 +65,52 @@ type RetrySpec struct {
 	Count int `json:"count,omitempty"`
 }
 
+// Test case statuses.
+const (
+	CasePassed  = "passed"
+	CaseFailed  = "failed"
+	CaseError   = "error"
+	CaseSkipped = "skipped"
+)
+
+// Bounds on the test cases one run reports.
+const (
+	MaxTestCases      = 5000
+	MaxCaseMessageLen = 1024
+	MaxCaseDetailsLen = 4096
+)
+
+// TestCase is one <testcase> of a JUnit report.
+type TestCase struct {
+	// Suite is the enclosing <testsuite name>; Class the testcase's
+	// classname. A case is identified across runs by Class (or Suite when
+	// there is no class) + Name — see CaseKey.
+	Suite string `json:"suite,omitempty"`
+	Class string `json:"class,omitempty"`
+	Name  string `json:"name"`
+	// Status is passed, failed, error or skipped.
+	Status     string `json:"status"`
+	DurationMs int64  `json:"durationMs,omitempty"`
+	// Message is the failure/error/skip message attribute; Details the
+	// element's text (stack trace, assertion diff), trimmed.
+	Message string `json:"message,omitempty"`
+	Details string `json:"details,omitempty"`
+	// File is the case's source file when the report says (file attr).
+	File string `json:"file,omitempty"`
+}
+
+// CaseKey identifies a test case across runs of the same Test.
+func (c TestCase) CaseKey() string {
+	group := c.Class
+	if group == "" {
+		group = c.Suite
+	}
+	if group == "" {
+		return c.Name
+	}
+	return group + " › " + c.Name
+}
+
 // AttemptResult is one try of a retried run.
 type AttemptResult struct {
 	Phase        string `json:"phase"`
@@ -129,6 +175,11 @@ type ExecutionResult struct {
 	// TestCounts is filled by the scraper (step 07) when JUnit XML files
 	// are found and parsed. Nil when the tool doesn't emit JUnit output.
 	TestCounts *TestCounts `json:"testCounts,omitempty"`
+
+	// TestCases are the individual results in the run's JUnit reports
+	// (bounded: MaxTestCases, failure text trimmed). Empty when the run
+	// scraped no JUnit XML.
+	TestCases []TestCase `json:"testCases,omitempty"`
 
 	// Attempts lists every try when the run was retried (Retry.Count > 0
 	// and the first try wasn't passed); the last entry is the verdict

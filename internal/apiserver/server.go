@@ -86,6 +86,10 @@ type Server struct {
 	// nothing and makes GET /audit 503.
 	Audit AuditLog
 
+	// Cases serves stored JUnit test cases (GET /runs/{id}/testcases,
+	// /tests/{name}/testcases[/history]). Nil makes them 503.
+	Cases CaseReader
+
 	// Templates resolves spec.use for GET /tests/{name}/resolved. Nil uses
 	// K8sClient (the production path).
 	Templates resolver.TemplateStore
@@ -161,6 +165,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /tests", s.createTest)
 	mux.HandleFunc("GET /tests/{name}", s.getTest)
 	mux.HandleFunc("GET /tests/{name}/resolved", s.getResolvedTest)
+	mux.HandleFunc("GET /tests/{name}/testcases", s.listTestCaseStats)
+	mux.HandleFunc("GET /tests/{name}/testcases/history", s.listTestCaseHistory)
 	mux.HandleFunc("PATCH /tests/{name}", s.patchTest)
 	mux.HandleFunc("DELETE /tests/{name}", s.deleteTest)
 
@@ -169,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /runs", s.listRuns)
 	mux.HandleFunc("GET /runs/{id}", s.getRun)
 	mux.HandleFunc("POST /runs/{id}/abort", s.abortRun)
+	mux.HandleFunc("GET /runs/{id}/testcases", s.listRunCases)
 	mux.HandleFunc("PUT /runs/{id}/comment", s.putComment)
 	mux.HandleFunc("DELETE /runs/{id}/comment", s.deleteComment)
 

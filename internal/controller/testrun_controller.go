@@ -50,6 +50,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/metrics"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/webhookdelivery"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -801,7 +802,58 @@ func (r *TestRunReconciler) persistFinished(ctx context.Context, run *testsv1alp
 			"run", run.Name, "uid", run.UID)
 		return
 	}
+	if err := r.persistTestCases(ctx, run); err != nil {
+		log.FromContext(ctx).Error(err, "saving test cases failed (will retry on next reconcile)",
+			"run", run.Name, "uid", run.UID)
+		return
+	}
 	r.persistedRuns.Store(key, struct{}{})
+}
+
+// TestCaseSaver is the run store's test-case write path (step 18-2f).
+type TestCaseSaver interface {
+	SaveTestCases(ctx context.Context, run *testsv1alpha1.TestRun, cases []executor.TestCase) error
+}
+
+// persistTestCases stores a finished run's JUnit test cases, read back
+// from its result.json (each worker's, for a parallel run). Composite
+// runs have none of their own — their children do. A result that can't
+// be read (no object storage, wrapper crash) just means no cases.
+func (r *TestRunReconciler) persistTestCases(ctx context.Context, run *testsv1alpha1.TestRun) error {
+	saver, ok := r.RunStore.(TestCaseSaver)
+	if !ok || isCompositeRun(run) {
+		return nil
+	}
+	var cases []executor.TestCase
+	if spec, err := resolvedSpecOf(run); err == nil && spec.Parallel != nil {
+		wr, ok := r.Results.(WorkerResultReader)
+		if !ok {
+			return nil
+		}
+		for _, w := range compiler.ParallelWorkers(spec.Parallel) {
+			res, err := wr.ReadWorker(ctx, run, w.Index)
+			if err != nil && !errors.Is(err, ErrResultNotFound) && !errors.Is(err, ErrResultMalformed) {
+				return err
+			}
+			if res != nil {
+				cases = append(cases, res.TestCases...)
+			}
+		}
+		cases = cases[:min(len(cases), executor.MaxTestCases)]
+	} else {
+		res, err := r.Results.Read(ctx, run)
+		switch {
+		case errors.Is(err, ErrResultNotFound), errors.Is(err, ErrResultMalformed):
+			return nil
+		case err != nil:
+			return err
+		}
+		cases = res.TestCases
+	}
+	if len(cases) == 0 {
+		return nil
+	}
+	return saver.SaveTestCases(ctx, run, cases)
 }
 
 // dispatchWebhooks lists Webhook CRs in the run's namespace, filters

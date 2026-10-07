@@ -48,6 +48,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/compiler"
 	"github.com/hinskii/kubetest-alt/internal/scheduler"
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -157,7 +158,8 @@ func (r *RecordingLogRegistry) CallsForRun(runName string) []LogRegistryCall {
 type RecordingRunStore struct {
 	mu       sync.Mutex
 	saves    []RecordedSave
-	errQueue map[string][]error // UID → errors to return, one per call
+	errQueue map[string][]error             // UID → errors to return, one per call
+	cases    map[string][]executor.TestCase // UID → last SaveTestCases
 }
 
 // RecordedSave is a captured invocation.
@@ -191,6 +193,24 @@ func (r *RecordingRunStore) SaveFinished(_ context.Context, run *testsv1alpha1.T
 	return nil
 }
 
+// SaveTestCases implements TestCaseSaver.
+func (r *RecordingRunStore) SaveTestCases(_ context.Context, run *testsv1alpha1.TestRun, cases []executor.TestCase) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cases == nil {
+		r.cases = map[string][]executor.TestCase{}
+	}
+	r.cases[string(run.UID)] = cases
+	return nil
+}
+
+// CasesForUID returns the test cases last saved for a run.
+func (r *RecordingRunStore) CasesForUID(uid string) []executor.TestCase {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cases[uid]
+}
+
 // QueueErr appends err to the per-UID queue. Every SaveFinished call for
 // that UID pops one entry; nil entries return success (useful to sequence
 // "fail then succeed" test cases).
@@ -219,6 +239,7 @@ func (r *RecordingRunStore) Reset() {
 	defer r.mu.Unlock()
 	r.saves = nil
 	r.errQueue = map[string][]error{}
+	r.cases = nil
 }
 
 // FakeResultReader is the ResultReader used across envtest tests. Concurrent-
