@@ -186,6 +186,12 @@ Analytics cover **every catalog tool**, not only k6.
   `metrics` (pkg/report vocabulary) for load tools; columns/series =
   metric keys present on the selected runs, never a per-tool layout.
 - One comparison builder for table + Markdown export over selected runs.
+- Report parsers for the two tools that only had a verdict (pkg/report,
+  `spec.metrics` in their catalog templates, fixtures from real output):
+  - ZAP (`zapJson`, `-J report.json`): `alerts_high`, `alerts_medium`,
+    `alerts_low`, `alerts_info`, `alerts_total`;
+  - kubepug (`kubepugJson`, `--format json`): `deprecated_apis`,
+    `deleted_apis`, `apis_total` (resources affected).
 
 ### 18g — Schedules, cleanup, k6 extras
 - One-shot schedules = TestRun with `spec.notBefore` (18d2); list =
