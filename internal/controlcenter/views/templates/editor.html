@@ -1,0 +1,193 @@
+{{define "content"}}
+{{$d := .Data}}{{$f := $d.Form}}
+<div class="title-row">
+  <h1>{{if $d.Edit}}Edit {{$f.Name}}{{else}}New test{{end}}</h1>
+  <a class="button secondary" href="{{$d.Back}}">Cancel</a>
+</div>
+<p class="muted">{{if $d.Edit}}Namespace {{$f.Namespace}} · managed in the GUI{{else}}The Test is created in the cluster, managed in the GUI — or download its YAML for Git (ArgoCD).{{end}}</p>
+
+{{with $d.Errors}}
+<div class="notice error" role="alert">
+  <strong>Fix these first:</strong>
+  <ul>{{range .}}<li>{{.}}</li>{{end}}</ul>
+</div>
+{{end}}
+
+<form method="post" action="{{$d.Action}}" class="wizard" id="wizard" novalidate data-step="{{$d.Step}}" data-mode="{{$f.Mode}}">
+  <input type="hidden" name="mode" value="{{$f.Mode}}">
+  <input type="hidden" name="resourceVersion" value="{{$f.ResourceVersion}}">
+
+{{if eq $f.Mode "yaml"}}
+  <input type="hidden" name="namespace" value="{{$f.Namespace}}">
+  <section class="panel">
+    <h2>YAML</h2>
+    {{with $d.YAMLOnly}}<p class="muted">{{.}}</p>{{end}}
+    <p class="muted small">The whole Test: anything the form doesn't cover (composite steps, services, parallel workers, volumes, verdict) is written here. {{if $d.Edit}}Name and namespace stay.{{end}}</p>
+    <textarea name="yaml" class="markdown yaml-editor" rows="28" spellcheck="false">{{$f.YAML}}</textarea>
+    <div class="actions wrap">
+      <button type="submit" name="action" value="preview" class="button secondary">Check</button>
+      {{if not $d.YAMLOnly}}<button type="submit" name="action" value="to-form" class="button secondary">Back to the form</button>{{end}}
+      <button type="submit" name="action" value="download" class="button secondary">Download YAML</button>
+      <button type="submit" name="action" value="save" class="button">{{if $d.Edit}}Save changes{{else}}Create test{{end}}</button>
+    </div>
+    {{template "check" $d}}
+  </section>
+{{else}}
+
+  <ol class="steps" aria-label="Steps">
+    <li data-goto="1">Basics</li>
+    <li data-goto="2">Source</li>
+    <li data-goto="3">Parameters &amp; container</li>
+    <li data-goto="4">Pod &amp; schedule</li>
+    <li data-goto="5">Review</li>
+  </ol>
+
+  <section class="panel wizard-step" data-step="1">
+    <h2>1. Basics</h2>
+    {{if $d.Edit}}
+      <p>{{$f.Namespace}}/<strong>{{$f.Name}}</strong></p>
+    {{else}}
+    <div class="run-form">
+      <label><span>Namespace</span>
+        <input type="text" name="namespace" value="{{$f.Namespace}}" list="namespaces" placeholder="demo" autocomplete="off" data-loaded="{{$f.Namespace}}">
+        <datalist id="namespaces">{{range $d.Namespaces}}<option value="{{.}}">{{end}}</datalist>
+      </label>
+      <label><span>Name <span class="muted">lowercase, digits, -</span></span>
+        <input type="text" name="name" value="{{$f.Name}}" placeholder="checkout-smoke" autocomplete="off" maxlength="200">
+      </label>
+      <div><button type="submit" formmethod="get" formaction="{{$d.Action}}" formnovalidate class="button secondary" id="load-catalog">Load the tool catalog</button></div>
+    </div>
+    {{end}}
+
+    <h3>Tool</h3>
+    {{with $d.TemplatesErr}}<p class="muted">The tool catalog could not be listed: {{.}}</p>{{end}}
+    {{if not $f.Namespace}}<p class="muted">Pick a namespace to see its tool catalog (TestTemplates).</p>{{end}}
+    <div class="choices">
+      {{range $d.Templates}}
+      <label class="choice">
+        <input type="radio" name="template" value="{{.Name}}"{{if eq .Name $f.Template}} checked{{end}} data-image="{{.Image}}" data-command="{{.Command}}" data-args="{{.Args}}">
+        <span><strong>{{.Name}}</strong>{{with .Tool}}{{if ne . $.Data.Form.Template}} <span class="chip">{{.}}</span>{{end}}{{end}}<br><span class="muted small mono">{{.Image}}</span></span>
+      </label>
+      {{end}}
+      <label class="choice">
+        <input type="radio" name="template" value=""{{if not $f.Template}} checked{{end}} data-image="" data-command="" data-args="">
+        <span><strong>Own image</strong><br><span class="muted small">any container: image + command</span></span>
+      </label>
+    </div>
+    <label class="field"><span>Tool label <span class="muted">kubetest.io/tool — groups the Test in the list; a template sets it</span></span>
+      <input type="text" name="tool" value="{{$f.Tool}}" placeholder="pytest" autocomplete="off" maxlength="63">
+    </label>
+  </section>
+
+  <section class="panel wizard-step" data-step="2">
+    <h2>2. Source</h2>
+    <p class="muted small">Lands under <span class="mono">/data</span> in the test pod: git at <span class="mono">/data/repo</span>, files at <span class="mono">/data/&lt;path&gt;</span>.</p>
+    <label class="check"><input type="checkbox" name="useGit" value="1"{{if $f.UseGit}} checked{{end}} data-toggles="git"> From a git repository</label>
+    <div class="run-form" data-toggled="git">
+      <label><span>Repository</span><input type="text" name="gitURI" value="{{$f.GitURI}}" placeholder="https://github.com/org/repo" autocomplete="off"></label>
+      <label><span>Revision <span class="muted">branch, tag or commit</span></span><input type="text" name="gitRevision" value="{{$f.GitRevision}}" placeholder="main" autocomplete="off"></label>
+      <label><span>Paths <span class="muted">sparse checkout, one per line</span></span><textarea name="gitPaths" rows="2" class="mono">{{$f.GitPaths}}</textarea></label>
+      <label><span>Token Secret <span class="muted">private repos, optional</span></span><input type="text" name="gitSecret" value="{{$f.GitSecret}}" placeholder="git-token" autocomplete="off"></label>
+      <label><span>Key in the Secret</span><input type="text" name="gitSecretKey" value="{{$f.GitSecretKey}}" placeholder="token" autocomplete="off"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="useFiles" value="1"{{if $f.UseFiles}} checked{{end}} data-toggles="files"> Inline files <span class="muted small">(up to 512 KB in all; bigger content belongs in git)</span></label>
+    <div data-toggled="files" id="files">
+      {{range $f.Files}}
+      <div class="file-row">
+        <input type="text" name="file.path" value="{{.Path}}" placeholder="repo/script.js" class="mono" autocomplete="off">
+        <textarea name="file.content" rows="10" class="markdown" spellcheck="false">{{.Content}}</textarea>
+      </div>
+      {{end}}
+      <button type="button" class="button secondary" id="add-file" hidden>Add a file</button>
+    </div>
+  </section>
+
+  <section class="panel wizard-step" data-step="3">
+    <h2>3. Parameters &amp; container</h2>
+    {{range $t := $d.Templates}}
+    <fieldset class="params" data-template="{{$t.Name}}">
+      <legend>Parameters of {{$t.Name}} <span class="muted small">— a run can still override them</span></legend>
+      {{if $t.Params}}
+      <div class="run-form">
+      {{range $t.Params}}
+        <label>
+          <span>{{.Name}} <span class="muted">{{.Type}}{{if .Required}}, set at run time if empty{{end}}</span></span>
+          {{if .Enum}}
+            <select name="param.{{$t.Name}}.{{.Name}}">
+              {{$v := .Value}}{{if .Required}}<option value=""></option>{{end}}
+              {{range .Enum}}<option value="{{.}}"{{if eq . $v}} selected{{end}}>{{.}}</option>{{end}}
+            </select>
+          {{else if eq .Type "boolean"}}
+            <select name="param.{{$t.Name}}.{{.Name}}">
+              <option value="true"{{if eq .Value "true"}} selected{{end}}>true</option>
+              <option value="false"{{if ne .Value "true"}} selected{{end}}>false</option>
+            </select>
+          {{else}}
+            <input type="{{.InputType}}" name="param.{{$t.Name}}.{{.Name}}" value="{{.Value}}"{{with .Step}} step="{{.}}"{{end}} placeholder="{{.Default}}">
+          {{end}}
+          {{with .Description}}<span class="muted small">{{.}}</span>{{end}}
+        </label>
+      {{end}}
+      </div>
+      {{else}}<p class="muted small">This template has no parameters.</p>{{end}}
+    </fieldset>
+    {{end}}
+    <div class="run-form">
+      <label><span>Image <span class="muted" data-hint="image">{{if $f.Template}}empty: the template's{{else}}required{{end}}</span></span>
+        <input type="text" name="image" value="{{$f.Image}}" class="mono" autocomplete="off" placeholder="grafana/k6:1.4.0">
+      </label>
+      <label><span>Command <span class="muted">one item per line; empty: the template's</span></span><textarea name="command" rows="2" class="mono">{{$f.Command}}</textarea></label>
+      <label><span>Arguments <span class="muted">one per line; {{"{{ config.name }}"}} works</span></span><textarea name="args" rows="3" class="mono">{{$f.Args}}</textarea></label>
+      <label><span>Environment <span class="muted">NAME=value per line</span></span><textarea name="env" rows="3" class="mono">{{$f.Env}}</textarea></label>
+    </div>
+    <h3>Resources <span class="muted small">empty: the template's or none</span></h3>
+    <div class="run-form">
+      <label><span>CPU request</span><input type="text" name="cpuRequest" value="{{$f.CPURequest}}" placeholder="500m"></label>
+      <label><span>Memory request</span><input type="text" name="memoryRequest" value="{{$f.MemoryRequest}}" placeholder="512Mi"></label>
+      <label><span>CPU limit</span><input type="text" name="cpuLimit" value="{{$f.CPULimit}}" placeholder="2"></label>
+      <label><span>Memory limit</span><input type="text" name="memoryLimit" value="{{$f.MemoryLimit}}" placeholder="2Gi"></label>
+    </div>
+  </section>
+
+  <section class="panel wizard-step" data-step="4">
+    <h2>4. Pod &amp; schedule</h2>
+    <div class="run-form">
+      <label><span>Pod annotations <span class="muted">key=value per line, e.g. sidecar.istio.io/inject=false</span></span><textarea name="podAnnotations" rows="3" class="mono">{{$f.PodAnnotations}}</textarea></label>
+      <label><span>Pod labels <span class="muted">key=value per line</span></span><textarea name="podLabels" rows="3" class="mono">{{$f.PodLabels}}</textarea></label>
+      <label><span>Service account <span class="muted">empty: default</span></span><input type="text" name="serviceAccount" value="{{$f.ServiceAccount}}" autocomplete="off"></label>
+      <label><span>Timeout <span class="muted">e.g. 15m, 1h30m</span></span><input type="text" name="timeout" value="{{$f.Timeout}}" placeholder="30m"></label>
+      <label><span>Schedule <span class="muted">cron, UTC; empty: only when started</span></span><input type="text" name="schedule" value="{{$f.Schedule}}" class="mono" placeholder="0 2 * * 1-5" maxlength="200"></label>
+    </div>
+    <p class="muted small">Fields the form doesn't cover (services, volumes, verdict, …) are kept as they are; the YAML on the next step shows everything.</p>
+  </section>
+
+  <section class="panel wizard-step" data-step="5">
+    <h2>5. Review</h2>
+    {{if $d.Preview}}
+      {{template "check" $d}}
+      <pre class="code" id="yaml-preview">{{$d.Preview}}</pre>
+      <div class="actions wrap">
+        <button type="submit" name="action" value="save" class="button">{{if $d.Edit}}Save changes{{else}}Create test{{end}}</button>
+        <button type="submit" name="action" value="download" class="button secondary">Download YAML</button>
+        <button type="button" class="button secondary" data-copy="yaml-preview" hidden>Copy YAML</button>
+        <button type="submit" name="action" value="to-yaml" class="button secondary">Edit as YAML</button>
+      </div>
+    {{else}}
+      <p class="muted">Check the Test: Control Center builds its YAML and asks the API whether it would be admitted.</p>
+    {{end}}
+  </section>
+
+  <div class="wizard-nav">
+    <button type="button" class="button secondary" data-nav="back" hidden>Back</button>
+    <button type="button" class="button secondary" data-nav="next" hidden>Next</button>
+    <button type="submit" name="action" value="preview" class="button" data-nav="review">Review</button>
+  </div>
+{{end}}
+</form>
+<script src="/static/editor.js" defer></script>
+{{end}}
+
+{{define "check"}}
+{{if .Admitted}}<p class="notice ok" role="status">The API would admit this Test (schema, webhooks, pod policy).</p>
+{{else if .CheckErr}}<div class="notice error" role="alert"><strong>{{if .SaveFailed}}Not saved:{{else}}The API would refuse it:{{end}}</strong> {{.CheckErr}}</div>{{end}}
+{{end}}

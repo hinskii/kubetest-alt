@@ -106,6 +106,16 @@ func (s *Server) createTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t.Namespace = ns
+	if dryRun(r) {
+		// Admission (webhooks, schema) without persisting: the wizard's
+		// "check before creating".
+		if err := s.K8sClient.Create(r.Context(), &t, client.DryRunAll); err != nil {
+			writeAPIError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, t)
+		return
+	}
 	if err := s.K8sClient.Create(r.Context(), &t); err != nil {
 		writeAPIError(w, err)
 		return
@@ -172,13 +182,28 @@ func (s *Server) patchTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, ReasonManagedByGitOps, lockedMessage(name, current.Labels, "edit"))
 		return
 	}
-	if err := s.K8sClient.Patch(r.Context(), &current, client.RawPatch(types.MergePatchType, body)); err != nil {
+	var opts []client.PatchOption
+	if dryRun(r) {
+		opts = append(opts, client.DryRunAll)
+	}
+	if err := s.K8sClient.Patch(r.Context(), &current, client.RawPatch(types.MergePatchType, body), opts...); err != nil {
 		writeAPIError(w, err)
+		return
+	}
+	if dryRun(r) {
+		writeJSON(w, http.StatusOK, current)
 		return
 	}
 	s.recordAudit(r, apiclient.ActionTestUpdate, current.Namespace, current.Name, nil)
 	writeJSON(w, http.StatusOK, current)
 }
+
+// dryRun: ?dry-run=true — admit the write (schema, webhooks) without
+// persisting it, as kubectl --dry-run=server. Not "dryRun": through the
+// Kubernetes API's service proxy (Control Center, the CLI) that query
+// parameter is the kube-apiserver's, which refuses it on a proxy request
+// ("dryRun is not supported").
+func dryRun(r *http.Request) bool { return r.URL.Query().Get(apiclient.QueryDryRun) == "true" }
 
 // deleteTest removes a Test. Blocked with 409 for gitops-owned CRs (§7).
 func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {

@@ -55,8 +55,8 @@ Roles come from email addresses (`controlCenter.rbac`):
 | Role | Can |
 |---|---|
 | viewer — anyone else who signed in | browse Tests and runs, logs, reports, artifacts, test cases, analytics, schedules |
-| developer | + start runs (now or at a time), run again, abort, comment, set a GUI-managed Test's schedule, preview cleanups |
-| admin | + delete runs, clean up runs |
+| developer | + create Tests (wizard), edit and duplicate them, start runs (now or at a time), run again, abort, comment, set a GUI-managed Test's schedule, preview cleanups |
+| admin | + delete Tests managed in the GUI, delete runs, clean up runs |
 
 Who may sign in at all is `allowedEmails` + `allowedDomains` + both rbac
 lists. Tests applied from Git (no `app.kubernetes.io/managed-by: ui`)
@@ -142,6 +142,35 @@ the pieces it needs: oauth2-proxy lets `GET /live/` through
 (`--skip-auth-route`), and a Secret holds the key signing the links
 (`controlCenter.liveView.existingSecret` to bring your own), shared by all
 replicas.
+
+## Creating and editing Tests
+
+**New test** on a cluster's page opens a wizard that writes the Test CRD:
+
+1. **Basics** — namespace, name, and the tool: a TestTemplate of that
+   namespace's catalog (k6, Cypress, JMeter, …) or an own image.
+2. **Source** — a git repository (revision, sparse-checkout paths, a
+   token from a Secret) and/or inline files.
+3. **Parameters & container** — the template's parameters (a Test keeps
+   only those that differ from the template's defaults; a run can still
+   override them), image, command, arguments, environment, CPU/memory.
+4. **Pod & schedule** — pod annotations and labels (e.g.
+   `sidecar.istio.io/inject=false`), service account, timeout, cron.
+5. **Review** — the Test's YAML and the API's verdict on it: a server-side
+   dry run through the same admission webhooks and pod policy a real write
+   meets, so nothing is created until it would be accepted. Then **Create
+   test** (in the cluster, `managed-by: ui`), **Download YAML** /
+   **Copy YAML** (for Git, without the GUI's `managed-by` label — commit
+   it and ArgoCD owns it), or **Edit as YAML** for what the form doesn't
+   cover (composite steps, services, parallel workers, volumes, verdict).
+
+**Edit** on a GUI-managed Test opens the same wizard. Fields the form
+doesn't show are kept as they are; composite Tests and Tests using more
+than one template open as YAML. Saving is conditional on the version the
+editor opened: if someone changed the Test meanwhile, nothing is
+overwritten and the page says so. Tests applied from Git can't be edited
+here (CLAUDE.md §7) — **Duplicate** makes a GUI-managed copy instead.
+Admins can **delete** a GUI-managed Test; its run history stays.
 
 ## Run page: what Kubernetes says
 

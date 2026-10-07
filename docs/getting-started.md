@@ -53,8 +53,10 @@ Playwright and ZAP are big).
 
 ## Write your own Test
 
-A Test is an image + a command (CLAUDE.md §10). Smallest one — a k6
-script inline, with a parameter:
+The quickest way: Control Center → **New test**, a wizard over the tool
+catalog (docs/control-center.md) — it shows the Test's YAML at the end.
+By hand: a Test is an image + a command (CLAUDE.md §10). Smallest one — a
+k6 script inline, with a parameter:
 
 ```yaml
 apiVersion: tests.kubetest.io/v1alpha1
@@ -104,8 +106,8 @@ Things to try next, all in Control Center afterwards:
   dashboard on its run page.
 
 Tests you `kubectl apply` are managed in "Git" as far as Control Center is
-concerned (read-only there, runs allowed); add the label
-`app.kubernetes.io/managed-by: ui` to edit their schedule from the UI.
+concerned (read-only there, runs allowed); **Duplicate** on such a Test's
+page makes an editable copy. Tests made with the wizard are editable.
 
 ## Look under the hood
 

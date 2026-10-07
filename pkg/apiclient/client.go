@@ -127,15 +127,65 @@ func (c *Client) GetTest(ctx context.Context, namespace, name string) (*testsv1a
 	return &out, nil
 }
 
+// QueryDryRun asks for a write to be admitted but not saved. Not
+// "dryRun": the Kubernetes service proxy refuses that parameter.
+const QueryDryRun = "dry-run"
+
+// WriteOptions modify a Test write.
+type WriteOptions struct {
+	// DryRun admits the write (schema, admission webhooks) without saving.
+	DryRun bool
+}
+
+func (o WriteOptions) query(namespace string) url.Values {
+	q := ns(namespace)
+	if o.DryRun {
+		q.Set(QueryDryRun, "true")
+	}
+	return q
+}
+
+// CreateTest creates a Test, managed in the GUI (the API server sets
+// app.kubernetes.io/managed-by=ui).
+func (c *Client) CreateTest(ctx context.Context, t *testsv1alpha1.Test, o WriteOptions) (*testsv1alpha1.Test, error) {
+	var out testsv1alpha1.Test
+	if err := c.sendJSON(ctx, http.MethodPost, "/tests", o.query(t.Namespace), t, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // PatchTest applies a JSON merge patch to a Test and returns the result.
 // Only Tests managed in the GUI (app.kubernetes.io/managed-by=ui) can be
 // patched; any other is a 409 (IsConflict) — its definition lives in Git.
 func (c *Client) PatchTest(ctx context.Context, namespace, name string, patch any) (*testsv1alpha1.Test, error) {
+	return c.PatchTestWith(ctx, namespace, name, patch, WriteOptions{})
+}
+
+// PatchTestWith is PatchTest with options.
+func (c *Client) PatchTestWith(ctx context.Context, namespace, name string, patch any, o WriteOptions) (*testsv1alpha1.Test, error) {
 	var out testsv1alpha1.Test
-	if err := c.sendJSON(ctx, http.MethodPatch, "/tests/"+url.PathEscape(name), ns(namespace), patch, &out); err != nil {
+	if err := c.sendJSON(ctx, http.MethodPatch, "/tests/"+url.PathEscape(name), o.query(namespace), patch, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+// DeleteTest deletes a GUI-managed Test (409 for any other). Its run
+// history stays.
+func (c *Client) DeleteTest(ctx context.Context, namespace, name string) error {
+	resp, err := c.do(ctx, http.MethodDelete, "/tests/"+url.PathEscape(name), ns(namespace), nil)
+	if err != nil {
+		return err
+	}
+	return resp.Body.Close()
+}
+
+// ListTemplates lists the TestTemplates of namespace — the tool catalog.
+func (c *Client) ListTemplates(ctx context.Context, namespace string) ([]testsv1alpha1.TestTemplate, error) {
+	var out []testsv1alpha1.TestTemplate
+	err := c.getJSON(ctx, "/templates", ns(namespace), &out)
+	return out, err
 }
 
 // SetTestSchedule sets Test.spec.schedule (a cron expression), or clears

@@ -54,15 +54,21 @@ func OpenAPISpec() map[string]any {
 			"/tests": map[string]any{
 				"get": routeOp("List Tests in ?namespace= (all namespaces when omitted on a cluster-wide server).",
 					nil, jsonArrayOf("#/components/schemas/Test"), errorResp()),
-				"post": routeOp(
+				"post": withParams(routeOp(
 					"Create a Test. The server sets app.kubernetes.io/managed-by=ui; "+
-						"payloads spoofing any other value are rejected 400.",
-					jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()),
+						"payloads spoofing any other value are rejected 400. "+
+						"?dry-run=true admits it (schema, webhooks) without creating it: 200.",
+					jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()), dryRunParam()),
+				"parameters": []any{namespaceParam()},
+			},
+			"/templates": map[string]any{
+				"get": routeOp("List TestTemplates in ?namespace= — the tool catalog a Test can `use`.",
+					nil, jsonArrayOf("#/components/schemas/TestTemplate"), errorResp()),
 				"parameters": []any{namespaceParam()},
 			},
 			"/tests/{name}": map[string]any{
 				"get":    routeOp("Get a Test by name.", nil, jsonRef("#/components/schemas/Test"), errorResp()),
-				"patch":  routeOp("JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by.", jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()),
+				"patch":  withParams(routeOp("JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by. metadata.resourceVersion in the patch makes it conditional (409 when the Test changed). ?dry-run=true admits it without saving.", jsonRef("#/components/schemas/Test"), jsonRef("#/components/schemas/Test"), errorResp()), dryRunParam()),
 				"delete": routeOp("Delete a Test. Blocked 409 for managed-by!=ui (§7).", nil, nil, errorResp()),
 				"parameters": []any{
 					pathParam("name", "Test name."),
@@ -411,8 +417,9 @@ func OpenAPISpec() map[string]any {
 				// We deliberately reference these as opaque objects — full CRD
 				// schemas are >1500 lines each; the GUI relies on the k8s API
 				// docs for field-level detail. Keeps this spec browsable.
-				"Test":    objectShape("A Test CRD object.", "spec", "metadata"),
-				"TestRun": objectShape("A TestRun CRD object.", "spec", "metadata"),
+				"Test":         objectShape("A Test CRD object.", "spec", "metadata"),
+				"TestRun":      objectShape("A TestRun CRD object.", "spec", "metadata"),
+				"TestTemplate": objectShape("A TestTemplate CRD object.", "spec", "metadata"),
 				"RunEnvelope": map[string]any{
 					"type":     "object",
 					"required": []string{"uid", "name", "namespace", "testRef", "phase", "origin"},
@@ -649,6 +656,16 @@ func queryParam(name, description string) map[string]any {
 // namespaceParam documents ?namespace=. Required for single-object routes
 // on a cluster-wide server; on a scoped server it may be omitted and must
 // equal the server's namespace when given.
+// withParams adds operation-level parameters to a routeOp.
+func withParams(op map[string]any, params ...any) map[string]any {
+	op["parameters"] = params
+	return op
+}
+
+func dryRunParam() map[string]any {
+	return queryParam(apiclient.QueryDryRun, "true: validate (schema, admission webhooks) without saving.")
+}
+
 func namespaceParam() map[string]any {
 	return map[string]any{
 		"name":     QueryNamespace,

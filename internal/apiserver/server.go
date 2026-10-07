@@ -183,6 +183,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tests/{name}/testcases/history", s.listTestCaseHistory)
 	mux.HandleFunc("PATCH /tests/{name}", s.patchTest)
 	mux.HandleFunc("DELETE /tests/{name}", s.deleteTest)
+	mux.HandleFunc("GET /templates", s.listTemplates)
 
 	// Runs — creation + list (cluster + store merge) + detail.
 	mux.HandleFunc("POST /runs", s.createRun)

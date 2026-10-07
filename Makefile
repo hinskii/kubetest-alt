@@ -405,7 +405,11 @@ dev-up: ## Local kubetest on kind: platform from this checkout, MinIO, Postgres,
 .PHONY: dev-ui
 dev-ui: ## Open Control Center of the dev cluster on http://localhost:8090 (Ctrl-C to stop).
 	@echo "Control Center: http://localhost:8090"
-	kubectl --context kind-$(DEV_CLUSTER) -n kubetest-alt port-forward svc/kt-kubetest-alt-control-center 8090:80
+	@# The port-forward ends when its pod goes (make dev-reload): reconnect.
+	@while true; do \
+		kubectl --context kind-$(DEV_CLUSTER) -n kubetest-alt port-forward svc/kt-kubetest-alt-control-center 8090:80; \
+		echo "port-forward ended; reconnecting in 2s (Ctrl-C to stop)"; sleep 2; \
+	done
 
 .PHONY: dev-reload
 dev-reload: ## Rebuild the platform images and restart them in the dev cluster.

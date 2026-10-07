@@ -33,7 +33,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -102,20 +102,36 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	home := ccPage(t, ui+"/", ccDeveloper)
 	assert.Contains(t, home, "connected", "Control Center → service proxy → API server")
 
-	// 3. A k6 Test from the catalog template, long enough to watch live.
-	test := &testsv1alpha1.Test{
-		ObjectMeta: metav1.ObjectMeta{Name: "e2e-cc-k6", Namespace: workloadNS},
-		Spec: testsv1alpha1.TestSpec{
-			Use:    []string{"k6"},
-			Config: map[string]testsv1alpha1.Parameter{"dashboardPeriod": {Type: "string", Default: "1s"}},
-			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{
-				Path:    "repo/live.js",
-				Content: "import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n",
-			}}},
-		},
+	// 3. A k6 Test from the catalog template, long enough to watch live,
+	//    made with the wizard: the review is a dry run through the real
+	//    admission webhooks, then the Test is created, managed in the GUI.
+	wizard := url.Values{
+		"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-k6"}, "template": {"k6"},
+		"param.k6.script": {"live.js"}, "param.k6.dashboardPeriod": {"1s"},
+		"useFiles": {"1"}, "file.path": {"repo/live.js"},
+		"file.content": {"import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"},
 	}
-	test.Spec.Config["script"] = testsv1alpha1.Parameter{Type: "string", Default: "live.js"}
-	require.NoError(t, c.Create(ctx, test))
+	newPage := ccPage(t, ui+"/clusters/local/tests/new?namespace="+workloadNS, ccDeveloper)
+	assert.Contains(t, newPage, `name="template" value="k6"`, "the catalog of the namespace")
+	wizard.Set("action", "preview")
+	review := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, wizard)
+	reviewBody, _ := io.ReadAll(review.Body)
+	_ = review.Body.Close()
+	require.Contains(t, string(reviewBody), "The API would admit this Test", string(reviewBody))
+	bad := url.Values{"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-bad"}, "template": {"k6"},
+		"podAnnotations": {"x=y"}, "serviceAccount": {"kube-system-admin"}, "action": {"preview"}}
+	refused := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, bad)
+	refusedBody, _ := io.ReadAll(refused.Body)
+	_ = refused.Body.Close()
+	assert.Contains(t, string(refusedBody), "The API would refuse it", "the webhook's pod policy, before anything exists")
+	wizard.Set("action", "save")
+	resp = ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, wizard)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	test := &testsv1alpha1.Test{}
+	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, test))
+	assert.Equal(t, "ui", test.Labels["app.kubernetes.io/managed-by"])
+	assert.Equal(t, "live.js", test.Spec.Config["script"].Default)
 
 	tests := ccPage(t, ui+"/clusters/local", ccDeveloper)
 	assert.Contains(t, tests, ">e2e-cc-k6<")
@@ -176,6 +192,15 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	assert.Contains(t, logs, "live.js", "the run's log through Control Center")
 	history := ccPage(t, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6", ccDeveloper)
 	assert.Contains(t, history, ">"+runName+"<", "the run in the Test's history")
+
+	// 7. An admin deletes the Test; its run history stays.
+	resp = ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6/delete", "admin@e2e.test", url.Values{})
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Location"), "deleted")
+	err = c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, &testsv1alpha1.Test{})
+	assert.True(t, apierrors.IsNotFound(err), "the Test is gone")
+	assert.Contains(t, ccPage(t, ui+runPath, ccDeveloper), ">passed<", "its run stays")
 }
 
 func headerOf(t *testing.T, rawURL, header string) string {

@@ -433,7 +433,7 @@ func fillComparison(c *comparison) {
 		}
 		return fmt.Sprintf("%d passed · %d failed · %d skipped", tc.Passed, tc.Failed, tc.Skipped)
 	})
-	fact("Started by", func(run apiclient.Run) string { return run.Tags["kubetest.io/created-by"] })
+	fact("Started by", func(run apiclient.Run) string { return run.Tags[tagCreatedBy] })
 
 	metricKeys := map[string]bool{}
 	paramKeys := map[string]bool{}

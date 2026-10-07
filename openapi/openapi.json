@@ -395,6 +395,14 @@
           "spec"
         ],
         "type": "object"
+      },
+      "TestTemplate": {
+        "description": "A TestTemplate CRD object.",
+        "required": [
+          "metadata",
+          "spec"
+        ],
+        "type": "object"
       }
     }
   },
@@ -1541,6 +1549,90 @@
         }
       ]
     },
+    "/templates": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TestTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TestTemplate"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "List TestTemplates in ?namespace= — the tool catalog a Test can `use`."
+      },
+      "parameters": [
+        {
+          "description": "Target namespace. Required for single-object requests when the server runs cluster-wide; optional (and must match) when it is scoped. On list endpoints, omitting it on a cluster-wide server lists all namespaces.",
+          "in": "query",
+          "name": "namespace",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/tests": {
       "get": {
         "responses": {
@@ -1625,6 +1717,17 @@
         }
       ],
       "post": {
+        "parameters": [
+          {
+            "description": "true: validate (schema, admission webhooks) without saving.",
+            "in": "query",
+            "name": "dry-run",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1697,7 +1800,7 @@
             "description": "OK"
           }
         },
-        "summary": "Create a Test. The server sets app.kubernetes.io/managed-by=ui; payloads spoofing any other value are rejected 400."
+        "summary": "Create a Test. The server sets app.kubernetes.io/managed-by=ui; payloads spoofing any other value are rejected 400. ?dry-run=true admits it (schema, webhooks) without creating it: 200."
       }
     },
     "/tests/{name}": {
@@ -1835,6 +1938,17 @@
         }
       ],
       "patch": {
+        "parameters": [
+          {
+            "description": "true: validate (schema, admission webhooks) without saving.",
+            "in": "query",
+            "name": "dry-run",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1907,7 +2021,7 @@
             "description": "OK"
           }
         },
-        "summary": "JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by."
+        "summary": "JSON merge patch (RFC 7396) of a Test: objects merge, arrays and scalars replace, null deletes. 409 unless managed-by=ui, including when the label is missing (§7); 400 if the patch touches managed-by. metadata.resourceVersion in the patch makes it conditional (409 when the Test changed). ?dry-run=true admits it without saving."
       }
     },
     "/tests/{name}/resolved": {

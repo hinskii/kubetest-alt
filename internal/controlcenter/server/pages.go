@@ -37,6 +37,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
+	"github.com/hinskii/kubetest-alt/pkg/expr"
 )
 
 // Labels Control Center reads from Tests.
@@ -47,6 +48,9 @@ const (
 	managedByUI = "ui"
 	// toolOther groups Tests without a tool label on the tests page.
 	toolOther = "other"
+	// tagCreatedBy names who started a run (a TestRun tag) or created a
+	// Test (an annotation).
+	tagCreatedBy = "kubetest.io/created-by"
 )
 
 // HTML input types of parameter fields (inputNumber is also the
@@ -79,6 +83,11 @@ const maxLogPoll = 1 << 20
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /clusters/{cluster}", s.testsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}", s.testPage)
+	mux.Handle("GET /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestPage)))
+	mux.Handle("POST /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitNewTest)))
+	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestPage)))
+	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
+	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/delete", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.deleteTest)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
@@ -250,6 +259,7 @@ func (s *Server) testsPage(w http.ResponseWriter, r *http.Request) {
 // param is one spec.config parameter as a form field.
 type param struct {
 	Name, Type, Default, Pattern, Description string
+	Value                                     string // the editor's current value
 	Enum                                      []string
 	Required                                  bool
 	InputType, Step                           string
@@ -278,7 +288,7 @@ func paramsOf(spec *testsv1alpha1.TestSpec) []param {
 		f := param{Name: name, Type: p.Type, Default: p.Default, Pattern: p.Pattern,
 			Enum: p.Enum, Required: p.Default == "", InputType: inputText}
 		switch p.Type {
-		case "integer":
+		case expr.TypeInteger:
 			f.InputType, f.Step = inputNumber, "1"
 		case inputNumber:
 			f.InputType, f.Step = inputNumber, "any"

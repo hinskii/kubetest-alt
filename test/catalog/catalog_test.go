@@ -60,7 +60,7 @@ import (
 )
 
 const (
-	namespace      = "kubetest-catalog" // prepared by test/e2e/run.sh
+	namespace = "kubetest-catalog" // prepared by test/e2e/run.sh
 
 	casesDir       = "cases"
 	defaultTimeout = 10 * time.Minute

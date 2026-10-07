@@ -1,6 +1,6 @@
 {{define "content"}}
 {{$d := .Data}}
-<div class="title-row"><h1>{{$d.ClusterDisplayName}}</h1><a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/schedules">Schedules</a></div>
+<div class="title-row"><h1>{{$d.ClusterDisplayName}}</h1><a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/schedules">Schedules</a>{{if canRun $.User}}<a class="button" href="/clusters/{{pathEscape $d.Cluster}}/tests/new{{with $d.Namespace}}?namespace={{.}}{{end}}">New test</a>{{end}}</div>
 <p class="muted">{{$d.Shown}} of {{$d.Total}} tests</p>
 
 <form class="filters" method="get">

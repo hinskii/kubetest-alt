@@ -4,6 +4,10 @@
   <h1>{{$t.Name}}</h1>
   {{with $t.Tool}}<span class="chip">{{.}}</span>{{end}}
   {{if $t.GitOpsLocked}}<span class="chip" title="Managed outside the GUI: read-only here, runs allowed">read-only</span>{{end}}
+  {{if canRun $.User}}
+  {{if not $t.GitOpsLocked}}<a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/edit">Edit</a>{{end}}
+  <a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/new?namespace={{$t.Namespace}}&amp;from={{$t.Name}}" title="A GUI-managed copy, opened in the editor">Duplicate</a>
+  {{end}}
 </div>
 <p class="muted">Namespace {{$t.Namespace}}{{with $t.Templates}} · templates {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}</p>
 
@@ -97,6 +101,16 @@
   <p class="muted">No runs yet.</p>
   {{end}}
 </section>
+
+{{if and (canDelete $.User) (not $t.GitOpsLocked)}}
+<details class="panel">
+  <summary>Delete this test</summary>
+  <p class="muted">The Test leaves the cluster; its run history, logs and artifacts stay. A schedule stops with it.</p>
+  <form method="post" action="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/delete" class="inline-form">
+    <button type="submit" class="button danger">Delete test {{$t.Name}}</button>
+  </form>
+</details>
+{{end}}
 
 <details class="panel">
   <summary>Definition <span class="muted">(templates merged, expressions not evaluated)</span></summary>
