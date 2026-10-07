@@ -12,6 +12,11 @@ spec:
     script:
       default: test/catalog/cases/k6/repo/k6/script.js
       type: string
+    # The script runs ~3s; k6's HTML report needs two dashboard periods
+    # (the template's default is 10s), so this short sample lowers it.
+    dashboardPeriod:
+      default: 1s
+      type: string
   content:
     git:
       paths:
