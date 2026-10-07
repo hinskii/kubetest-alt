@@ -65,6 +65,18 @@ type RetrySpec struct {
 	Count int `json:"count,omitempty"`
 }
 
+// ContentInfoFile is where the content fetcher leaves ContentInfo, in the
+// data dir — outside repo/, so artifact globs don't pick it up.
+const ContentInfoFile = ".kubetest-content.json"
+
+// ContentInfo is what the content fetcher checked out.
+type ContentInfo struct {
+	// GitRevision is the requested revision (branch, tag, sha) or HEAD.
+	GitRevision string `json:"gitRevision,omitempty"`
+	// GitCommit is the commit it resolved to.
+	GitCommit string `json:"gitCommit,omitempty"`
+}
+
 // Test case statuses.
 const (
 	CasePassed  = "passed"
@@ -175,6 +187,9 @@ type ExecutionResult struct {
 	// TestCounts is filled by the scraper (step 07) when JUnit XML files
 	// are found and parsed. Nil when the tool doesn't emit JUnit output.
 	TestCounts *TestCounts `json:"testCounts,omitempty"`
+
+	// Content says which revision of the test content ran (git source).
+	Content *ContentInfo `json:"content,omitempty"`
 
 	// TestCases are the individual results in the run's JUnit reports
 	// (bounded: MaxTestCases, failure text trimmed). Empty when the run

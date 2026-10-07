@@ -33,6 +33,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/internal/store"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 var base = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -169,6 +170,26 @@ func TestRunEnvelope_FromArchivedRow(t *testing.T) {
 	assert.Equal(t, "jmeter", e.Tool)
 	assert.Equal(t, "20", e.Config["threads"])
 	assert.Equal(t, "ok", e.Steps["s0"].Message)
+}
+
+func TestRunEnvelope_GitCheckout(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	cr := liveRun("git", testsv1alpha1.PhasePassed)
+	cr.Status.ResolvedSpec = `{"content":{"git":{"uri":"https://bot:s3cret@github.com/acme/tests.git"}}}`
+	cr.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "main", GitCommit: sha}
+	want := &apiclient.GitCheckout{URI: "https://github.com/acme/tests.git", Revision: "main", Commit: sha}
+	assert.Equal(t, want, runEnvelopeFromCR(cr).Git, "credentials never leave the API server")
+
+	r := row("old", 1, func(r *store.Row) {
+		r.ResolvedSpec = map[string]any{"content": map[string]any{"git": map[string]any{"uri": "https://bot:s3cret@github.com/acme/tests.git"}}} // #nosec G101 -- fake credential, asserted to be stripped
+		r.GitRevision, r.GitCommit = "main", sha
+	})
+	assert.Equal(t, want, runEnvelopeFromRow(&r).Git)
+
+	assert.Nil(t, runEnvelopeFromCR(liveRun("plain", testsv1alpha1.PhasePassed)).Git, "no git source")
+	plain := row("plain", 1)
+	assert.Nil(t, runEnvelopeFromRow(&plain).Git)
+	assert.Equal(t, "git@github.com:acme/tests.git", stripUserinfo("git@github.com:acme/tests.git"), "scp-style URIs pass through")
 }
 
 func TestCreateRun_RecordsCreatorFromHeader(t *testing.T) {

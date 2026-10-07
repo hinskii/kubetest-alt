@@ -84,12 +84,14 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			uid, name, namespace, test_ref, phase, source,
 			queued_at, started_at, finished_at, duration_ms,
 			resolved_spec, steps, metrics, test_counts, artifact_refs,
-			logs_ref, message, tags, config, tool, parent_run
+			logs_ref, message, tags, config, tool, parent_run,
+			git_revision, git_commit
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
 			$11, $12, $13, $14, $15,
-			$16, $17, $18, $19, $20, $21
+			$16, $17, $18, $19, $20, $21,
+			$22, $23
 		)
 		ON CONFLICT (uid, finished_at) DO UPDATE SET
 			name          = EXCLUDED.name,
@@ -110,7 +112,9 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			tags          = EXCLUDED.tags,
 			config        = EXCLUDED.config,
 			tool          = EXCLUDED.tool,
-			parent_run    = EXCLUDED.parent_run
+			parent_run    = EXCLUDED.parent_run,
+			git_revision  = EXCLUDED.git_revision,
+			git_commit    = EXCLUDED.git_commit
 	`
 	_, err = p.pool.Exec(ctx, stmt,
 		row.UID, row.Name, row.Namespace, row.TestRef, row.Phase, nullIfEmpty(row.Source),
@@ -118,6 +122,7 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 		resolvedSpec, steps, metrics, testCounts, artifacts,
 		nullIfEmpty(row.LogsRef), nullIfEmpty(row.Message), tags,
 		config, nullIfEmpty(row.Tool), nullIfEmpty(row.ParentRun),
+		nullIfEmpty(row.GitRevision), nullIfEmpty(row.GitCommit),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert %s: %w", row.UID, err)
@@ -336,7 +341,7 @@ const selectCols = `
 	queued_at, started_at, finished_at, duration_ms,
 	resolved_spec, steps, metrics, test_counts, artifact_refs,
 	logs_ref, message, tags, config, tool, parent_run,
-	comment, comment_by, comment_at
+	comment, comment_by, comment_at, git_revision, git_commit
 `
 
 func scanRows(rows pgx.Rows) ([]Row, error) {
@@ -360,13 +365,15 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			comment    *string
 			commentBy  *string
 			commentAt  *time.Time
+			gitRev     *string
+			gitCommit  *string
 		)
 		if err := rows.Scan(
 			&r.UID, &r.Name, &r.Namespace, &r.TestRef, &r.Phase, &source,
 			&r.QueuedAt, &r.StartedAt, &r.FinishedAt, &duration,
 			&specBytes, &stepsBytes, &metricsB, &tcBytes, &arBytes,
 			&logsRef, &message, &tagsBytes, &cfgBytes, &tool, &parentRun,
-			&comment, &commentBy, &commentAt,
+			&comment, &commentBy, &commentAt, &gitRev, &gitCommit,
 		); err != nil {
 			return nil, err
 		}
@@ -387,6 +394,12 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 		}
 		if parentRun != nil {
 			r.ParentRun = *parentRun
+		}
+		if gitRev != nil {
+			r.GitRevision = *gitRev
+		}
+		if gitCommit != nil {
+			r.GitCommit = *gitCommit
 		}
 		if comment != nil && commentAt != nil {
 			r.Comment = &Comment{Text: *comment, At: commentAt.UTC()}

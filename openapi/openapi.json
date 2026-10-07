@@ -197,6 +197,24 @@
             "format": "date-time",
             "type": "string"
           },
+          "git": {
+            "description": "The code a finished run checked out (git content source only).",
+            "properties": {
+              "commit": {
+                "description": "Checked-out commit SHA.",
+                "type": "string"
+              },
+              "revision": {
+                "description": "Requested revision; HEAD when unset.",
+                "type": "string"
+              },
+              "uri": {
+                "description": "Repository URI, credentials removed.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
           "message": {
             "type": "string"
           },

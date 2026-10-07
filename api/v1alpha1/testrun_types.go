@@ -147,6 +147,12 @@ type TestRunStatus struct {
 	// +optional
 	TestCounts *TestCounts `json:"testCounts,omitempty"`
 
+	// Content records what the content fetcher checked out — for a git
+	// source, the requested revision and the commit it resolved to. Nil
+	// without a git source.
+	// +optional
+	Content *ContentStatus `json:"content,omitempty"`
+
 	// +optional
 	Message string `json:"message,omitempty"`
 

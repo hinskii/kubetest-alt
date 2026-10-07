@@ -248,6 +248,8 @@ type testData struct {
 	Runs       []apiclient.Run
 	NextCursor string
 	PageCursor string
+	// ShowCommit: some run on the page checked out a git commit.
+	ShowCommit bool
 }
 
 func paramsOf(spec *testsv1alpha1.TestSpec) []param {
@@ -292,6 +294,7 @@ func (s *Server) testPage(w http.ResponseWriter, r *http.Request) {
 	}
 	data := testData{Cluster: c.Name, Test: t, Params: paramsOf(t.Spec), Runs: runs.Runs,
 		NextCursor: runs.NextCursor, PageCursor: cursor}
+	data.ShowCommit = slices.ContainsFunc(runs.Runs, func(r apiclient.Run) bool { return r.Git != nil && r.Git.Commit != "" })
 	s.page(w, r, "test", name, clusterCrumbs(c), data)
 }
 

@@ -45,6 +45,7 @@ func TerminationSummary(r ExecutionResult) []byte {
 		ErrorMessage: truncateUTF8(r.ErrorMessage, maxSummaryErrorBytes),
 		TestCounts:   r.TestCounts,
 		Metrics:      r.Metrics,
+		Content:      r.Content,
 	}
 	b, err := json.Marshal(s)
 	if err != nil || len(b) > maxTerminationMessageBytes {

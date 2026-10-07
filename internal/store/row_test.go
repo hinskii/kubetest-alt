@@ -283,6 +283,7 @@ func TestRowFromRun_RunContext(t *testing.T) {
 		`"duration":{"type":"string","default":"1m"},"script":{"type":"string"}}}`
 	run.Status.Tool = "k6"
 	run.Labels = map[string]string{LabelParentRun: "nightly-suite-run"}
+	run.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "main", GitCommit: "abc123"}
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{
 		"s0": {Phase: testsv1alpha1.StepPhaseFailed, Message: "step timeout exceeded"},
 	}
@@ -293,6 +294,8 @@ func TestRowFromRun_RunContext(t *testing.T) {
 		"override wins, defaults fill in, params without a default stay absent")
 	assert.Equal(t, "k6", row.Tool)
 	assert.Equal(t, "nightly-suite-run", row.ParentRun)
+	assert.Equal(t, "main", row.GitRevision)
+	assert.Equal(t, "abc123", row.GitCommit)
 	assert.Equal(t, "step timeout exceeded", row.Steps["s0"].(map[string]any)["message"])
 }
 

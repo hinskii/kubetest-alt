@@ -177,6 +177,7 @@ func (e *Entry) Execute(ctx context.Context) error {
 	// Scrape (§15.3) — runs even on failure/abort paths so partial output
 	// survives. Never changes Phase; puts errors in ScrapeError.
 	e.runScrape(ctx, req, &result)
+	result.Content = readContentInfo(req.DataDir)
 
 	e.writeTermination(result)
 	if err := WriteResultAtomic(e.ResultDir, result); err != nil {
@@ -487,6 +488,24 @@ func (e *Entry) writeErrorResult(msg string) error {
 		return err
 	}
 	return nil
+}
+
+// readContentInfo returns what the content fetcher checked out, or nil
+// (no git source, or no data dir).
+func readContentInfo(dataDir string) *ContentInfo {
+	if dataDir == "" {
+		return nil
+	}
+	// #nosec G304 -- the pod's own data dir + a constant name.
+	b, err := os.ReadFile(filepath.Join(dataDir, ContentInfoFile))
+	if err != nil {
+		return nil
+	}
+	var info ContentInfo
+	if json.Unmarshal(b, &info) != nil || (info.GitCommit == "" && info.GitRevision == "") {
+		return nil
+	}
+	return &info
 }
 
 // writeTermination leaves the verdict where Kubernetes surfaces it in the

@@ -260,3 +260,6 @@ input, select {
   .topbar, .page { padding-left: 1rem; padding-right: 1rem; }
   .user { max-width: 45vw; }
 }
+
+/* A commit SHA. */
+.mono { font-family: var(--mono); }

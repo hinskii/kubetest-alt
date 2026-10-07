@@ -92,3 +92,20 @@ func TestParseTerminationSummary_RejectsOtherMessages(t *testing.T) {
 		assert.False(t, ok, msg)
 	}
 }
+
+func TestEntry_ReportsCheckedOutCommit(t *testing.T) {
+	dataDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dataDir, ContentInfoFile),
+		[]byte(`{"gitRevision":"main","gitCommit":"0123456789abcdef0123456789abcdef01234567"}`), 0o600))
+	e := entryFor(t, ExecutionRequest{Args: []string{"tool"}, TimeoutSeconds: 30, DataDir: dataDir}, 0, nil)
+	e.TerminationMessagePath = filepath.Join(t.TempDir(), "termination-log")
+	require.NoError(t, e.Execute(context.Background()))
+
+	want := &ContentInfo{GitRevision: "main", GitCommit: "0123456789abcdef0123456789abcdef01234567"}
+	assert.Equal(t, want, readResult(t, e.ResultDir).Content)
+	assert.Equal(t, want, readTermination(t, e.TerminationMessagePath).Content, "also without object storage")
+
+	e = entryFor(t, ExecutionRequest{Args: []string{"tool"}, TimeoutSeconds: 30, DataDir: t.TempDir()}, 0, nil)
+	require.NoError(t, e.Execute(context.Background()))
+	assert.Nil(t, readResult(t, e.ResultDir).Content, "no git source, no content info")
+}

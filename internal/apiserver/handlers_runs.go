@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -401,6 +402,9 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 		var spec testsv1alpha1.TestSpec
 		if err := json.Unmarshal([]byte(cr.Status.ResolvedSpec), &spec); err == nil {
 			e.Config = store.EffectiveConfig(spec.Config, cr.Spec.Config)
+			if c := cr.Status.Content; c != nil && spec.Content.Git != nil {
+				e.Git = gitCheckout(spec.Content.Git.URI, c.GitRevision, c.GitCommit)
+			}
 		}
 	} else {
 		e.Config = store.EffectiveConfig(nil, cr.Spec.Config)
@@ -467,6 +471,10 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		Metrics:    row.Metrics,
 		Comment:    apiComment(row.Comment),
 	}
+	if row.GitCommit != "" || row.GitRevision != "" {
+		uri, _ := nested(row.ResolvedSpec, "content", "git", "uri").(string)
+		e.Git = gitCheckout(uri, row.GitRevision, row.GitCommit)
+	}
 	f := row.FinishedAt
 	e.FinishedAt = &f
 	if len(row.Steps) > 0 {
@@ -476,6 +484,34 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		}
 	}
 	return e
+}
+
+func gitCheckout(uri, revision, commit string) *apiclient.GitCheckout {
+	return &apiclient.GitCheckout{URI: stripUserinfo(uri), Revision: revision, Commit: commit}
+}
+
+// stripUserinfo drops "user:token@" from a URI, so a credential someone
+// put into spec.content.git.uri doesn't travel to every API client.
+func stripUserinfo(uri string) string {
+	u, err := url.Parse(uri)
+	if err != nil || u.User == nil {
+		return uri
+	}
+	u.User = nil
+	return u.String()
+}
+
+// nested walks string keys of decoded JSON; nil when a key is missing.
+func nested(m map[string]any, keys ...string) any {
+	var v any = m
+	for _, k := range keys {
+		mm, ok := v.(map[string]any)
+		if !ok {
+			return nil
+		}
+		v = mm[k]
+	}
+	return v
 }
 
 // crTool mirrors the controller's runTool: status.tool, else the label.

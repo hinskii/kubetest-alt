@@ -3347,6 +3347,21 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              content:
+                description: |-
+                  Content records what the content fetcher checked out — for a git
+                  source, the requested revision and the commit it resolved to. Nil
+                  without a git source.
+                properties:
+                  gitCommit:
+                    description: GitCommit is the full commit SHA that was checked
+                      out.
+                    type: string
+                  gitRevision:
+                    description: GitRevision is the revision the Test asked for ("HEAD"
+                      when unset).
+                    type: string
+                type: object
               durationMs:
                 format: int64
                 type: integer

@@ -49,6 +49,51 @@ var funcs = template.FuncMap{
 	"deltaMs":      deltaMs,
 	"sub":          func(a, b int) int { return a - b },
 	"dict":         dict,
+	"shortSHA":     shortSHA,
+	"commitURL":    commitURL,
+}
+
+// shortSHA is the 7-character form of a commit SHA.
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+// commitURL links a commit on GitHub, GitLab or Bitbucket (cloud or a
+// self-hosted instance with the name in its host), from an https, ssh://
+// or scp-style (git@host:owner/repo.git) repository URI. "" for anything
+// else — the page then shows the SHA without a link.
+func commitURL(repo, sha string) string {
+	if sha == "" {
+		return ""
+	}
+	var host, path string
+	if u, err := url.Parse(repo); err == nil && u.Host != "" {
+		if u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "ssh" {
+			return ""
+		}
+		host, path = u.Hostname(), u.Path
+	} else if at, colon := strings.Index(repo, "@"), strings.Index(repo, ":"); at >= 0 && colon > at {
+		host, path = repo[at+1:colon], repo[colon+1:]
+	} else {
+		return ""
+	}
+	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
+	if host == "" || strings.Count(path, "/") < 1 {
+		return ""
+	}
+	base := "https://" + host + "/" + path
+	switch h := strings.ToLower(host); {
+	case strings.Contains(h, "github"):
+		return base + "/commit/" + url.PathEscape(sha)
+	case strings.Contains(h, "gitlab"):
+		return base + "/-/commit/" + url.PathEscape(sha)
+	case strings.Contains(h, "bitbucket"):
+		return base + "/commits/" + url.PathEscape(sha)
+	}
+	return ""
 }
 
 // dict builds a map for passing several values to a sub-template:

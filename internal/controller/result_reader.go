@@ -43,6 +43,10 @@ type RunResult struct {
 	// when no JUnit files were uploaded.
 	TestCounts *testsv1alpha1.TestCounts
 
+	// Content is what the content fetcher checked out (git revision and
+	// commit). Nil without a git source.
+	Content *testsv1alpha1.ContentStatus
+
 	// Attempts lists every try of a retried run (empty for a single try).
 	Attempts []executor.AttemptResult
 

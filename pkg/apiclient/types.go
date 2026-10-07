@@ -88,6 +88,19 @@ type Run struct {
 	NotBefore *time.Time `json:"notBefore,omitempty"`
 	// Comment is the run's note. Only finished runs (in run history) have one.
 	Comment *Comment `json:"comment,omitempty"`
+	// Git is the code the run checked out, for a Test with a git source.
+	// Set once the run has finished.
+	Git *GitCheckout `json:"git,omitempty"`
+}
+
+// GitCheckout is what a run's content fetcher checked out.
+type GitCheckout struct {
+	// URI is the repository (spec.content.git.uri, credentials removed).
+	URI string `json:"uri,omitempty"`
+	// Revision is the revision the Test asked for ("HEAD" when unset).
+	Revision string `json:"revision,omitempty"`
+	// Commit is the full SHA that was checked out.
+	Commit string `json:"commit,omitempty"`
 }
 
 // Comment is a note on a finished run. One per run; setting it again

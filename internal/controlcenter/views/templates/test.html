@@ -45,7 +45,7 @@
   </div>
   {{if $d.Runs}}
   <table class="table">
-    <thead><tr><th>Run</th><th>Phase</th><th>Started</th><th>Duration</th><th>Source</th><th>Note</th></tr></thead>
+    <thead><tr><th>Run</th><th>Phase</th><th>Started</th><th>Duration</th>{{if $d.ShowCommit}}<th>Commit</th>{{end}}<th>Source</th><th>Note</th></tr></thead>
     <tbody>
     {{range $d.Runs}}
       <tr>
@@ -53,6 +53,7 @@
         <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
         <td class="muted">{{if .StartedAt}}{{when .StartedAt}}{{else if .NotBefore}}scheduled {{when .NotBefore}}{{end}}</td>
         <td>{{duration .DurationMs}}</td>
+        {{if $d.ShowCommit}}<td>{{with .Git}}{{template "commit" .}}{{end}}</td>{{end}}
         <td class="muted">{{.Source}}{{with index .Tags "kubetest.io/created-by"}} · {{.}}{{end}}</td>
         <td>{{with .Comment}}{{.Text}}{{end}}</td>
       </tr>

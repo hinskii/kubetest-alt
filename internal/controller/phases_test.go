@@ -247,6 +247,7 @@ func TestResultFromTermination(t *testing.T) {
 	failed := executor.ExecutionResult{
 		Phase: executor.PhaseFailed, ErrorMessage: "exit code 99",
 		TestCounts: &executor.TestCounts{Total: 3, Failed: 1, Passed: 2}, Metrics: map[string]float64{"p95_ms": 120},
+		Content: &executor.ContentInfo{GitRevision: "main", GitCommit: "abc123"},
 	}
 	got := ResultFromTermination(wrapperPod(corev1.ContainerStateTerminated{
 		Message: string(executor.TerminationSummary(failed)),
@@ -256,6 +257,10 @@ func TestResultFromTermination(t *testing.T) {
 	assert.Equal(t, "exit code 99", got.ErrorMessage)
 	assert.Equal(t, &testsv1alpha1.TestCounts{Total: 3, Failed: 1, Passed: 2}, got.TestCounts)
 	assert.Equal(t, map[string]float64{"p95_ms": 120}, got.Metrics)
+	assert.Equal(t, &testsv1alpha1.ContentStatus{GitRevision: "main", GitCommit: "abc123"}, got.Content)
+	run := &testsv1alpha1.TestRun{}
+	applyRunResultToStatus(run, got)
+	assert.Equal(t, got.Content, run.Status.Content, "the commit reaches the run's status")
 
 	passed := ResultFromTermination(wrapperPod(corev1.ContainerStateTerminated{
 		Message: string(executor.TerminationSummary(executor.ExecutionResult{Phase: executor.PhasePassed})),

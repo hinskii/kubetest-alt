@@ -94,6 +94,9 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 		t := run.Status.StartedAt.UTC()
 		r.StartedAt = &t
 	}
+	if c := run.Status.Content; c != nil {
+		r.GitRevision, r.GitCommit = c.GitRevision, c.GitCommit
+	}
 	if run.Status.TestCounts != nil {
 		r.TestCounts = &TestCounts{
 			Total:   run.Status.TestCounts.Total,

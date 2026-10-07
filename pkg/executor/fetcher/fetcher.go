@@ -18,12 +18,15 @@ package fetcher
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 // Fetcher orchestrates the three fetch modes: git → files → tarballs.
@@ -101,6 +104,15 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 		if err := f.Git.clone(ctx, *c.Git, repoDir); err != nil {
 			return err
 		}
+		rev := c.Git.Revision
+		if rev == "" {
+			rev = "HEAD"
+		}
+		if err := writeContentInfo(dstDir, executor.ContentInfo{
+			GitRevision: rev, GitCommit: f.Git.headCommit(ctx, repoDir),
+		}); err != nil {
+			return err
+		}
 	}
 	if len(c.Files) > 0 {
 		if err := writeFiles(dstDir, c.Files, f.EnvLookup); err != nil {
@@ -113,6 +125,17 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 		}
 	}
 	return shareWithAnyUID(dstDir)
+}
+
+// writeContentInfo records what was checked out for the wrapper to report
+// (executor.ContentInfoFile in the data dir).
+func writeContentInfo(dataDir string, info executor.ContentInfo) error {
+	b, err := json.Marshal(info)
+	if err != nil {
+		return err
+	}
+	// #nosec G306 -- shared emptyDir; the wrapper (any uid) reads it.
+	return os.WriteFile(filepath.Join(dataDir, executor.ContentInfoFile), b, 0o644)
 }
 
 // shareWithAnyUID makes the fetched tree writable by whatever user the

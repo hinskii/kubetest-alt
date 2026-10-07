@@ -367,3 +367,25 @@ func TestTestPage_Paging(t *testing.T) {
 	assert.Contains(t, body.Body.String(), "malformed cursor")
 	assert.Contains(t, w.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String(), "No runs yet.")
 }
+
+func TestRunAndTestPages_ShowCommit(t *testing.T) {
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	run := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
+	run.Status.ResolvedSpec = `{"content":{"git":{"uri":"https://bot:s3cret@github.com/acme/tests.git"}}}`
+	run.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "main", GitCommit: sha}
+	w := newWorld(t, smokeTest(), run)
+
+	body := w.get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
+	assert.Contains(t, body, `href="https://github.com/acme/tests/commit/`+sha+`"`)
+	assert.Contains(t, body, ">0123456</a>")
+	assert.Contains(t, body, "· main")
+	assert.NotContains(t, body, "s3cret")
+
+	test := w.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String()
+	assert.Contains(t, test, "<th>Commit</th>")
+	assert.Contains(t, test, ">0123456</a>")
+
+	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
+	assert.NotContains(t, plain.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String(), "<th>Commit</th>",
+		"no git source, no commit column")
+}

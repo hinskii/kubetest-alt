@@ -30,7 +30,7 @@ import (
 // Fields projected:
 //   - Metrics — float→string encoded so the CRD schema stays simple
 //     (map[string]string is trivially valid in k8s API).
-//   - TestCounts — copied verbatim.
+//   - TestCounts, Content — copied verbatim.
 //   - ArtifactRefs — copied verbatim (ArtifactRef shape aligned across
 //     pkg/executor and api/v1alpha1 in step 07).
 //
@@ -50,6 +50,9 @@ func applyRunResultToStatus(run *testsv1alpha1.TestRun, r *RunResult) {
 	}
 	if r.TestCounts != nil {
 		run.Status.TestCounts = r.TestCounts
+	}
+	if r.Content != nil {
+		run.Status.Content = r.Content
 	}
 	if len(r.Artifacts) > 0 {
 		run.Status.ArtifactRefs = r.Artifacts

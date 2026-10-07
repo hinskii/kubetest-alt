@@ -106,6 +106,10 @@ type Row struct {
 	Tool string `json:"tool,omitempty"`
 	// ParentRun is the composite parent's run name ("" for top-level).
 	ParentRun string `json:"parentRun,omitempty"`
+	// GitRevision and GitCommit are what the content fetcher checked out
+	// ("" without a git source).
+	GitRevision string `json:"gitRevision,omitempty"`
+	GitCommit   string `json:"gitCommit,omitempty"`
 	// Comment is the run's note, if any.
 	Comment *Comment `json:"comment,omitempty"`
 }

@@ -184,6 +184,16 @@ type ArtifactRef struct {
 	ContentType string `json:"contentType,omitempty"`
 }
 
+// ContentStatus mirrors pkg/executor.ContentInfo.
+type ContentStatus struct {
+	// GitRevision is the revision the Test asked for ("HEAD" when unset).
+	// +optional
+	GitRevision string `json:"gitRevision,omitempty"`
+	// GitCommit is the full commit SHA that was checked out.
+	// +optional
+	GitCommit string `json:"gitCommit,omitempty"`
+}
+
 // TestCounts mirrors pkg/executor.TestCounts — JUnit-aggregated counts the
 // scraper (step 07) parses out of uploaded XML fixtures.
 type TestCounts struct {

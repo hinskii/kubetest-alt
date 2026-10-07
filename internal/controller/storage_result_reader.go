@@ -120,6 +120,9 @@ func projectRunResult(er *executor.ExecutionResult) *RunResult {
 		Attempts:     er.Attempts,
 		TestCases:    er.TestCases,
 	}
+	if c := er.Content; c != nil {
+		rr.Content = &testsv1alpha1.ContentStatus{GitRevision: c.GitRevision, GitCommit: c.GitCommit}
+	}
 	if er.TestCounts != nil {
 		rr.TestCounts = &testsv1alpha1.TestCounts{
 			Total:   er.TestCounts.Total,

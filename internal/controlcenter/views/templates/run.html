@@ -17,6 +17,7 @@
     {{with $r.QueuedAt}}<dt>Queued</dt><dd>{{when .}}</dd>{{end}}
     {{with $r.StartedAt}}<dt>Started</dt><dd>{{when .}}</dd>{{end}}
     {{with $r.FinishedAt}}<dt>Finished</dt><dd>{{when .}} <span class="muted">{{duration $r.DurationMs}}</span></dd>{{end}}
+    {{with $r.Git}}<dt>Commit</dt><dd>{{template "commit" .}}{{with .Revision}} <span class="muted">· {{.}}</span>{{end}}{{with .URI}} <span class="muted">· {{.}}</span>{{end}}</dd>{{end}}
     {{with $r.TestCounts}}<dt>Tests</dt><dd>{{.Passed}} passed · {{.Failed}} failed · {{.Skipped}} skipped · {{.Total}} total</dd>{{end}}
     {{with $r.Abort}}<dt>Abort</dt><dd>{{.Reason}}{{with .RequestedBy}} by {{.}}{{end}}{{with .Message}}: {{.}}{{end}}</dd>{{end}}
     {{if eq $r.Origin "archive"}}<dt>Record</dt><dd class="muted">run history (the TestRun is gone from the cluster)</dd>{{end}}

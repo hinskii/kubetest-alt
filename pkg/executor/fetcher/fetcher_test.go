@@ -19,14 +19,19 @@ package fetcher
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
 
 // TestFetch_FilesOnly is the base case: no git, no tarball, just inline files.
@@ -127,12 +132,12 @@ func TestFetch_MkdirDstOnDemand(t *testing.T) {
 // k6's --summary-export silently produced nothing.
 func TestFetch_TreeWritableByAnyUID(t *testing.T) {
 	dir := t.TempDir()
-	exec := int32(0o755)
+	mode := int32(0o755)
 	f := NewFetcher()
 	f.Stdout, f.Stderr = &bytes.Buffer{}, &bytes.Buffer{}
 	require.NoError(t, f.Fetch(context.Background(), Content{Files: []FileContent{
 		{Path: "repo/k6/script.js", Content: "export default function () {}"},
-		{Path: "repo/bin/run.sh", Content: "#!/bin/sh\n", Mode: &exec},
+		{Path: "repo/bin/run.sh", Content: "#!/bin/sh\n", Mode: &mode},
 	}}, dir))
 
 	for _, d := range []string{"repo", "repo/k6", "repo/bin"} {
@@ -176,6 +181,16 @@ func TestFetch_GitLandsInRepoByDefault(t *testing.T) {
 		Content{Git: &GitContent{URI: "file://" + src, Revision: "main"}}, data))
 	assert.FileExists(t, filepath.Join(data, "repo", "k6", "script.js"))
 	assert.NoFileExists(t, filepath.Join(data, "k6", "script.js"), "nothing at the data-dir root")
+
+	// The checked-out commit is recorded for the run (step 18-2f).
+	// #nosec G204 -- test-controlled args.
+	want, err := exec.Command("git", "-C", src, "rev-parse", "HEAD").Output()
+	require.NoError(t, err)
+	b, err := os.ReadFile(filepath.Join(data, executor.ContentInfoFile)) // #nosec G304 -- t.TempDir() path
+	require.NoError(t, err)
+	var info executor.ContentInfo
+	require.NoError(t, json.Unmarshal(b, &info))
+	assert.Equal(t, executor.ContentInfo{GitRevision: "main", GitCommit: strings.TrimSpace(string(want))}, info)
 
 	custom := t.TempDir()
 	require.NoError(t, f.Fetch(context.Background(),

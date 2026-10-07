@@ -116,6 +116,24 @@ func (c *gitCloner) clone(ctx context.Context, g GitContent, dstDir string) erro
 	return nil
 }
 
+// headCommit returns the checked-out commit of dir ("" when git can't
+// tell, e.g. a test stub).
+func (c *gitCloner) headCommit(ctx context.Context, dir string) string {
+	// #nosec G204 -- literal args.
+	cmd := c.Exec(ctx, c.Binary, "rev-parse", "HEAD")
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	sha := strings.TrimSpace(string(out))
+	if len(sha) < 7 || strings.ContainsAny(sha, " \n") {
+		return ""
+	}
+	return sha
+}
+
 // run executes one git subcommand. Args are for git itself; secrets flow via
 // baseEnv only.
 func (c *gitCloner) run(ctx context.Context, dir string, env []string, args ...string) error {

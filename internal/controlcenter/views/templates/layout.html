@@ -22,3 +22,6 @@
   </main>
 </body>
 </html>{{end}}
+
+{{/* commit renders a run's checked-out commit (apiclient.GitCheckout) as a short SHA, linked when the host is known. */}}
+{{define "commit"}}{{with commitURL .URI .Commit}}<a class="mono" href="{{.}}" target="_blank" rel="noopener" title="{{$.Commit}}">{{shortSHA $.Commit}}</a>{{else}}<span class="mono" title="{{.Commit}}">{{shortSHA .Commit}}</span>{{end}}{{end}}

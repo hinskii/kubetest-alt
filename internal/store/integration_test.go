@@ -225,6 +225,7 @@ func TestIntegration_RunContextColumns(t *testing.T) {
 	run.Status.ResolvedSpec = `{"config":{"vus":{"type":"integer","default":"10"},"duration":{"type":"string","default":"1m"}}}`
 	run.Status.Tool = "k6"
 	run.Labels = map[string]string{LabelParentRun: "suite-run"}
+	run.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "v1.2.0", GitCommit: "0123456789abcdef0123456789abcdef01234567"}
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "failed", Message: "step timeout exceeded"}}
 	require.NoError(t, p.SaveFinished(ctx, run))
 
@@ -233,6 +234,8 @@ func TestIntegration_RunContextColumns(t *testing.T) {
 	assert.Equal(t, map[string]string{"vus": "50", "duration": "1m"}, got.Config)
 	assert.Equal(t, "k6", got.Tool)
 	assert.Equal(t, "suite-run", got.ParentRun)
+	assert.Equal(t, "v1.2.0", got.GitRevision)
+	assert.Equal(t, "0123456789abcdef0123456789abcdef01234567", got.GitCommit)
 	assert.Equal(t, "step timeout exceeded", got.Steps["s0"].(map[string]any)["message"])
 
 	ui, err := p.List(ctx, Filter{TestRef: "ctx-test", Source: "ui"}, Page{})

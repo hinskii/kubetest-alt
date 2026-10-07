@@ -280,6 +280,10 @@ func (r *TestRunReconciler) finishWorker(run *testsv1alpha1.TestRun, i int, res 
 		step.StartedAt = &now
 	}
 	run.Status.Steps[key] = step
+	// Workers check out the same revision; the first one's commit stands.
+	if run.Status.Content == nil {
+		run.Status.Content = res.Content
+	}
 	if tc := res.TestCounts; tc != nil {
 		if run.Status.TestCounts == nil {
 			run.Status.TestCounts = &testsv1alpha1.TestCounts{}

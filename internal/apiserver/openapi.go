@@ -421,6 +421,15 @@ func OpenAPISpec() map[string]any {
 							"description": "Scheduled start (spec.notBefore); the run waits in queued until then.",
 						},
 						"comment": jsonRef("#/components/schemas/Comment"),
+						"git": map[string]any{
+							"type":        "object",
+							"description": "The code a finished run checked out (git content source only).",
+							"properties": map[string]any{
+								"uri":      map[string]any{"type": "string", "description": "Repository URI, credentials removed."},
+								"revision": map[string]any{"type": "string", "description": "Requested revision; HEAD when unset."},
+								"commit":   map[string]any{"type": "string", "description": "Checked-out commit SHA."},
+							},
+						},
 					},
 				},
 				"Comment": map[string]any{

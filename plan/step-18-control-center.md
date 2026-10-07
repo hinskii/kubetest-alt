@@ -187,7 +187,7 @@ from the catalog images' real output, docs/metrics.md vocabulary):
 - Catalog e2e cases assert the metrics, like the load tools'.
 - CRD enum of `spec.metrics.from` is tested against `report.Formats`.
 
-### 18-2f — Functional tests: per-test-case results
+### 18-2f — Functional tests: per-test-case results ✅
 Today JUnit gives only totals (`testCounts`). The reports carry every
 test case (name, class/suite, status, duration, failure message):
 1. **Failed tests on the run page** — name, message, stack excerpt,
@@ -210,6 +210,21 @@ the run store gets a `test_cases` table (partitioned and expired with
 `test_runs`); the apiserver serves `GET /runs/{id}/testcases` and
 `GET /tests/{name}/testcases/{case}/history`; Control Center renders
 1–5. Points 5 and 6 don't depend on the table.
+
+Done as built:
+- Cases: wrapper → result.json `testCases` (max 5000, message ≤1 KB,
+  details ≤4 KB) → `test_cases` (migration 0004, partitioned like
+  `test_runs`); `GET /runs/{id}/testcases`,
+  `GET /tests/{name}/testcases?runs=`,
+  `GET /tests/{name}/testcases/history?case=`.
+- Flaky = passed and failed (or errored) in the window, with the number
+  of status flips; windows 10/30/100 runs.
+- Commit: the fetcher writes `.kubetest-content.json` (requested
+  revision + `git rev-parse HEAD`); the wrapper adds it to result.json
+  and the termination message; `TestRun.status.content`;
+  `test_runs.git_revision/git_commit` (migration 0005); Run `git`
+  (URI without credentials). Control Center links the commit on GitHub,
+  GitLab and Bitbucket.
 
 ### 18f — Analytics (generic)
 **Decisions (user, 2026-10-07):** no legacy import — history starts fresh
