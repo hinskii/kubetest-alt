@@ -31,8 +31,9 @@ func TestReconcile_Composite_Sequential(t *testing.T) {
 
 	// Two leaf Tests + one composite Test referencing both, one per step.
 	leafA := newTestFixture(ns, "leaf-a")
+	leafA.Labels = map[string]string{compiler.LabelKubetestTool: "k6"}
 	require.NoError(t, k8sClient.Create(ctx, leafA))
-	leafB := newTestFixture(ns, "leaf-b")
+	leafB := newTestFixture(ns, "leaf-b") // no tool label
 	require.NoError(t, k8sClient.Create(ctx, leafB))
 
 	parent := &testsv1alpha1.Test{
@@ -75,6 +76,12 @@ func TestReconcile_Composite_Sequential(t *testing.T) {
 	// no Job controller so nothing else drives child phase.
 	kids := listChildren(t, ctx, ns, parentRun.Name)
 	require.Len(t, kids, 1)
+	// A child is its own Test's tool, never the parent's "composite".
+	assert.NotContains(t, kids[0].Labels, compiler.LabelKubetestTool)
+	require.Eventually(t, func() bool {
+		var k testsv1alpha1.TestRun
+		return k8sClient.Get(ctx, client.ObjectKeyFromObject(&kids[0]), &k) == nil && k.Status.Tool == "k6"
+	}, 5*time.Second, 100*time.Millisecond, "child takes leaf-a's tool")
 	// Preload result reader for the child so its leaf reconciler transitions
 	// cleanly instead of hitting MissingResult (that would surface as
 	// phase=error and step 1 would be skipped).

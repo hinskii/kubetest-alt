@@ -429,11 +429,13 @@ func (r *TestRunReconciler) createChild(ctx context.Context, logger interface{ I
 			Name:      name,
 			Namespace: parent.Namespace,
 			Labels: map[string]string{
-				compiler.LabelParentRun:    parent.Name,
-				compiler.LabelStep:         fmt.Sprintf("%d", stepIdx),
-				compiler.LabelExecIndex:    fmt.Sprintf("%d", e.Index),
-				compiler.LabelAttempt:      fmt.Sprintf("%d", attempt),
-				compiler.LabelKubetestTool: parent.Labels[compiler.LabelKubetestTool],
+				compiler.LabelParentRun: parent.Name,
+				compiler.LabelStep:      fmt.Sprintf("%d", stepIdx),
+				compiler.LabelExecIndex: fmt.Sprintf("%d", e.Index),
+				compiler.LabelAttempt:   fmt.Sprintf("%d", attempt),
+				// No tool label: the child's tool is its own Test's
+				// (status.tool, set in setup) — copying the parent's
+				// made every child a "composite" run in history.
 			},
 			OwnerReferences: []metav1.OwnerReference{{
 				APIVersion: testsv1alpha1.GroupVersion.String(),
