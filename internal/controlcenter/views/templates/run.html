@@ -77,6 +77,21 @@
   <pre class="log" id="log" data-src="{{$d.Path}}/log" data-live="{{$d.Live}}">Loading…</pre>
 </section>
 
+{{if $d.Media}}
+<section class="panel">
+  <h2>Screenshots &amp; videos <span class="muted">{{len $d.Media}}{{with $d.MoreMedia}} of {{len $d.Media}}+{{.}} — the rest are under Artifacts{{end}}</span></h2>
+  <div class="gallery">
+    {{range $d.Media}}
+    <figure>
+      {{if .Video}}<video controls preload="metadata" src="{{$d.Path}}/artifacts/{{artifactPath .Path}}"></video>
+      {{else}}<a href="{{$d.Path}}/artifacts/{{artifactPath .Path}}" target="_blank" rel="noopener"><img loading="lazy" alt="{{.Path}}" src="{{$d.Path}}/artifacts/{{artifactPath .Path}}"></a>{{end}}
+      <figcaption>{{.Path}}</figcaption>
+    </figure>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
 <section class="panel">
   <h2>Artifacts</h2>
   {{with $d.ArtifactsErr}}<p class="muted">Artifacts unavailable: {{.}}</p>{{end}}

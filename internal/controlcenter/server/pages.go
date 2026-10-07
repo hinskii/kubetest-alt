@@ -17,12 +17,14 @@ limitations under the License.
 package server
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"slices"
 	"strconv"
 	"strings"
@@ -371,8 +373,12 @@ type runData struct {
 	// FailedCases are the run's failed and errored JUnit test cases
 	// (finished runs that reached run history).
 	FailedCases []apiclient.TestCase
-	Live        bool
-	Path        string
+	// Media are the screenshots and videos among the artifacts;
+	// MoreMedia counts those past the gallery's limit.
+	Media     []mediaItem
+	MoreMedia int
+	Live      bool
+	Path      string
 }
 
 func stepKind(key string) string {
@@ -405,6 +411,7 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 		data.ArtifactsErr = messageOf(err)
 	} else {
 		data.Artifacts = arts
+		data.Media, data.MoreMedia = mediaOf(arts)
 	}
 	if !data.Live && run.TestCounts != nil && run.TestCounts.Failed > 0 {
 		// Best effort: without run history there are only the counts.
@@ -501,7 +508,12 @@ func (s *Server) runArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = st.Body.Close() }()
 	h := w.Header()
-	h.Set("Content-Type", st.ContentType)
+	ct := st.ContentType
+	if ct == "" || strings.HasPrefix(ct, "application/octet-stream") {
+		// A video recorded without a type would not play inline.
+		ct = cmp.Or(mediaTypes[strings.ToLower(pathpkg.Ext(path))], ct)
+	}
+	h.Set("Content-Type", ct)
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("X-Content-Type-Options", "nosniff")
 	disposition := "inline"
