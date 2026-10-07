@@ -71,7 +71,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /clusters/{cluster}", s.testsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}", s.testPage)
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
+	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
+	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}", s.runPage)
+	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/compare", s.compareRuns)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/log", s.runLogPoll)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/logs.txt", s.runLogDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/artifacts/{path...}", s.runArtifact)
@@ -365,8 +368,11 @@ type runData struct {
 	Steps        []stepRow
 	Artifacts    []apiclient.Artifact
 	ArtifactsErr string
-	Live         bool
-	Path         string
+	// FailedCases are the run's failed and errored JUnit test cases
+	// (finished runs that reached run history).
+	FailedCases []apiclient.TestCase
+	Live        bool
+	Path        string
 }
 
 func stepKind(key string) string {
@@ -399,6 +405,10 @@ func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
 		data.ArtifactsErr = messageOf(err)
 	} else {
 		data.Artifacts = arts
+	}
+	if !data.Live && run.TestCounts != nil && run.TestCounts.Failed > 0 {
+		// Best effort: without run history there are only the counts.
+		data.FailedCases, _ = client.RunTestCases(r.Context(), ns, id, true)
 	}
 	crumbs := append(clusterCrumbs(c), views.Crumb{Label: run.TestRef, Href: testPath(c.Name, ns, run.TestRef)})
 	s.page(w, r, "run", run.Name, crumbs, data)

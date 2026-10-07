@@ -4,6 +4,7 @@
   <h1>{{$r.Name}}</h1>
   <span class="status {{phaseClass $r.Phase}}" id="run-phase">{{$r.Phase}}</span>
   {{with $r.Tool}}<span class="chip">{{.}}</span>{{end}}
+  {{if terminal $r.Phase}}<a class="button secondary" href="{{$d.Path}}/compare">Compare with another run</a>{{end}}
 </div>
 {{with $r.Message}}<p class="message">{{.}}</p>{{end}}
 
@@ -29,6 +30,23 @@
   <dl>{{range $k, $v := $r.Metrics}}<dt>{{$k}}</dt><dd>{{$v}}</dd>{{end}}</dl>
   {{end}}
 </section>
+
+{{if $d.FailedCases}}
+<section class="panel">
+  <h2>Failed tests <span class="muted">{{len $d.FailedCases}}</span></h2>
+  <ul class="failures">
+    {{range $d.FailedCases}}
+    <li>
+      <div class="title-row"><span class="status {{phaseClass .Status}}">{{.Status}}</span>
+        <a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $r.Namespace}}/{{pathEscape $r.TestRef}}/cases/history?case={{.Key}}" title="History of this test case">{{.Name}}</a>
+        <span class="muted small">{{with .Class}}{{.}}{{else}}{{.Suite}}{{end}}{{with .DurationMs}} · {{duration .}}{{end}}</span></div>
+      {{with .Message}}<p class="message">{{.}}</p>{{end}}
+      {{with .Details}}<details><summary class="muted">Details</summary><pre class="code">{{.}}</pre></details>{{end}}
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
 
 {{if $d.Steps}}
 <section class="panel">

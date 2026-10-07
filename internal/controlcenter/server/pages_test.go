@@ -73,7 +73,7 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 	k8s := fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
 	objects := storage.NewFake()
 	api := &apiserver.Server{K8sClient: k8s, Bucket: bucket,
-		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects}
+		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects, Cases: cannedCases{}}
 
 	mux := http.NewServeMux()
 	mux.Handle(proxyPath+"/", http.StripPrefix(proxyPath, api.Handler()))

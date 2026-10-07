@@ -30,7 +30,9 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 )
 
-// funcs are available in every template.
+// funcs are available in every template. There is deliberately no query
+// escaper: html/template encodes values after "?" in URL attributes itself,
+// so escaping them again breaks the link.
 var funcs = template.FuncMap{
 	"when":         when,
 	"duration":     duration,
@@ -39,11 +41,47 @@ var funcs = template.FuncMap{
 	"sortedKeys":   sortedKeys,
 	"toYAML":       toYAML,
 	"pathEscape":   url.PathEscape,
-	"queryEscape":  url.QueryEscape,
 	"canRun":       func(u auth.User) bool { return u.Can(auth.RoleDeveloper) },
 	"canDelete":    func(u auth.User) bool { return u.Can(auth.RoleAdmin) },
 	"hasPrefix":    strings.HasPrefix,
 	"artifactPath": artifactPath,
+	"pct":          pct,
+	"deltaMs":      deltaMs,
+	"sub":          func(a, b int) int { return a - b },
+	"dict":         dict,
+}
+
+// dict builds a map for passing several values to a sub-template:
+// {{template "x" (dict "Title" "…" "Rows" .Rows)}}.
+func dict(kv ...any) map[string]any {
+	m := make(map[string]any, len(kv)/2)
+	for i := 0; i+1 < len(kv); i += 2 {
+		m[fmt.Sprint(kv[i])] = kv[i+1]
+	}
+	return m
+}
+
+// pct renders part/total as a whole percentage, "" when total is 0.
+func pct(part, total int) string {
+	if total <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d%%", (part*100+total/2)/total)
+}
+
+// deltaMs renders a duration change: "+1.2s", "-300ms", "" for none.
+func deltaMs(d int64) string {
+	if d == 0 {
+		return ""
+	}
+	sign := "+"
+	if d < 0 {
+		sign, d = "-", -d
+	}
+	if d < 1000 {
+		return fmt.Sprintf("%s%dms", sign, d)
+	}
+	return sign + duration(d)
 }
 
 // when renders a time (or *time.Time) in UTC, "" for none.

@@ -1,0 +1,30 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="title-row"><h1>{{$d.Key}}</h1></div>
+<p class="muted">{{$d.Test}} · {{len $d.Runs}} runs · {{$d.Passed}} passed · {{$d.Failed}} failed · {{$d.Skipped}} skipped</p>
+
+{{if $d.Runs}}
+<section class="panel">
+  <h2>Latest first</h2>
+  <div class="strip" aria-label="Result per run, newest first">
+    {{range $d.Runs}}<a class="dot {{phaseClass .Status}}" title="{{.RunName}} · {{.Status}} · {{when .FinishedAt}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape $d.Namespace}}/{{pathEscape .RunUID}}"></a>{{end}}
+  </div>
+  <table class="table">
+    <thead><tr><th>Run</th><th>Result</th><th>Finished</th><th>Duration</th><th>Message</th></tr></thead>
+    <tbody>
+    {{range $d.Runs}}
+      <tr>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape $d.Namespace}}/{{pathEscape .RunUID}}">{{if .RunName}}{{.RunName}}{{else}}{{.RunUID}}{{end}}</a></td>
+        <td><span class="status {{phaseClass .Status}}">{{.Status}}</span></td>
+        <td class="muted">{{when .FinishedAt}}</td>
+        <td>{{duration .DurationMs}}</td>
+        <td>{{.Message}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{else}}
+<p class="muted">No runs recorded this test case.</p>
+{{end}}
+{{end}}

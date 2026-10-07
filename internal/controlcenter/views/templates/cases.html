@@ -1,0 +1,47 @@
+{{define "content"}}
+{{$d := .Data}}
+{{$base := printf "/clusters/%s/tests/%s/%s/cases" (pathEscape $d.Cluster) (pathEscape $d.Namespace) (pathEscape $d.Test)}}
+<div class="title-row"><h1>{{$d.Test}} · test cases</h1></div>
+<p class="muted">{{len $d.Cases}} cases over the last {{$d.Runs}} runs that reported JUnit ·
+  <strong>{{$d.FailingNow}}</strong> failing in the latest run ·
+  <strong>{{$d.FlakyCount}}</strong> flaky (passed and failed in this window)</p>
+
+<form class="filters" method="get">
+  <label>Window
+    <select name="runs">{{range $d.Windows}}<option value="{{.}}"{{if eq . $d.Runs}} selected{{end}}>last {{.}} runs</option>{{end}}</select>
+  </label>
+  <label>Sort
+    <select name="sort">
+      <option value="failures"{{if eq $d.Sort "failures"}} selected{{end}}>most failures</option>
+      <option value="flaky"{{if eq $d.Sort "flaky"}} selected{{end}}>most flips (flaky)</option>
+      <option value="slowest"{{if eq $d.Sort "slowest"}} selected{{end}}>slowest</option>
+      <option value="name"{{if eq $d.Sort "name"}} selected{{end}}>name</option>
+    </select>
+  </label>
+  <button type="submit" class="button secondary">Apply</button>
+</form>
+
+{{if $d.Cases}}
+<section class="panel">
+<table class="table">
+  <thead><tr><th>Test case</th><th>Latest</th><th>Pass rate</th><th>Passed / failed / skipped</th><th>Avg</th><th>Max</th><th>Flips</th></tr></thead>
+  <tbody>
+  {{range $d.Cases}}
+    <tr>
+      <td><a href="{{$base}}/history?case={{.Key}}">{{.Name}}</a>{{if .Flaky}} <span class="chip flaky" title="Passed and failed within this window">flaky</span>{{end}}
+        {{with .Class}}<div class="muted small">{{.}}</div>{{else}}{{with .Suite}}<div class="muted small">{{.}}</div>{{end}}{{end}}</td>
+      <td><span class="status {{phaseClass .LastStatus}}">{{.LastStatus}}</span></td>
+      <td>{{pct .Passed (sub .Runs .Skipped)}}</td>
+      <td>{{.Passed}} / {{.Failed}} / {{.Skipped}} <span class="muted">of {{.Runs}}</span></td>
+      <td>{{duration .AvgMs}}</td>
+      <td class="muted">{{duration .MaxMs}}</td>
+      <td>{{if .Flips}}{{.Flips}}{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+</section>
+{{else}}
+<p class="muted">No test cases yet. They appear once a run of this Test that writes JUnit reports has finished.</p>
+{{end}}
+{{end}}

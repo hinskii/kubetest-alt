@@ -39,7 +39,10 @@
 {{end}}
 
 <section class="panel">
-  <h2>Runs</h2>
+  <div class="title-row">
+    <h2>Runs</h2>
+    <a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/cases">Test cases &amp; flaky tests</a>
+  </div>
   {{if $d.Runs}}
   <table class="table">
     <thead><tr><th>Run</th><th>Phase</th><th>Started</th><th>Duration</th><th>Source</th><th>Note</th></tr></thead>
@@ -58,7 +61,7 @@
   </table>
   <p class="pager">
     {{if $d.PageCursor}}<a href="?">Newest</a>{{end}}
-    {{with $d.NextCursor}}<a href="?after={{queryEscape .}}">Older runs</a>{{end}}
+    {{with $d.NextCursor}}<a href="?after={{.}}">Older runs</a>{{end}}
   </p>
   {{else}}
   <p class="muted">No runs yet.</p>

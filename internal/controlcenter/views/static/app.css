@@ -234,6 +234,18 @@ input, select {
 .comment { margin: 0 0 0.75rem; padding: 0.5rem 1rem; border-left: 3px solid var(--primary); }
 .comment footer { font-size: 0.8rem; margin-top: 0.25rem; }
 .pager { display: flex; gap: 1rem; margin: 0.75rem 0 0; }
+.small { font-size: 0.8rem; }
+.chip.flaky { background: var(--warning-bg); color: var(--warning-text); }
+.failures { list-style: none; margin: 0; padding: 0; }
+.failures li { padding: 0.75rem 0; border-bottom: 1px solid var(--border); }
+.failures li:last-child { border-bottom: none; }
+.failures .message { margin: 0.4rem 0 0; font-family: var(--mono); font-size: 0.85rem; word-break: break-word; }
+.failures details { margin-top: 0.4rem; }
+.strip { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 1rem; }
+.dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; padding: 0; }
+.dot.status-passed { background: var(--success-text); }
+.dot.status-failed, .dot.status-error { background: var(--danger-text); }
+.dot.status-skipped { background: var(--unknown-text); }
 .actions { display: flex; gap: 1rem; }
 
 @media (max-width: 600px) {
