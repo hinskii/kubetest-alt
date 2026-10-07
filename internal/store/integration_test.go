@@ -200,11 +200,16 @@ func TestIntegration_Delete(t *testing.T) {
 	require.NoError(t, p.EnsurePartitions(ctx, PartitionsToCreate(finished, 0, 0)))
 
 	uid := "aaaaaaaa-0000-0000-0000-0000000000d1"
-	require.NoError(t, p.SaveFinished(ctx, newRun(uid, "to-delete", testsv1alpha1.PhasePassed, finished)))
+	run := newRun(uid, "to-delete", testsv1alpha1.PhasePassed, finished)
+	require.NoError(t, p.SaveFinished(ctx, run))
+	require.NoError(t, p.SaveTestCases(ctx, run, []executor.TestCase{{Name: "login", Status: executor.CasePassed}}))
 
 	require.NoError(t, p.Delete(ctx, uid))
 	_, err := p.Get(ctx, uid)
 	assert.ErrorIs(t, err, ErrNotFound)
+	cases, err := p.RunCases(ctx, uid, false)
+	require.NoError(t, err)
+	assert.Empty(t, cases, "the run's test cases go with it")
 
 	assert.ErrorIs(t, p.Delete(ctx, uid), ErrNotFound, "repeat delete")
 	assert.ErrorIs(t, p.Delete(ctx, "not-a-uuid"), ErrNotFound)

@@ -147,7 +147,7 @@ func (s *Server) testAnalyticsPage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, run := range cmpData.Runs {
-			data.Selected[run.Name] = true
+			data.Selected[views.RunID(run)] = true
 		}
 		data.Compare = cmpData
 		data.Markdown = comparisonMarkdown(c.DisplayNameOrName(), ns, name, cmpData, time.Now())

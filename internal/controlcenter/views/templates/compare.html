@@ -5,7 +5,7 @@
 <form class="filters" method="get">
   <label>with an earlier run
     <select name="with">
-      {{range $d.Candidates}}<option value="{{.Name}}"{{if and $d.Base (eq .Name $d.Base.Name)}} selected{{end}}>{{.Name}} · {{.Phase}} · {{when .FinishedAt}}</option>{{end}}
+      {{range $d.Candidates}}<option value="{{runID .}}"{{if and $d.Base (eq .UID $d.Base.UID)}} selected{{end}}>{{.Name}} · {{.Phase}} · {{when .FinishedAt}}</option>{{end}}
     </select>
   </label>
   <button type="submit" class="button secondary">Compare</button>

@@ -15,13 +15,13 @@
 <section class="panel">
   <h2>Overview <span class="muted">{{$s.Finished}} finished runs</span></h2>
   <div class="strip" aria-label="Run phases, oldest first">
-    {{range $d.Strip}}<a class="tick {{phaseClass .Phase}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}" title="{{.Name}} · {{.Phase}}{{with .StartedAt}} · {{when .}}{{end}}"></a>{{end}}
+    {{range $d.Strip}}<a class="tick {{phaseClass .Phase}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}" title="{{.Name}} · {{.Phase}}{{with .StartedAt}} · {{when .}}{{end}}"></a>{{end}}
   </div>
   <dl class="stats">
     <div><dt>Pass rate</dt><dd>{{with $s.PassRate}}{{.}}{{else}}—{{end}}</dd></div>
     <div><dt>Passed · failed · error · aborted</dt><dd>{{$s.Passed}} · {{$s.Failed}} · {{$s.Errored}} · {{$s.Aborted}}</dd></div>
     <div><dt>Duration avg · p95</dt><dd>{{with duration $s.AvgMs}}{{.}} · {{duration $s.P95Ms}}{{else}}—{{end}}</dd></div>
-    {{with $s.LastFailure}}<div><dt>Last failure</dt><dd><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a>{{with .FinishedAt}} <span class="muted">{{when .}}</span>{{end}}</dd></div>{{end}}
+    {{with $s.LastFailure}}<div><dt>Last failure</dt><dd><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a>{{with .FinishedAt}} <span class="muted">{{when .}}</span>{{end}}</dd></div>{{end}}
     {{if $d.HasCases}}<div><dt>Test cases</dt><dd>{{if $d.CasesErr}}<span class="muted">unavailable: {{$d.CasesErr}}</span>{{else}}<a href="{{$test}}/cases?runs={{$d.Window}}&amp;sort=flaky">{{$d.FlakyCount}} flaky · {{$d.FailingNow}} failing now</a>{{end}}</dd></div>{{end}}
   </dl>
 </section>
@@ -57,7 +57,7 @@
   {{if .Runs}}
   <div class="table-scroll">
   <table class="table compare-table">
-    <thead><tr><th></th>{{range .Runs}}<th><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></th>{{end}}</tr></thead>
+    <thead><tr><th></th>{{range .Runs}}<th><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></th>{{end}}</tr></thead>
     <tbody>
       {{range .Facts}}<tr><th scope="row">{{.Label}}</th>{{range .Cells}}<td>{{.Value}}</td>{{end}}</tr>{{end}}
       {{with .Metrics}}<tr class="section"><th scope="rowgroup" colspan="{{len $d.Compare.Runs | inc}}">Metrics</th></tr>
@@ -85,8 +85,8 @@
       <tbody>
       {{range $d.Runs}}
         <tr>
-          <td><input type="checkbox" name="run" value="{{.Name}}" aria-label="compare {{.Name}}"{{if index $d.Selected .Name}} checked{{end}}></td>
-          <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+          <td><input type="checkbox" name="run" value="{{runID .}}" aria-label="compare {{.Name}}"{{if index $d.Selected (runID .)}} checked{{end}}></td>
+          <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></td>
           <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
           <td class="muted">{{with .StartedAt}}{{when .}}{{end}}</td>
           <td>{{duration .DurationMs}}</td>

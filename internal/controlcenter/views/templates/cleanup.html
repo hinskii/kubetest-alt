@@ -1,0 +1,52 @@
+{{define "content"}}
+{{$d := .Data}}{{$c := $d.Criteria}}
+<div class="title-row"><h1>{{$d.Test}} · clean up runs</h1></div>
+<p class="muted">Deletes finished runs of this Test with their logs, artifacts, test cases and comment. Run history also expires on its own after the retention period. Running and queued runs are never touched.</p>
+
+<section class="panel">
+  <h2>Which runs</h2>
+  <form method="get" class="run-form">
+    <label><span><input type="radio" name="mode" value="older"{{if eq $c.Mode "older"}} checked{{end}}> Finished more than</span>
+      <span><input type="number" name="days" min="1" max="3650" step="1" value="{{$c.Days}}"> days ago</span></label>
+    <label><span><input type="radio" name="mode" value="range"{{if eq $c.Mode "range"}} checked{{end}}> Finished between <span class="muted">dates, UTC, inclusive — at least one</span></span>
+      <span class="actions"><input type="date" name="from" value="{{$c.RawFrom}}" aria-label="From"> <input type="date" name="to" value="{{$c.RawTo}}" aria-label="To"></span></label>
+    <div><button type="submit" class="button secondary">Preview</button></div>
+  </form>
+  {{with $d.Error}}<p class="message">{{.}}</p>{{end}}
+  {{with $d.Note}}<p class="muted">{{.}}</p>{{end}}
+</section>
+
+{{if $d.Previewed}}
+<section class="panel">
+  <h2>Matching runs <span class="muted">{{len $d.Matches}}{{with $d.More}} (+{{.}} more){{end}}</span></h2>
+  {{if $d.More}}<p class="muted">One cleanup deletes at most {{$d.Max}} runs, oldest first — run it again for the rest.</p>{{end}}
+  {{if $d.ScanCapped}}<p class="muted">Only the newest {{$d.Scanned}} runs were checked; older matches show up after this batch is gone.</p>{{end}}
+  {{if $d.Matches}}
+  <form method="post">
+    <table class="table">
+      <thead><tr><th></th><th>Run</th><th>Phase</th><th>Finished</th><th>Duration</th><th>Note</th></tr></thead>
+      <tbody>
+      {{range $d.Matches}}
+        <tr>
+          <td><input type="checkbox" name="run" value="{{runID .}}" checked aria-label="delete {{.Name}}"{{if not (canDelete $.User)}} disabled{{end}}></td>
+          <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></td>
+          <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
+          <td class="muted">{{when .FinishedAt}}</td>
+          <td>{{duration .DurationMs}}</td>
+          <td>{{with .Comment}}{{.Text}}{{end}}</td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{if canDelete $.User}}
+      <p><button type="submit" class="button danger">Delete selected runs</button> <span class="muted small">cannot be undone; each delete is recorded in the audit log</span></p>
+    {{else}}
+      <p class="muted">Only admins can delete runs.</p>
+    {{end}}
+  </form>
+  {{else}}
+  <p class="muted">No finished runs match.</p>
+  {{end}}
+</section>
+{{end}}
+{{end}}

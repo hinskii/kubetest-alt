@@ -295,8 +295,18 @@ open.
    pointer to Git otherwise. Schedules are UTC unless `CRON_TZ=` — the
    operator's scheduler and Control Center now pin UTC instead of using
    the process's zone (a pod `TZ` used to shift every schedule).
-3. **Cleanup policy** → `DELETE /runs/{uid}` (audited by kubetest);
-   no-bound guard kept.
+3. **Cleanup policy** ✅ → `DELETE /runs/{uid}` (audited by kubetest);
+   no-bound guard kept. Built: per Test `…/cleanup` — developers preview
+   (finished more than N days ago, or a date range with at least one
+   bound), admins delete exactly the previewed runs (≤200 per cleanup,
+   oldest first, 4 at a time; each must still be a finished run of that
+   Test). Found on the way: the store left a deleted run's test cases
+   behind (now one transaction), and Control Center linked archived runs
+   by name although the API finds them by UID (`views.RunID`).
+   **Open decision:** finished TestRun CRs are never deleted by kubetest —
+   retention drops history rows and objects, the CRs stay in etcd. A
+   finished-run TTL in the operator (delete the CR once it is in run
+   history) is the natural fix.
 4. **Live view.** A template declares the port of its live UI; Control
    Center proxies it (K8s pod proxy) while the pod runs. k6 only for now
    (web dashboard, xk6-dashboard#258 shim); Locust's UI would need

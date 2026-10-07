@@ -70,6 +70,7 @@
     <h2>Runs</h2>
     <a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/cases">Test cases &amp; flaky tests</a>
     <a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/analytics">Analytics &amp; comparison</a>
+    {{if canRun $.User}}<a class="button secondary" href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/cleanup">Clean up runs</a>{{end}}
   </div>
   {{if $d.Runs}}
   <table class="table">
@@ -77,7 +78,7 @@
     <tbody>
     {{range $d.Runs}}
       <tr>
-        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></td>
         <td><span class="status {{phaseClass .Phase}}">{{.Phase}}</span></td>
         <td class="muted">{{if .StartedAt}}{{when .StartedAt}}{{else if .NotBefore}}scheduled {{when .NotBefore}}{{end}}</td>
         <td>{{duration .DurationMs}}</td>

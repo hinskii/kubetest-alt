@@ -45,6 +45,8 @@ const (
 	labelManagedBy = "app.kubernetes.io/managed-by"
 	// managedByUI marks a Test the GUI may edit (CLAUDE.md §7).
 	managedByUI = "ui"
+	// toolOther groups Tests without a tool label on the tests page.
+	toolOther = "other"
 )
 
 // HTML input types of parameter fields (inputNumber is also the
@@ -81,6 +83,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
 	mux.HandleFunc("GET /clusters/{cluster}/schedules", s.schedulesPage)
+	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.cleanupPage)))
+	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.cleanupRuns)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/schedule", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.setSchedule)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
@@ -215,7 +219,7 @@ func (s *Server) testsPage(w http.ResponseWriter, r *http.Request) {
 	for _, t := range tests {
 		tool := t.Labels[labelTool]
 		if tool == "" {
-			tool = "other"
+			tool = toolOther
 		}
 		namespaces[t.Namespace], tools[tool] = true, true
 		if (nsFilter != "" && t.Namespace != nsFilter) || (toolFilter != "" && tool != toolFilter) {

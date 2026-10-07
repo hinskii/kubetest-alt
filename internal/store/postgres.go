@@ -155,14 +155,24 @@ func (p *Postgres) Delete(ctx context.Context, uid string) error {
 	if _, err := uuid.Parse(uid); err != nil {
 		return ErrNotFound
 	}
-	tag, err := p.pool.Exec(ctx, `DELETE FROM test_runs WHERE uid = $1`, uid)
+	// The run's test cases go with it — otherwise a deleted run would
+	// still count in case history and flakiness.
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	tag, err := tx.Exec(ctx, `DELETE FROM test_runs WHERE uid = $1`, uid)
 	if err != nil {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if _, err := tx.Exec(ctx, `DELETE FROM test_cases WHERE run_uid = $1`, uid); err != nil {
+		return fmt.Errorf("store: delete cases %s: %w", uid, err)
+	}
+	return tx.Commit(ctx)
 }
 
 // SetComment implements RunStore.

@@ -35,10 +35,10 @@
     {{range $d.OneShot}}
       <tr>
         <td>{{when .NotBefore}}</td>
-        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
+        <td><a href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}">{{.Name}}</a></td>
         <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .TestRef}}">{{.TestRef}}</a> <span class="muted">{{.Namespace}}</span></td>
         <td class="muted">{{index .Tags "kubetest.io/created-by"}}</td>
-        <td>{{if canRun $.User}}<form method="post" action="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape .Name}}/abort">
+        <td>{{if canRun $.User}}<form method="post" action="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape .Namespace}}/{{pathEscape (runID .)}}/abort">
           <input type="hidden" name="back" value="{{$d.Back}}"><input type="hidden" name="message" value="cancelled before its start time">
           <button type="submit" class="button secondary small">Cancel</button></form>{{end}}</td>
       </tr>

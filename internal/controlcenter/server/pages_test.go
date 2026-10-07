@@ -67,6 +67,13 @@ type world struct {
 
 func newWorld(t *testing.T, objs ...client.Object) *world {
 	t.Helper()
+	return newWorldWithArchive(t, nil, objs...)
+}
+
+// newWorldWithArchive also gives the API server a run history (runs whose
+// TestRun is gone), when archive is non-nil.
+func newWorldWithArchive(t *testing.T, archive *archiveStore, objs ...client.Object) *world {
+	t.Helper()
 	sch := runtime.NewScheme()
 	require.NoError(t, clientgoscheme.AddToScheme(sch))
 	require.NoError(t, testsv1alpha1.AddToScheme(sch))
@@ -74,6 +81,9 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 	objects := storage.NewFake()
 	api := &apiserver.Server{K8sClient: k8s, Bucket: bucket,
 		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects, Cases: cannedCases{}}
+	if archive != nil {
+		api.Store, api.Deleter = archive, archive
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle(proxyPath+"/", http.StripPrefix(proxyPath, api.Handler()))

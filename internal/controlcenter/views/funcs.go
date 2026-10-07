@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
+	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
 // funcs are available in every template. There is deliberately no query
@@ -56,6 +57,17 @@ var funcs = template.FuncMap{
 	"num":          FormatNumber,
 	"durationF":    func(ms float64) string { return duration(int64(math.Round(ms))) },
 	"inc":          func(n int) int { return n + 1 },
+	"runID":        RunID,
+}
+
+// RunID is the id the API finds a run by: its name while the TestRun
+// exists, its UID once only run history has it (the API looks archived
+// runs up by UID).
+func RunID(r apiclient.Run) string {
+	if r.Origin == "archive" && r.UID != "" {
+		return r.UID
+	}
+	return r.Name
 }
 
 // FormatNumber renders a metric value: integers as such, otherwise up to
