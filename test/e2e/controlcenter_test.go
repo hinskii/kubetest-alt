@@ -120,7 +120,8 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	_ = review.Body.Close()
 	require.Contains(t, string(reviewBody), "The API would admit this Test", string(reviewBody))
 	bad := url.Values{"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-bad"}, "template": {"k6"},
-		"podAnnotations": {"x=y"}, "serviceAccount": {"kube-system-admin"}, "action": {"preview"}}
+		"param.k6.script": {"x.js"},
+		"podAnnotations":  {"x=y"}, "serviceAccount": {"kube-system-admin"}, "action": {"preview"}}
 	refused := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, bad)
 	refusedBody, _ := io.ReadAll(refused.Body)
 	_ = refused.Body.Close()

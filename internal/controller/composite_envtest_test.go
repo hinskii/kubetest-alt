@@ -246,14 +246,19 @@ func TestReconcile_Composite_Idempotent(t *testing.T) {
 		return len(listChildren(t, ctx, ns, run.Name)) == 3
 	}, 5*time.Second, 100*time.Millisecond)
 
-	// Poke the parent to force a re-reconcile (annotate). Should not create dupes.
-	var fresh testsv1alpha1.TestRun
-	require.NoError(t, k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: run.Name}, &fresh))
-	if fresh.Annotations == nil {
-		fresh.Annotations = map[string]string{}
-	}
-	fresh.Annotations["poke"] = "1"
-	require.NoError(t, k8sClient.Update(ctx, &fresh))
+	// Poke the parent to force a re-reconcile (annotate). Should not create
+	// dupes. The reconciler writes the run too: retry on a version conflict.
+	require.NoError(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var fresh testsv1alpha1.TestRun
+		if err := k8sClient.Get(ctx, client.ObjectKey{Namespace: ns, Name: run.Name}, &fresh); err != nil {
+			return err
+		}
+		if fresh.Annotations == nil {
+			fresh.Annotations = map[string]string{}
+		}
+		fresh.Annotations["poke"] = "1"
+		return k8sClient.Update(ctx, &fresh)
+	}))
 
 	// Give the reconciler a moment; count MUST remain 3.
 	time.Sleep(500 * time.Millisecond)
