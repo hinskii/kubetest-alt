@@ -1,4 +1,5 @@
 config:
+  locustfile: locustfile.py
   host: http://target:8000
   users: "2"
   spawnRate: "2"

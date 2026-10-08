@@ -61,8 +61,8 @@ spec:
   config:
     script:
       type: string
-      # Required — every k6 Test names its own script.
-      # Empty default = required per step-13 semantics.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The k6 script, relative to the repository root (git) or to /data/repo (inline files), e.g. perf/checkout.js."
     # Web-dashboard aggregation period (Go duration); the HTML report
     # needs at least two of them, so short runs set e.g. "1s".
     dashboardPeriod:

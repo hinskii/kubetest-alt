@@ -22,6 +22,8 @@ package apiclient
 import (
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
 
@@ -276,6 +278,9 @@ type ResolvedTest struct {
 	// Spec: expressions not evaluated, config not resolved — spec.config
 	// is the full parameter schema.
 	Spec *testsv1alpha1.TestSpec `json:"spec"`
+	// Conditions are the Test's status conditions — Ready=False with
+	// reason ParameterMissing when it doesn't say where its files are.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
 // AbortOptions is the optional body of POST /runs/{id}/abort.

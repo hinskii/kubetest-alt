@@ -61,8 +61,9 @@ func (w *world) test(t *testing.T, name string) *testsv1alpha1.Test {
 func wizardForm(action string) url.Values {
 	return url.Values{
 		"action": {action}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"checkout"},
-		"template": {"k6"}, "param.k6.script": {"checkout.js"}, "param.k6.vus": {"10"},
+		"template": {"k6"}, "param.k6.script": {""}, "param.k6.vus": {"10"},
 		"useGit": {"1"}, "gitURI": {"https://github.com/org/perf"}, "gitRevision": {"main"},
+		"gitPath":   {"perf/checkout.js"},
 		"gitSecret": {"git-token"},
 		"env":       {"TARGET=https://shop\n"}, "memoryLimit": {"1Gi"},
 		"podAnnotations": {"sidecar.istio.io/inject=false"}, "timeout": {"15m"},
@@ -87,7 +88,8 @@ func TestEditor_NewTestFromTemplate(t *testing.T) {
 	body = rec.Body.String()
 	assert.Contains(t, body, "The API would admit this Test")
 	assert.Contains(t, body, "use:\n  - k6")
-	assert.Contains(t, body, "script:\n      default: checkout.js", "a parameter differing from the template's default")
+	assert.Contains(t, body, "script:\n      default: perf/checkout.js", "the main path from the path in the repository")
+	assert.Contains(t, body, "paths:\n      - perf\n", "and the sparse checkout: the file's directory")
 	assert.NotContains(t, body, "vus:", "a parameter equal to the template's default stays out")
 	assert.Contains(t, body, "kubetest.io/tool: k6")
 	assert.NotContains(t, body, "managed-by", "the YAML is for Git")
@@ -101,7 +103,8 @@ func TestEditor_NewTestFromTemplate(t *testing.T) {
 	assert.Equal(t, "ui", got.Labels["app.kubernetes.io/managed-by"])
 	assert.Equal(t, developer, got.Annotations["kubetest.io/created-by"])
 	assert.Equal(t, []string{"k6"}, got.Spec.Use)
-	assert.Equal(t, "checkout.js", got.Spec.Config["script"].Default)
+	assert.Equal(t, "perf/checkout.js", got.Spec.Config["script"].Default)
+	assert.Equal(t, []string{"perf"}, got.Spec.Content.Git.Paths)
 	assert.Equal(t, "string", got.Spec.Config["script"].Type)
 	require.NotNil(t, got.Spec.Content.Git)
 	assert.Equal(t, "git-token", got.Spec.Content.Git.TokenFrom.SecretKeyRef.Name)
@@ -154,7 +157,8 @@ func TestEditor_APIRefusalIsShown(t *testing.T) {
 	got := w.test(t, "smoke")
 	got.Labels["app.kubernetes.io/managed-by"] = "argocd"
 	require.NoError(t, w.k8s.Update(context.Background(), got))
-	form := url.Values{"action": {actPreview}, "mode": {"form"}, "template": {"k6"}, "resourceVersion": {got.ResourceVersion}}
+	form := url.Values{"action": {actPreview}, "mode": {"form"}, "template": {"k6"}, "resourceVersion": {got.ResourceVersion},
+		"param.k6.script": {"a.js"}}
 	body := w.post(t, edit, developer, form).Body.String()
 	assert.Contains(t, body, "The API would refuse it")
 	assert.Contains(t, body, "edit it in the source repo")
@@ -175,7 +179,7 @@ func TestEditor_EditKeepsWhatTheFormDoesNotCover(t *testing.T) {
 	assert.Contains(t, page, `name="resourceVersion" value="`+rv+`"`)
 
 	form := url.Values{"action": {actSave}, "mode": {"form"}, "template": {"k6"}, "resourceVersion": {rv},
-		"args": {"run\nb.js"}, "param.k6.vus": {"25"}, "param.k6.script": {""}}
+		"args": {"run\nb.js"}, "param.k6.vus": {"25"}, "param.k6.script": {"b.js"}}
 	rec := w.post(t, edit, developer, form)
 	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
 	got := w.test(t, "smoke")
@@ -295,16 +299,65 @@ func TestEditor_InlineScriptBindsTheMainFileParameter(t *testing.T) {
 	form.Set("param.k6.script", "")
 	form.Set("useGit", "1")
 	form.Set("gitURI", "https://github.com/org/perf")
+	form.Set("gitPath", "load/main.js")
 	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	assert.NotContains(t, w.test(t, "from-git").Spec.Config, "script")
+	assert.Equal(t, "load/main.js", w.test(t, "from-git").Spec.Config["script"].Default, "with git, the path in the repository")
 }
 
-func TestEntryParam_FromTheTemplatesArguments(t *testing.T) {
-	assert.Equal(t, "script", entryParam(k6Template()))
-	plain := k6Template()
-	plain.Spec.Container.Args = []string{"run", "{{ config.script }}"}
-	assert.Empty(t, entryParam(plain), "not under /data/repo/")
-	missing := k6Template()
-	delete(missing.Spec.Config, "script")
-	assert.Empty(t, entryParam(missing), "not a parameter of the template")
+func TestEditor_GitPathIsRequiredAndStatedOnce(t *testing.T) {
+	w := newWorld(t, k6Template())
+	form := wizardForm(actPreview)
+	form.Set("gitPath", "")
+	body := w.post(t, newURL, developer, form).Body.String()
+	assert.Contains(t, body, "Path in the repository: required")
+
+	// No git, no files: the main path parameter is required, with its
+	// description.
+	form = wizardForm(actPreview)
+	form.Del("useGit")
+	k6 := k6Template()
+	k6.Spec.Config["script"] = testsv1alpha1.Parameter{Type: "string", Description: "The k6 script."}
+	w = newWorld(t, k6)
+	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "script: required — The k6 script.")
+
+	// A directory is the sparse checkout itself; "." the whole repository.
+	w = newWorld(t, k6Template())
+	form = wizardForm(actSave)
+	form.Set("name", "dir")
+	form.Set("gitPath", "e2e/web/")
+	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
+	got := w.test(t, "dir")
+	assert.Equal(t, []string{"e2e/web"}, got.Spec.Content.Git.Paths)
+	assert.Equal(t, "e2e/web", got.Spec.Config["script"].Default)
+	form.Set("name", "whole")
+	form.Set("gitPath", ".")
+	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
+	assert.Empty(t, w.test(t, "whole").Spec.Content.Git.Paths, "the whole repository: no sparse checkout")
+
+	// The editor shows the path back once — not again as sparse paths.
+	page := w.get(t, clusterURL+"/tests/team-a/dir/edit", developer).Body.String()
+	assert.Contains(t, page, `name="gitPath" value="e2e/web"`)
+	assert.Contains(t, page, `name="param.k6.script" value=""`, "the parameter follows the path")
+	assert.Contains(t, page, `<textarea name="gitPaths" rows="2" class="mono"></textarea>`)
+}
+
+func TestEditor_MainPathOutsideTheCheckoutWarns(t *testing.T) {
+	w := newWorld(t, k6Template())
+	form := wizardForm(actPreview)
+	form.Set("gitPaths", "perf")
+	form.Set("param.k6.script", "other/x.js")
+	body := w.post(t, newURL, developer, form).Body.String()
+	assert.Contains(t, body, "script is other/x.js, which the sparse checkout (perf) leaves out")
+	assert.Contains(t, body, "The API would admit this Test", "a warning, not an error")
+}
+
+func TestTestPages_NotReady(t *testing.T) {
+	test := smokeTest()
+	test.Status.Conditions = []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Reason: "ParameterMissing",
+		Message: "set spec.config.script: The k6 script.", LastTransitionTime: metav1.Now()}}
+	w := newWorld(t, test)
+	assert.Contains(t, w.get(t, clusterURL, developer).Body.String(), `<span class="chip warning" title="set spec.config.script: The k6 script.">not ready</span>`)
+	page := w.get(t, clusterURL+"/tests/team-a/smoke", developer).Body.String()
+	assert.Contains(t, page, "Not ready to run:</strong> set spec.config.script: The k6 script.")
+	assert.Contains(t, page, `/tests/team-a/smoke/edit">edit the Test</a>`)
 }

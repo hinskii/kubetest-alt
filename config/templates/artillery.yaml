@@ -58,7 +58,8 @@ spec:
   config:
     scenario:
       type: string
-      # Required — path to the scenario YAML.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The Artillery scenario YAML, relative to the repository root (git) or to /data/repo (inline files), e.g. load/scenario.yml."
     # `ensure` is a template-level marker (required, no default) that
     # forces consumers to acknowledge the "your scenario MUST contain
     # the ensure plugin" contract by supplying a truthy value here.

@@ -85,8 +85,9 @@
     <label class="check"><input type="checkbox" name="useGit" value="1"{{if $f.UseGit}} checked{{end}} data-toggles="git"> From a git repository</label>
     <div class="run-form" data-toggled="git">
       <label><span>Repository</span><input type="text" name="gitURI" value="{{$f.GitURI}}" placeholder="https://github.com/org/repo" autocomplete="off"></label>
+      <label><span>Path in the repository <span class="muted">required — the tests: a file or a directory; "." for all of it</span></span><input type="text" name="gitPath" value="{{$f.GitPath}}" placeholder="perf/checkout.js" class="mono" autocomplete="off" id="git-path"></label>
       <label><span>Revision <span class="muted">branch, tag or commit</span></span><input type="text" name="gitRevision" value="{{$f.GitRevision}}" placeholder="main" autocomplete="off"></label>
-      <label><span>Paths <span class="muted">sparse checkout, one per line</span></span><textarea name="gitPaths" rows="2" class="mono">{{$f.GitPaths}}</textarea></label>
+      <label><span>Sparse paths <span class="muted">advanced, one per line; empty: from the path above</span></span><textarea name="gitPaths" rows="2" class="mono">{{$f.GitPaths}}</textarea></label>
       <label><span>Token Secret <span class="muted">private repos, optional</span></span><input type="text" name="gitSecret" value="{{$f.GitSecret}}" placeholder="git-token" autocomplete="off"></label>
       <label><span>Key in the Secret</span><input type="text" name="gitSecretKey" value="{{$f.GitSecretKey}}" placeholder="token" autocomplete="off"></label>
     </div>
@@ -112,7 +113,11 @@
       <div class="run-form">
       {{range $t.Params}}
         <label>
+          {{if eq .Name $t.MainParam}}
+          <span>{{.Name}} <span class="muted">where the tests are — empty: the path in the repository, or the first inline file</span></span>
+          {{else}}
           <span>{{.Name}} <span class="muted">{{.Type}}{{if .Required}}, set at run time if empty{{end}}</span></span>
+          {{end}}
           {{if .Enum}}
             <select name="param.{{$t.Name}}.{{.Name}}">
               {{$v := .Value}}{{if .Required}}<option value=""></option>{{end}}
@@ -124,7 +129,7 @@
               <option value="false"{{if ne .Value "true"}} selected{{end}}>false</option>
             </select>
           {{else}}
-            <input type="{{.InputType}}" name="param.{{$t.Name}}.{{.Name}}" value="{{.Value}}"{{with .Step}} step="{{.}}"{{end}} placeholder="{{.Default}}">
+            <input type="{{.InputType}}" name="param.{{$t.Name}}.{{.Name}}" value="{{.Value}}"{{with .Step}} step="{{.}}"{{end}} placeholder="{{.Default}}"{{if eq .Name $t.MainParam}} data-main-path class="mono"{{end}}>
           {{end}}
           {{with .Description}}<span class="muted small">{{.}}</span>{{end}}
         </label>
@@ -189,6 +194,7 @@
 {{end}}
 
 {{define "check"}}
+{{with .Warnings}}<div class="notice warning" role="status"><strong>Check:</strong><ul>{{range .}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
 {{if .Admitted}}<p class="notice ok" role="status">The API would admit this Test (schema, webhooks, pod policy).</p>
 {{else if .CheckErr}}<div class="notice error" role="alert"><strong>{{if .SaveFailed}}Not saved:{{else}}The API would refuse it:{{end}}</strong> {{.CheckErr}}</div>{{end}}
 {{end}}

@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 )
 
 // TestCatalog_ApplyAllTemplatesAndSamples proves every catalog file under
@@ -382,6 +383,43 @@ func TestCatalog_SamplesRunTheCatalogProjects(t *testing.T) {
 			globless := strings.SplitN(v, "*", 2)[0]
 			_, err := os.Stat(filepath.Join(repoRoot, globless))
 			assert.NoError(t, err, "%s: config %s=%q must exist in the repo", filepath.Base(f), name, v)
+		}
+	}
+}
+
+// TestCatalog_MainPathParamsAreRequired: a template never defaults where
+// a Test's files are (step 20h), says what to put there, and every sample
+// says it.
+func TestCatalog_MainPathParamsAreRequired(t *testing.T) {
+	repoRoot, err := findRepoRoot()
+	require.NoError(t, err)
+	tmplFiles, err := listYAML(filepath.Join(repoRoot, "config", "templates"))
+	require.NoError(t, err)
+	mainParam := map[string]string{}
+	for _, f := range tmplFiles {
+		tmpl, err := readTestTemplate(f)
+		require.NoError(t, err, "parse %s", f)
+		p := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+		if p == "" {
+			continue // aimed at a URL (zap-baseline), not at files
+		}
+		mainParam[tmpl.Name] = p
+		assert.Empty(t, tmpl.Spec.Config[p].Default, "%s: %s must have no default", tmpl.Name, p)
+		assert.NotEmpty(t, tmpl.Spec.Config[p].Description, "%s: %s needs a description", tmpl.Name, p)
+	}
+	assert.GreaterOrEqual(t, len(mainParam), 14, "the file-based tools: %v", mainParam)
+
+	sampleFiles, err := listYAML(filepath.Join(repoRoot, "config", "samples", "tools"))
+	require.NoError(t, err)
+	for _, f := range sampleFiles {
+		b, err := os.ReadFile(f) // #nosec G304 -- repo fixture
+		require.NoError(t, err)
+		var test testsv1alpha1.Test
+		if yaml.Unmarshal(b, &test) != nil || test.Kind != "Test" || len(test.Spec.Use) == 0 {
+			continue
+		}
+		if p, ok := mainParam[test.Spec.Use[0]]; ok {
+			assert.NotEmpty(t, test.Spec.Config[p].Default, "%s: the sample must set %s", filepath.Base(f), p)
 		}
 	}
 }

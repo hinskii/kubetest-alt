@@ -154,17 +154,22 @@ links to open it in a new tab or download it.
 
 1. **Basics** — namespace, name, and the tool: a TestTemplate of that
    namespace's catalog (k6, Cypress, JMeter, …) or an own image.
-2. **Source** — a git repository (revision, sparse-checkout paths, a
-   token from a Secret) and/or inline files. File paths are under
-   `/data/repo/`, where a template's tool looks (a leading `/` means under
-   `/data`).
+2. **Source** — a git repository and/or inline files. With git, **Path
+   in the repository** is required: where the tests are, a file or a
+   directory (`perf/checkout.js`, `e2e/web`; `.` for all of it). It fills
+   the template's main path parameter and the sparse checkout (the
+   directory, or a file's directory); *Sparse paths* (advanced) override
+   the latter, and the review warns when the main path falls outside
+   them. Inline file paths are under `/data/repo/`, where a template's
+   tool looks (a leading `/` means under `/data`).
 3. **Parameters & container** — the template's parameters (a Test keeps
    only those that differ from the template's defaults; a run can still
    override them), image, command, arguments, environment, CPU/memory.
-   With inline files and no git, the template's main-file parameter —
-   the one its arguments put after `/data/repo/` (k6's `script`, JMeter's
-   `plan`, newman's `collection`, …) — points at the first file unless
-   you set it: pick k6, paste a script, create.
+   The template's main path parameter — the one its container puts after
+   `/data/repo/` (k6's `script`, JMeter's `plan`, newman's `collection`,
+   …) — has no default: it follows the path in the repository, or with
+   inline files the first file, unless you set it. Pick k6, paste a
+   script, create.
 4. **Pod & schedule** — pod annotations and labels (e.g.
    `sidecar.istio.io/inject=false`), service account, timeout, cron.
 5. **Review** — the Test's YAML and the API's verdict on it: a server-side
@@ -182,6 +187,18 @@ editor opened: if someone changed the Test meanwhile, nothing is
 overwritten and the page says so. Tests applied from Git can't be edited
 here (CLAUDE.md §7) — **Duplicate** makes a GUI-managed copy instead.
 Admins can **delete** a GUI-managed Test; its run history stays.
+
+### "Not ready to run"
+
+A Test that doesn't say where its files are — the template's main path
+parameter left empty — shows **not ready** in the list and a banner on its
+page with what to set ("set spec.config.script: The k6 script, relative to
+the repository root …"). The operator keeps this in the Test's
+`status.conditions` (`Ready=False`, reason `ParameterMissing`, or
+`TemplateMissing` for a template in `spec.use` that doesn't exist); a run
+of such a Test fails at once instead of running the repository's root.
+Templates never default that path, so Tests that relied on an old default
+(`projectDir: "."`, `locustfile.py`, …) need it set.
 
 ## Run page: what Kubernetes says
 

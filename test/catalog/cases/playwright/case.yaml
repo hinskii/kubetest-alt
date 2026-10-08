@@ -1,4 +1,5 @@
-config: {}
+config:
+  projectDir: "."           # package.json + playwright.config.js at the root
 expect:
   phase: failed            # one spec fails on purpose
   testCounts: {total: 2, failed: 1}

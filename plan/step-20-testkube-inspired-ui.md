@@ -174,84 +174,77 @@ the tool already has its chip). Clicking one filters the list
 
 ---
 
-## 20h — The test's path: required, stated once, nothing hardcoded
+## 20h — The test's path: required, stated once, no defaults
 
-Today the location of a Test's files is partly hardcoded, partly
-defaulted, and stated twice:
-- the templates hardcode the checkout's place — `/data/repo/{{ config.script }}`,
-  `workingDir: /data/repo/{{ config.projectDir }}`, … — so a Test that sets
-  `content.git.mountPath` (which the fetcher honours) breaks every
-  template;
-- several templates default the path: `projectDir: "."` (playwright,
+Today the location of a Test's files is defaulted and stated twice:
+- eight templates default the path: `projectDir: "."` (playwright,
   cypress, gradle, maven), `testsDir: "."` (pytest), `featuresDir: "."`
   (cucumber), `locustfile: locustfile.py`, gatling's simulations folder —
-  so a git Test "works" without saying where its tests are, and runs
-  whatever sits at the repository's root;
-- the same directory goes into `content.git.paths` (sparse checkout) and
-  into the template's main parameter — the samples repeat it
-  (`paths: [test/catalog/cases/playwright/repo]` +
-  `projectDir: test/catalog/cases/playwright/repo`), the wizard asks for it
-  twice, and a mismatch fails only at run time.
+  so a Test "works" without saying where its tests are, and runs whatever
+  sits at the repository's root;
+- with git, the same directory goes into `content.git.paths` (sparse
+  checkout) and into the template's main parameter — the wizard asks for
+  it twice, and a mismatch fails only at run time.
 
-**The rule:** a Test says where its tests are — the template's main path
+**The rule:** a Test says where its tests are — a template's main path
 parameter has no default, ever. Where the checkout sits in the pod
-(`/data/repo`) stays the platform's business.
+(`/data/repo`) stays the platform's business (no `{{ content.repo }}`:
+custom mount paths are not a goal).
+
+**The main path parameter** of a template is the `config` parameter its
+container puts right after `/data/repo/` (in command, args or workingDir):
+k6's `script`, JMeter's `plan`, newman's `collection`, playwright's
+`projectDir`, … Found from the template itself
+(`resolver.MainPathParam`), shared by the operator and Control Center —
+no tool is named in code.
 
 **Templates (catalog)**
-- The main path parameter of every template — `script`, `plan`,
-  `collection`, `projectDir`, `testsDir`, `featuresDir`, `locustfile`,
-  `simulationsFolder`, `scenario`, `inputFile`, … — loses its default and
-  gets a `description` saying what to put there (relative to the
-  repository root, or to /data/repo for inline files).
-- A new expression `{{ content.repo }}`: where the git checkout is, from
-  `content.git.mountPath` (relative to /data or absolute inside it), else
-  `/data/repo`. Every template uses it instead of the literal, so a custom
-  mountPath works; results stay under `{{ content.repo }}/results`.
-- Lint test over config/templates: no `/data/repo` literal, and the
-  parameter each template puts after `{{ content.repo }}/` has no default.
+- The eight defaults go; every main path parameter gets a `description`
+  ("relative to the repository root", or to /data/repo for inline files).
+- A test over config/templates: each main path parameter has no default
+  and has a description.
 
-**Operator**
-- A Test whose resolved spec leaves a required parameter empty gets
-  `status.conditions` `Ready=False`, reason `ParameterMissing`, message
-  "set spec.config.script (the k6 script, relative to the repository)".
-  Control Center shows it on the Test page and in the list (a warning
-  chip). Admission stays template-agnostic — no template lookups in the
-  webhook (ArgoCD may sync a Test before its template).
-- A run of such a Test still starts only with the value given at run
-  time (today's required-parameter rule); without it, it fails at once
-  with the same message — never runs the repository root.
+**Operator: Test status**
+- A small Test controller sets `status.conditions[type=Ready]`:
+  `False/ParameterMissing` ("set spec.config.script — the k6 script,
+  relative to the repository") when the merged spec leaves the main path
+  parameter empty; `False/TemplateMissing` when a template in `spec.use`
+  doesn't exist; else `True/Resolved`. Re-evaluated when a TestTemplate
+  changes. Status is patched (conditions only), never clobbering
+  `latestRun`.
+- Admission stays template-agnostic — no template lookups in the webhook
+  (ArgoCD may sync a Test before its template).
+- A run without the path still fails at once (required-parameter rule),
+  never runs the repository root.
 
-**Wizard (CC)**
-- Git source: one required field, *Path in the repository* (a file or a
-  directory, e.g. `perf/checkout.js`, `e2e/web`). It sets the template's
-  main parameter (found from the template's arguments, as the wizard
-  already does for inline files) and the sparse checkout (the directory,
-  or a file's directory). Review refuses to continue without it.
-- *Sparse paths* stays as an advanced field (more paths, or "." for the
-  whole repository — explicit, never implied).
-- Inline files: the main parameter is bound to the first file as today;
-  with no file and no git, the review says which parameter is missing.
-- Review warns when the main parameter points outside the sparse paths
-  ("k6 will look for perf/x.js, which the checkout leaves out").
-- Edit shows the path back (the parameter).
+**API / Control Center**
+- `GET /tests/{name}/resolved` carries the Test's conditions; the Test
+  page shows a ParameterMissing / TemplateMissing banner; the tests list a
+  warning chip (from the Test's status).
+- Wizard, git source: one required field, *Path in the repository* (a
+  file or a directory, e.g. `perf/checkout.js`, `e2e/web`). It sets the
+  main path parameter (unless the user typed one) and, unless *Sparse
+  paths* (advanced) is filled, the sparse checkout: the directory, or a
+  file's directory. Own image: the path is the sparse checkout only.
+- Inline files: the main parameter is bound to the first file (as now);
+  with no file and no git, the review names the missing parameter.
+- Review warns when the main parameter points outside the sparse paths.
+- Edit shows the path back (the parameter, else the first sparse path).
 
 **Samples, catalog e2e, docs**
-- `config/samples/tools/*.yaml` and the catalog cases set the parameter
-  explicitly; one sample sets a custom `mountPath` to keep
-  `{{ content.repo }}` honest in the catalog e2e.
-- Release note: Tests that relied on a removed default (`projectDir: .`,
-  `locustfile.py`, …) now report `ParameterMissing` — set the parameter.
-- docs/onboarding-a-tool.md: templates use `{{ content.repo }}` and never
-  default the main path; docs/control-center.md: the wizard's git path.
+- The catalog cases that leaned on a default (cucumber, gatling, locust,
+  playwright) set the parameter; the samples already do.
+- docs/onboarding-a-tool.md: the main path parameter never has a default;
+  docs/control-center.md: the wizard's git path; upgrading note: Tests
+  that relied on a removed default report ParameterMissing — set it.
 
 **Acceptance**
-- Resolver tests: `{{ content.repo }}` default, relative and absolute
-  mountPath.
-- Template lint test (above).
-- Controller test: `ParameterMissing` set and cleared.
+- `MainPathParam` unit tests; the catalog template test.
+- Controller (envtest): ParameterMissing / TemplateMissing / Resolved,
+  re-evaluated on a template change, latestRun untouched.
 - Wizard tests: git path required; one path → parameter + sparse path;
   typed parameter kept; the outside-the-checkout warning.
-- Catalog e2e green (every tool), including the custom-mountPath sample.
+- Catalog e2e green for every tool.
 
 ---
 

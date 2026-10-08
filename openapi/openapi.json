@@ -2032,6 +2032,13 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "conditions": {
+                      "description": "The Test's status conditions: Ready=False/ParameterMissing when it doesn't say where its files are.",
+                      "items": {
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "gitopsLocked": {
                       "type": "boolean"
                     },

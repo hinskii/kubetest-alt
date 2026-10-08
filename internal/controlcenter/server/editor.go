@@ -17,12 +17,13 @@ limitations under the License.
 package server
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
 	"net/url"
+	"path"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -35,6 +36,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
 )
 
@@ -66,11 +68,15 @@ type testForm struct {
 	UseGit        bool
 	GitURI        string
 	GitRevision   string
-	GitPaths      string // one per line
-	GitSecret     string // Secret with the token, optional
-	GitSecretKey  string
-	UseFiles      bool
-	Files         []fileField
+	// GitPath is where the tests are in the repository (a file or a
+	// directory): the template's main path parameter and, unless GitPaths
+	// says otherwise, the sparse checkout. Required with git (step 20h).
+	GitPath      string
+	GitPaths     string // sparse checkout, one per line (advanced)
+	GitSecret    string // Secret with the token, optional
+	GitSecretKey string
+	UseFiles     bool
+	Files        []fileField
 	// Params are the template's parameters (name → value).
 	Params map[string]string
 	Env    string // NAME=value per line
@@ -107,6 +113,7 @@ func formFromValues(v url.Values) testForm {
 		Image: strings.TrimSpace(v.Get("image")), Command: v.Get("command"), Args: v.Get("args"),
 		UseGit: v.Get("useGit") != "", GitURI: strings.TrimSpace(v.Get("gitURI")),
 		GitRevision: strings.TrimSpace(v.Get("gitRevision")), GitPaths: v.Get("gitPaths"),
+		GitPath:   strings.Trim(strings.TrimSpace(v.Get("gitPath")), "/"),
 		GitSecret: strings.TrimSpace(v.Get("gitSecret")), GitSecretKey: strings.TrimSpace(v.Get("gitSecretKey")),
 		UseFiles: v.Get("useFiles") != "", Env: v.Get("env"),
 		CPURequest: strings.TrimSpace(v.Get("cpuRequest")), MemoryRequest: strings.TrimSpace(v.Get("memoryRequest")),
@@ -176,12 +183,30 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 		}
 	}
 	f.UseFiles = len(f.Files) > 0
+	if g := s.Content.Git; g != nil {
+		main := ""
+		if tmpl != nil {
+			main = resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+		}
+		if own, ok := s.Config[main]; ok && main != "" {
+			f.GitPath = own.Default
+		} else if len(g.Paths) > 0 {
+			f.GitPath = g.Paths[0]
+		}
+		if slices.Equal(g.Paths, sparseFor(f.GitPath)) {
+			f.GitPaths = "" // derived from the path: nothing to show
+		}
+	}
 	if tmpl != nil {
+		main := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
 		for name, p := range tmpl.Spec.Config {
 			f.Params[name] = p.Default
 			if own, ok := s.Config[name]; ok {
 				f.Params[name] = own.Default
 			}
+		}
+		if f.UseGit && main != "" && f.Params[main] == f.GitPath {
+			f.Params[main] = "" // follows the path in the repository
 		}
 	}
 	var env []string
@@ -249,8 +274,9 @@ func kvLines(field, s string) (map[string]string, error) {
 // build turns the form into a Test: a copy of base (the Test being
 // edited, or an empty one) with the fields the form owns replaced and
 // everything else — services, volumes, verdict, … — kept. tmpl is the
-// chosen template (nil for an own image). Returns every problem found.
-func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) (*testsv1alpha1.Test, []string) {
+// chosen template (nil for an own image). Returns every problem found,
+// and warnings that don't stop a save.
+func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) (*testsv1alpha1.Test, []string, []string) {
 	b := &builder{form: f, t: base.DeepCopy()}
 	t := b.t
 	t.APIVersion, t.Kind = testsv1alpha1.GroupVersion.String(), kindTest
@@ -275,14 +301,15 @@ func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTempla
 	}
 	b.pod()
 	b.timing()
-	return t, b.errs
+	return t, b.errs, b.warns
 }
 
 // builder collects the problems of one build.
 type builder struct {
-	form testForm
-	t    *testsv1alpha1.Test
-	errs []string
+	form  testForm
+	t     *testsv1alpha1.Test
+	errs  []string
+	warns []string
 }
 
 func (b *builder) fail(msg string) { b.errs = append(b.errs, msg) }
@@ -346,6 +373,12 @@ func (b *builder) content(was *testsv1alpha1.GitContent) {
 	c.Git = nil
 	if f.UseGit {
 		g := testsv1alpha1.GitContent{URI: f.GitURI, Revision: f.GitRevision, Paths: lines(f.GitPaths)}
+		if len(g.Paths) == 0 {
+			g.Paths = sparseFor(f.GitPath)
+		}
+		if f.GitPath == "" {
+			b.fail(`Path in the repository: required — where the tests are, a file or a directory (e.g. perf/checkout.js, e2e/web; "." for the whole repository).`)
+		}
 		if was != nil {
 			g.MountPath, g.AuthType, g.UsernameFrom, g.SSHKeyFrom = was.MountPath, was.AuthType, was.UsernameFrom, was.SSHKeyFrom
 		}
@@ -387,11 +420,16 @@ func (b *builder) params(tmpl *testsv1alpha1.TestTemplate, changed bool) {
 			}
 		}
 	}
-	entry := entryParam(tmpl)
+	main := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
 	for _, name := range slices.Sorted(maps.Keys(tmpl.Spec.Config)) {
 		p, v := tmpl.Spec.Config[name], b.form.Params[name]
-		if name == entry {
-			v = b.entryValue(p, v)
+		if name == main {
+			v = b.mainPathValue(p, v)
+			if v == "" {
+				b.fail(fmt.Sprintf("%s: required — %s", name, cmp.Or(p.Description, "where the Test's files are.")))
+				continue
+			}
+			b.checkInCheckout(name, v)
 		}
 		if v == "" || v == p.Default {
 			delete(s.Config, name)
@@ -436,31 +474,16 @@ func formPath(p string) string {
 	return "/" + p
 }
 
-// entryArg finds the template parameter naming the tool's main file in
-// its arguments: k6's "/data/repo/{{ config.script }}", JMeter's plan,
-// newman's collection, … Read from the template, so the editor knows no
-// tool by name.
-var entryArg = regexp.MustCompile(`/data/repo/\{\{\s*config\.([A-Za-z0-9_]+)\s*\}\}`)
-
-// entryParam is the template's main-file parameter, or "".
-func entryParam(tmpl *testsv1alpha1.TestTemplate) string {
-	for _, arg := range slices.Concat(tmpl.Spec.Container.Command, tmpl.Spec.Container.Args) {
-		if m := entryArg.FindStringSubmatch(arg); m != nil {
-			if _, ok := tmpl.Spec.Config[m[1]]; ok {
-				return m[1]
-			}
-		}
-	}
-	return ""
-}
-
-// entryValue points the main-file parameter at the first inline file
-// when the Test's content is inline (no git) and the parameter, left
-// empty or at the template's default, names none of its files. A value
-// the user typed is kept.
-func (b *builder) entryValue(p testsv1alpha1.Parameter, v string) string {
-	if b.form.UseGit || (v != "" && v != p.Default) {
+// mainPathValue is the template's main path parameter (resolver.
+// MainPathParam: k6's script, JMeter's plan, playwright's projectDir, …):
+// what the user typed, else the path in the repository (git), else the
+// first inline file when the value names none of the Test's files.
+func (b *builder) mainPathValue(p testsv1alpha1.Parameter, v string) string {
+	if v != "" && v != p.Default {
 		return v
+	}
+	if b.form.UseGit {
+		return cmp.Or(v, b.form.GitPath)
 	}
 	var inline []string
 	for _, file := range b.t.Spec.Content.Files {
@@ -472,6 +495,42 @@ func (b *builder) entryValue(p testsv1alpha1.Parameter, v string) string {
 		return v
 	}
 	return inline[0]
+}
+
+// checkInCheckout warns when the main path lies outside the sparse
+// checkout — the tool would look for a file the clone leaves out.
+func (b *builder) checkInCheckout(name, v string) {
+	g := b.t.Spec.Content.Git
+	if g == nil || len(g.Paths) == 0 {
+		return
+	}
+	v = strings.Trim(path.Clean(v), "/")
+	for _, sp := range g.Paths {
+		sp = strings.Trim(path.Clean(sp), "/")
+		if sp == "." || v == sp || strings.HasPrefix(v, sp+"/") {
+			return
+		}
+	}
+	b.warns = append(b.warns, fmt.Sprintf("%s is %s, which the sparse checkout (%s) leaves out — the tool won't find it.",
+		name, v, strings.Join(g.Paths, ", ")))
+}
+
+// sparseFor is the sparse checkout a path in the repository needs: the
+// directory itself, or a file's directory (a name with an extension is
+// taken for a file); none — the whole repository — for "." or a file at
+// the root.
+func sparseFor(p string) []string {
+	p = strings.Trim(path.Clean(strings.TrimSpace(p)), "/")
+	if p == "" || p == "." {
+		return nil
+	}
+	if path.Ext(path.Base(p)) != "" {
+		p = path.Dir(p)
+		if p == "." {
+			return nil
+		}
+	}
+	return []string{p}
 }
 
 // pod sets the service account, annotations and labels; the rest of the

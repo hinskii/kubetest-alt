@@ -66,5 +66,6 @@ func (s *Server) getResolvedTest(w http.ResponseWriter, r *http.Request) {
 		GitOpsLocked: isLockedForUI(t.Labels),
 		Templates:    t.Spec.Use,
 		Spec:         spec,
+		Conditions:   t.Status.Conditions,
 	})
 }

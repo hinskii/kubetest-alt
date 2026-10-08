@@ -10,6 +10,7 @@
   {{end}}
 </div>
 <p class="muted">Namespace {{$t.Namespace}}{{with $t.Templates}} · templates {{range $i, $n := .}}{{if $i}}, {{end}}{{$n}}{{end}}{{end}}</p>
+{{with $d.Problem}}<div class="notice warning" role="status"><strong>Not ready to run:</strong> {{.}}{{if and (not $t.GitOpsLocked) (canRun $.User)}} — <a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape $t.Namespace}}/{{pathEscape $t.Name}}/edit">edit the Test</a>{{else if $t.GitOpsLocked}} — set it where the Test is defined (Git).{{end}}</div>{{end}}
 
 {{if canRun $.User}}
 <section class="panel">

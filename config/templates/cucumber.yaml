@@ -34,7 +34,8 @@ spec:
   config:
     featuresDir:
       type: string
-      default: "."
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The directory with the features and step definitions, relative to the repository root (git) or to /data/repo (inline files); \".\" for the root itself."
     cucumberVersion:
       type: string
       default: "9.2.0"

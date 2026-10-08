@@ -39,4 +39,5 @@ spec:
     # /data/repo working tree.
     collection:
       type: string
-      # Required.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The Postman collection (.json), relative to the repository root (git) or to /data/repo (inline files)."

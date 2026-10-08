@@ -325,3 +325,6 @@ fieldset.params legend { font-weight: 600; padding: 0; }
 .yaml-editor { min-height: 24rem; }
 .file-row .path { display: flex; align-items: center; gap: 0.3rem; }
 .file-row .path input { flex: 1; }
+.notice.warning { background: var(--warning-bg); color: var(--warning-text); }
+.notice.warning ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
+.chip.warning { background: var(--warning-bg); color: var(--warning-text); }

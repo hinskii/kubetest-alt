@@ -32,7 +32,7 @@
         <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a></td>
         <td class="muted">{{.Namespace}}</td>
         <td>{{with .LatestRun}}<a class="status {{phaseClass .Phase}}" href="/clusters/{{pathEscape $d.Cluster}}/runs/{{pathEscape $ns}}/{{pathEscape .Name}}">{{.Phase}}</a> <span class="muted">{{when .FinishedAt}}</span>{{else}}<span class="muted">never run</span>{{end}}</td>
-        <td>{{if .Locked}}<span class="chip" title="Managed outside the GUI (GitOps or kubectl): read-only here, runs allowed">read-only</span>{{end}}</td>
+        <td>{{with .Problem}}<span class="chip warning" title="{{.}}">not ready</span> {{end}}{{if .Locked}}<span class="chip" title="Managed outside the GUI (GitOps or kubectl): read-only here, runs allowed">read-only</span>{{end}}</td>
       </tr>
     {{end}}
     </tbody>

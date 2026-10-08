@@ -92,6 +92,8 @@ func OpenAPISpec() map[string]any {
 								"gitopsLocked": map[string]any{"type": "boolean"},
 								"templates":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 								"spec":         map[string]any{"type": "object", "description": "Merged TestSpec."},
+								"conditions": map[string]any{"type": "array", "items": map[string]any{"type": "object"},
+									"description": "The Test's status conditions: Ready=False/ParameterMissing when it doesn't say where its files are."},
 							},
 						}),
 						"400": errorSchema(),

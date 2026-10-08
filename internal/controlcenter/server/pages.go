@@ -32,6 +32,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
@@ -48,6 +50,9 @@ const (
 	managedByUI = "ui"
 	// toolOther groups Tests without a tool label on the tests page.
 	toolOther = "other"
+	// conditionReady is a Test's readiness (the operator's Test
+	// controller): False when it can't run as it is.
+	conditionReady = "Ready"
 	// tagCreatedBy names who started a run (a TestRun tag) or created a
 	// Test (an annotation).
 	tagCreatedBy = "kubetest.io/created-by"
@@ -201,6 +206,8 @@ type testRow struct {
 	Name, Namespace, Tool string
 	Locked                bool
 	LatestRun             *testsv1alpha1.RunReference
+	// Problem is why the Test can't run as it is (its Ready condition).
+	Problem string
 }
 
 type testGroup struct {
@@ -244,6 +251,7 @@ func (s *Server) testsPage(w http.ResponseWriter, r *http.Request) {
 			Name: t.Name, Namespace: t.Namespace, Tool: tool,
 			Locked:    t.Labels[labelManagedBy] != managedByUI,
 			LatestRun: t.Status.LatestRun,
+			Problem:   notReady(t.Status.Conditions),
 		})
 		data.Shown++
 	}
@@ -281,6 +289,16 @@ type testData struct {
 	ShowCommit bool
 	// Schedule is the Test's recurring schedule (spec.schedule), if any.
 	Schedule *scheduleView
+	// Problem is why the Test can't run as it is (its Ready condition).
+	Problem string
+}
+
+// notReady is the message of a Test's Ready=False condition, or "".
+func notReady(conds []metav1.Condition) string {
+	if c := meta.FindStatusCondition(conds, conditionReady); c != nil && c.Status == metav1.ConditionFalse {
+		return cmp.Or(c.Message, c.Reason)
+	}
+	return ""
 }
 
 func paramsOf(spec *testsv1alpha1.TestSpec) []param {
@@ -324,7 +342,7 @@ func (s *Server) testPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := testData{Cluster: c.Name, Test: t, Params: paramsOf(t.Spec), Runs: runs.Runs,
-		NextCursor: runs.NextCursor, PageCursor: cursor}
+		NextCursor: runs.NextCursor, PageCursor: cursor, Problem: notReady(t.Conditions)}
 	if t.Spec != nil {
 		data.Schedule = viewSchedule(t.Spec.Schedule, time.Now())
 	}

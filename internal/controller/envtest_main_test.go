@@ -403,6 +403,14 @@ func runTests(m *testing.M) (int, error) {
 		return 0, err
 	}
 
+	// Step 20h: Test readiness.
+	if err := (&TestReconciler{
+		Client:        mgr.GetClient(),
+		TemplateStore: &ClientTemplateStore{Client: mgr.GetClient()},
+	}).SetupWithManager(mgr); err != nil {
+		return 0, fmt.Errorf("setup TestReconciler: %w", err)
+	}
+
 	// Step 12: wire the TestTrigger controller + scheduler runnable into
 	// the envtest manager. Trigger controller uses a fake clock so timeout/
 	// delay/TTL tests never touch wall time. Scheduler is wired to prove

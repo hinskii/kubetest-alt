@@ -53,4 +53,5 @@ spec:
   config:
     inputFile:
       type: string
-      # Required — path to k8s YAML manifest(s) to scan.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The Kubernetes manifest(s) to scan, relative to the repository root (git) or to /data/repo (inline files)."

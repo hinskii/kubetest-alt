@@ -29,4 +29,5 @@ spec:
   config:
     projectDir:
       type: string
-      default: "."
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The Maven project (where pom.xml is), relative to the repository root (git) or to /data/repo (inline files); \".\" for the root itself."

@@ -92,6 +92,19 @@
     });
   }
 
+  // The main path parameter follows the path in the repository unless
+  // typed: show what it will be.
+  var gitPath = document.getElementById("git-path");
+  function mirrorPath() {
+    form.querySelectorAll("[data-main-path]").forEach(function (el) {
+      el.placeholder = gitPath && gitPath.value ? gitPath.value : "";
+    });
+  }
+  if (gitPath) {
+    gitPath.addEventListener("input", mirrorPath);
+    mirrorPath();
+  }
+
   // Copy the YAML for Git.
   form.querySelectorAll("[data-copy]").forEach(function (btn) {
     var src = document.getElementById(btn.getAttribute("data-copy"));

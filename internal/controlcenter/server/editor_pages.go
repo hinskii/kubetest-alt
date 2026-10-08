@@ -26,6 +26,7 @@ import (
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
@@ -49,6 +50,9 @@ type templateOption struct {
 	Name, Tool, Image string
 	Command, Args     string
 	Params            []param
+	// MainParam is where the tool finds the Test's files (step 20h): set
+	// from the path in the repository unless typed.
+	MainParam string
 }
 
 type editorData struct {
@@ -63,6 +67,9 @@ type editorData struct {
 	// TemplatesErr: the catalog couldn't be listed.
 	TemplatesErr string
 	Errors       []string
+	// Warnings don't stop a save (e.g. the main path outside the sparse
+	// checkout).
+	Warnings []string
 	// Preview is the resulting Test as YAML for Git; Admitted says the
 	// API (schema, webhooks, pod policy) accepted it in a dry run, else
 	// CheckErr is its answer.
@@ -86,6 +93,7 @@ func templateOptions(list []testsv1alpha1.TestTemplate, f testForm) []templateOp
 		o := templateOption{Name: t.Name, Tool: t.Labels[labelTool], Image: t.Spec.Container.Image,
 			Command: strings.Join(t.Spec.Container.Command, " "), Args: strings.Join(t.Spec.Container.Args, " ")}
 		o.Params = paramsOf(&testsv1alpha1.TestSpec{Config: t.Spec.Config})
+		o.MainParam = resolver.MainPathParam(t.Spec.Container, t.Spec.Config)
 		for i := range o.Params {
 			o.Params[i].Value = o.Params[i].Default
 			if v, ok := f.Params[o.Params[i].Name]; ok && t.Name == f.Template {
@@ -242,7 +250,7 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 		data.Templates = templateOptions(templates, f)
 	}
 	if f.Mode == modeForm {
-		t, data.Errors = f.build(base, findTemplate(templates, f.Template))
+		t, data.Errors, data.Warnings = f.build(base, findTemplate(templates, f.Template))
 	}
 	switch {
 	case action == actToYAML && len(data.Errors) == 0:

@@ -58,7 +58,8 @@ spec:
   config:
     locustfile:
       type: string
-      default: "locustfile.py"
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The locustfile, relative to the repository root (git) or to /data/repo (inline files), e.g. load/locustfile.py."
     host:
       type: string
       # Required — the target base URL under load.

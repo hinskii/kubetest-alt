@@ -48,4 +48,5 @@ spec:
   config:
     project:
       type: string
-      # Required — path to the SoapUI project XML.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The SoapUI project XML, relative to the repository root (git) or to /data/repo (inline files)."

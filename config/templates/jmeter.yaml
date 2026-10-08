@@ -56,7 +56,8 @@ spec:
     # Path to the .jmx test plan inside the content-fetcher tree.
     plan:
       type: string
-      # Required.
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The JMeter test plan (.jmx), relative to the repository root (git) or to /data/repo (inline files), e.g. jmeter/plan.jmx."
   verdict:
     # THE reason verdictFrom exists. Without this every JMeter run
     # reports "passed" regardless of the actual failure rate.

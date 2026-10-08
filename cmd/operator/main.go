@@ -467,6 +467,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Step 20h: a Test's Ready condition (does it say where its files are).
+	if err := (&controller.TestReconciler{
+		Client:        mgr.GetClient(),
+		TemplateStore: &controller.ClientTemplateStore{Client: mgr.GetClient()},
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "Test")
+		os.Exit(1)
+	}
+
 	// Step 12: cron scheduler + TestTrigger controller. Both live in-process,
 	// behind manager leader election (their Runnables opt in via
 	// NeedLeaderElection()). No separate binaries, no CronJob-per-Test.

@@ -1,4 +1,5 @@
 config:
+  simulationsFolder: gatling/user-files/simulations
   simulation: FixtureSimulation
 expect:
   phase: passed            # no Gatling assertions → nothing to fail

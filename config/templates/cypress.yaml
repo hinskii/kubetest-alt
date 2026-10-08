@@ -63,7 +63,8 @@ spec:
     # Cypress `--project` root — where cypress.config.js lives.
     projectDir:
       type: string
-      default: "."
+      # Required, no default: a Test says where its files are (step 20h).
+      description: "The Cypress project (where cypress.config.* is), relative to the repository root (git) or to /data/repo (inline files); \".\" for the root itself."
     # Cypress `--spec` glob — leave defaulted to run everything.
     spec:
       type: string

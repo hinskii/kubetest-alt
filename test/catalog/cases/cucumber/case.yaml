@@ -1,4 +1,5 @@
-config: {}
+config:
+  featuresDir: "."          # the features sit at the repository root
 expect:
   phase: failed            # one scenario fails on purpose
   testCounts: {total: 2, failed: 1}
