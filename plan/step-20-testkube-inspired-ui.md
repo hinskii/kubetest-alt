@@ -13,7 +13,7 @@ banners, a SPA. Control Center stays server-rendered html/template with
 small same-origin scripts (CSP: no inline script), stateless (no database),
 and every page keeps working without JavaScript.
 
-Order: 20a → 20h, one commit each, gates green before the next
+Order: 20h (done) → 20i → 20a … 20g, one commit each, gates green before the next
 (`make lint test test-coverage openapi-check`; e2e in CI).
 
 ---
@@ -245,6 +245,87 @@ no tool is named in code.
 - Wizard tests: git path required; one path → parameter + sparse path;
   typed parameter kept; the outside-the-checkout warning.
 - Catalog e2e green for every tool.
+
+---
+
+## 20i — Content: git or inline, never both; projects only from git
+
+Follow-up to 20h. Inline files are text typed into the Test itself; git is
+a repository. They answer different needs, so a Test uses one or the
+other, and only git asks where the tests are.
+
+**Templates say what their main path is** — a new optional field on
+`Parameter`:
+
+```yaml
+config:
+  script:
+    type: string
+    path: file        # file | directory — this is the main path parameter
+    description: "The k6 script, relative to the repository root."
+```
+
+- `path` marks the main path parameter explicitly; `resolver.MainPathParam`
+  reads it instead of scanning the container for `/data/repo/{{ config.X }}`
+  (that scan goes). At most one parameter per template may set it
+  (TestTemplate webhook). CRD change, additive.
+- Catalog: `path: file` — k6 `script`, JMeter `plan`, newman `collection`,
+  Locust `locustfile`, Artillery `scenario`, kubepug `inputFile`, SoapUI
+  `project`; `path: directory` — Playwright, Cypress, Gradle, Maven
+  `projectDir`, pytest `testsDir`, Cucumber `featuresDir`, Gatling
+  `simulationsFolder`.
+
+**Projects come from git only.** A template whose main path is a
+`directory` runs a project (package.json + config + specs + lockfile,
+pom.xml, …) — something that belongs in a repository: reviewed, run
+locally, versioned with the app, and too big for the 512 KB inline cap.
+- Test webhook: no inline files with a template whose main path is a
+  directory — needs the template, so it is checked where templates are
+  known: the operator's Ready condition (`False/InlineNotSupported`, "this
+  tool runs a project: put it in git") and the wizard, which doesn't offer
+  inline files for such a template. Admission stays template-agnostic.
+- Single-file tools (`path: file`) take git or inline.
+
+**Git or inline, never both.**
+- Test webhook (no template needed): `content.git` together with inline
+  files (`content.files[]` with `content`) is refused — "a Test's files
+  come from git or are written inline, not both".
+- Open question: files with `contentFrom` (ConfigMap/Secret) are test
+  data, not test code — proposed to stay allowed next to git (e.g. a list
+  of product IDs per environment). To confirm before implementing.
+- Wizard: *Source* is a choice — Git | Inline files — not two checkboxes.
+
+**Inline: no path, ever (YAML and GUI).** With inline files and the main
+path parameter unset, the resolver sets it to the first inline file
+(path relative to /data/repo). Nothing to type: `content.files` is the
+whole story. Setting the parameter explicitly still wins (e.g. a data
+file listed first). The Ready condition counts this as set.
+
+**Git: unchanged from 20h** — the path is required (`ParameterMissing`
+without it); the wizard's *Path in the repository* fills it.
+
+**Migration**
+- Catalog e2e cases of the seven directory tools (playwright, cypress,
+  gradle, maven, pytest, cucumber, gatling) move from inline files to git:
+  this repository at the commit under test, sparse path
+  `test/catalog/cases/<tool>/repo` — as the samples already do. E2E then
+  needs network for those (the samples already do).
+- Tests on clusters that combine git and inline text files are refused on
+  their next update; inline projects of directory tools report
+  `InlineNotSupported`. Upgrade note in docs/control-center.md.
+- The dev cluster's `playwright-smoke` (inline) goes to git or away.
+
+**Acceptance**
+- Resolver: inline main file = first file; explicit value wins; directory
+  template + inline → error.
+- Webhook sentinel: git + inline text files refused (rule not
+  expressible in the schema); TestTemplate with two `path` parameters
+  refused.
+- Controller: `InlineNotSupported`; inline single-file Test without the
+  parameter → Resolved.
+- Wizard: Source choice; no inline for directory tools; inline k6 with
+  only a pasted script creates a Test with no `script` in its config.
+- Catalog e2e green (directory tools from git).
 
 ---
 
