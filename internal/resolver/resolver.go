@@ -29,6 +29,7 @@ limitations under the License.
 package resolver
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -97,6 +98,9 @@ func Resolve(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, store Templat
 	// Steps 1+2: templates in order, then the Test itself.
 	merged, _, err := MergeTemplates(test, store)
 	if err != nil {
+		return nil, err
+	}
+	if err := CheckContent(merged); err != nil {
 		return nil, err
 	}
 
@@ -180,6 +184,8 @@ func MergeTemplates(test *testsv1alpha1.Test, store TemplateStore) (spec *testsv
 	if t := test.Labels[LabelTool]; t != "" {
 		tool = t
 	}
+	// Inline code names no path: the main file is the first file (20i).
+	bindInlineMainFile(merged)
 	return merged, tool, nil
 }
 
@@ -276,6 +282,9 @@ func mergeTemplateInto(dst *testsv1alpha1.TestSpec, tmpl *testsv1alpha1.TestTemp
 	if len(tmpl.Content.Files) > 0 {
 		dst.Content.Files = append(dst.Content.Files, tmpl.Content.Files...)
 	}
+	if len(tmpl.Content.TestData) > 0 {
+		dst.Content.TestData = append(dst.Content.TestData, tmpl.Content.TestData...)
+	}
 	if len(tmpl.Content.Tarball) > 0 {
 		dst.Content.Tarball = append(dst.Content.Tarball, tmpl.Content.Tarball...)
 	}
@@ -333,6 +342,9 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 	if len(test.Content.Files) > 0 {
 		dst.Content.Files = append([]testsv1alpha1.FileContent(nil), test.Content.Files...)
 	}
+	if len(test.Content.TestData) > 0 {
+		dst.Content.TestData = append(dst.Content.TestData, test.Content.TestData...)
+	}
 	if len(test.Content.Tarball) > 0 {
 		dst.Content.Tarball = append([]testsv1alpha1.Tarball(nil), test.Content.Tarball...)
 	}
@@ -343,8 +355,16 @@ func mergeTestInto(dst *testsv1alpha1.TestSpec, test *testsv1alpha1.TestSpec) {
 		if dst.Config == nil {
 			dst.Config = map[string]testsv1alpha1.Parameter{}
 		}
-		// Test's declarations REPLACE template defaults on the same key.
-		maps.Copy(dst.Config, test.Config)
+		// Test's declarations REPLACE template defaults on the same key —
+		// but keep what the template says about the parameter when the
+		// Test doesn't: which one is the main path, and its description.
+		for k, v := range test.Config {
+			if base, ok := dst.Config[k]; ok {
+				v.Path = cmp.Or(v.Path, base.Path)
+				v.Description = cmp.Or(v.Description, base.Description)
+			}
+			dst.Config[k] = v
+		}
 	}
 	if test.Artifacts != nil {
 		dst.Artifacts = test.Artifacts.DeepCopy()

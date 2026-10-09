@@ -32,6 +32,17 @@ type Content struct {
 	Git     *GitContent   `json:"git,omitempty"`
 	Files   []FileContent `json:"files,omitempty"`
 	Tarball []Tarball     `json:"tarball,omitempty"`
+	// EmptyMounts are testData mount points below the data dir: after the
+	// fetch each must be missing or empty, or a ConfigMap/Secret mounted
+	// there would hide files of the code (step 20i).
+	EmptyMounts []EmptyMount `json:"emptyMounts,omitempty"`
+}
+
+// EmptyMount names a testData entry and its mountPath (absolute, below
+// DefaultDataDir).
+type EmptyMount struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
 }
 
 // GitContent tells the fetcher where to clone from and what auth to use.

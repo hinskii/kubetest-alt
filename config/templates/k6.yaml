@@ -61,8 +61,9 @@ spec:
   config:
     script:
       type: string
-      # Required, no default: a Test says where its files are (step 20h).
-      description: "The k6 script, relative to the repository root (git) or to /data/repo (inline files), e.g. perf/checkout.js."
+      # The main path, a file: from git (required) or inline (the first file). No default (steps 20h, 20i).
+      path: file
+      description: "The k6 script, relative to the repository root, e.g. perf/checkout.js. With inline files, the first file unless set."
     # Web-dashboard aggregation period (Go duration); the HTML report
     # needs at least two of them, so short runs set e.g. "1s".
     dashboardPeriod:

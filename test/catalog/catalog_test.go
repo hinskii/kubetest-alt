@@ -48,6 +48,7 @@ import (
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -57,6 +58,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 )
 
 const (
@@ -100,10 +102,16 @@ func TestCatalog(t *testing.T) {
 	// Tools run in parallel; `go test -parallel N` bounds how many at once
 	// (the heavy images — cypress, artillery, zap — starve small runners).
 	for _, tool := range tools {
-		t.Run(tool, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c, tool)
-		})
+		// A project tool (main path a directory) takes its code from git
+		// only (step 20i): its case runs as the git variant below.
+		if !isProjectTool(t, tool) {
+			t.Run(tool, func(t *testing.T) {
+				t.Parallel()
+				runCase(t, c, tool)
+			})
+		} else if os.Getenv("CATALOG_GIT_REVISION") == "" {
+			t.Logf("%s runs a project, from git only: set CATALOG_GIT_REVISION to test it", tool)
+		}
 		// The same project once more, fetched from git exactly as the
 		// sample in config/samples/tools does — the path every real user
 		// takes. CATALOG_GIT_REVISION pins the commit under test (CI sets
@@ -186,6 +194,12 @@ func runCase(t *testing.T, c client.Client, tool string) {
 			Use:     []string{tool},
 			Content: testsv1alpha1.Content{Files: files},
 		},
+	}
+	// cases/<tool>/testdata/: mounted as content.testData from a ConfigMap,
+	// named to the test in CATALOG_TESTDATA so it insists on finding it.
+	if data := loadTestData(t, ctx, c, tool); data != "" {
+		test.Spec.Content.TestData = []testsv1alpha1.TestDataSource{{ConfigMap: data}}
+		test.Spec.Container.Env = append(test.Spec.Container.Env, corev1.EnvVar{Name: "CATALOG_TESTDATA", Value: data})
 	}
 	_ = c.Delete(ctx, test) // leftovers from a previous local run
 	require.NoError(t, c.Create(ctx, test))
@@ -281,8 +295,38 @@ func loadCase(t *testing.T, tool string) caseSpec {
 	return cs
 }
 
-// loadRepo ships cases/<tool>/repo/** as content.files under repo/ — the
-// fetcher materialises them at /data/repo, where the templates look.
+// isProjectTool: the tool's template marks its main path a directory.
+func isProjectTool(t *testing.T, tool string) bool {
+	b, err := os.ReadFile(filepath.Join("..", "..", "config", "templates", tool+".yaml")) // #nosec G304 -- our templates
+	require.NoError(t, err)
+	var tmpl testsv1alpha1.TestTemplate
+	require.NoError(t, yaml.Unmarshal(b, &tmpl))
+	_, kind := resolver.MainPathParam(tmpl.Spec.Config)
+	return kind == resolver.PathDirectory
+}
+
+// loadTestData puts cases/<tool>/testdata/* into a ConfigMap and returns
+// its name, or "" without such a directory.
+func loadTestData(t *testing.T, ctx context.Context, c client.Client, tool string) string {
+	dir := filepath.Join(casesDir, tool, "testdata")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "catalog-" + tool + "-data", Namespace: namespace},
+		Data: map[string]string{}}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name())) // #nosec G304 -- our testdata
+		require.NoError(t, err)
+		cm.Data[e.Name()] = string(b)
+	}
+	_ = c.Delete(ctx, cm)
+	require.NoError(t, c.Create(ctx, cm))
+	return cm.Name
+}
+
+// loadRepo ships cases/<tool>/repo/** as content.files — paths relative to
+// /data/repo, where the fetcher materialises them and the templates look.
 func loadRepo(t *testing.T, tool string) []testsv1alpha1.FileContent {
 	root := filepath.Join(casesDir, tool, "repo")
 	var files []testsv1alpha1.FileContent
@@ -295,7 +339,7 @@ func loadRepo(t *testing.T, tool string) []testsv1alpha1.FileContent {
 			return err
 		}
 		rel, _ := filepath.Rel(root, p)
-		files = append(files, testsv1alpha1.FileContent{Path: "repo/" + filepath.ToSlash(rel), Content: string(b)})
+		files = append(files, testsv1alpha1.FileContent{Path: filepath.ToSlash(rel), Content: string(b)})
 		return nil
 	})
 	require.NoError(t, err)

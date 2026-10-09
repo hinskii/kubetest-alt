@@ -90,7 +90,10 @@ func TestResolve_Template_ContributesAllFragmentTypes(t *testing.T) {
 	}
 	store := MapStore{"ns/complete": tmpl}
 
-	spec, err := Resolve(test, mkRun(), store, Options{})
+	// Merging only: this template carries every content source to prove
+	// each merges; Resolve would refuse that combination (step 20i,
+	// TestCheckContent).
+	spec, _, err := MergeTemplates(test, store)
 	require.NoError(t, err)
 
 	// Content

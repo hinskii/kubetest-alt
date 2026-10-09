@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
@@ -612,5 +613,58 @@ func TestValidateTest_Parallel(t *testing.T) {
 		"too many workers": {&testsv1alpha1.ParallelSpec{Count: n(10), Matrix: map[string][]string{"a": {"1", "2", "3", "4", "5", "6"}}}, "at most 50"},
 	} {
 		t.Run(name, func(t *testing.T) { require.ErrorContains(t, with(tc.p), tc.want) })
+	}
+}
+
+func TestValidateTest_Content20i(t *testing.T) {
+	cm := func(name string) testsv1alpha1.TestDataSource { return testsv1alpha1.TestDataSource{ConfigMap: name} }
+	cases := []struct {
+		name    string
+		content testsv1alpha1.Content
+		wantErr string
+	}{
+		{"git only", testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{URI: "https://x"}}, ""},
+		{"inline only", testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "load.js"}}}, ""},
+		{"git and inline", testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{URI: "https://x"},
+			Files: []testsv1alpha1.FileContent{{Path: "extra.js"}}}, "one of them, not several"},
+		{"git and a tarball", testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{URI: "https://x"},
+			Tarball: []testsv1alpha1.Tarball{{URL: "https://t"}}}, "one of them, not several"},
+		{"old repo/ prefix", testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/load.js"}}},
+			`inline paths are relative to /data/repo now — write "load.js"`},
+		{"absolute inline path", testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "/etc/x"}}}, "must be relative"},
+		{"climbing out", testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "a/../../x"}}}, "without .."},
+		{"contentFrom", testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "d.csv",
+			ContentFrom: &corev1.EnvVarSource{ConfigMapKeyRef: &corev1.ConfigMapKeySelector{Key: "k"}}}}},
+			"mount the ConfigMap or Secret with spec.content.testData"},
+		{"git and test data", testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{URI: "https://x"},
+			TestData: []testsv1alpha1.TestDataSource{cm("products"), {Secret: "acc", MountPath: "/data/secrets"},
+				{Secret: "acc2", Items: []testsv1alpha1.TestDataItem{{Key: "env", Path: "/data/repo/.env"}}}}}, ""},
+		{"configMap and secret", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{{ConfigMap: "a", Secret: "b"}}},
+			"exactly one of configMap or secret"},
+		{"mountPath and items", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{{ConfigMap: "a",
+			MountPath: "/data/x", Items: []testsv1alpha1.TestDataItem{{Key: "k", Path: "/data/y"}}}}}, "not both"},
+		{"relative mountPath", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{{ConfigMap: "a", MountPath: "data/x"}}},
+			"absolute path"},
+		{"over the code", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{{ConfigMap: "a", MountPath: "/data/repo"}}},
+			"would cover the whole /data/repo"},
+		{"platform directory", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{{ConfigMap: "a", MountPath: "/etc/kubetest/x"}}},
+			"platform's directory"},
+		{"same default directory", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{cm("a"), {Secret: "a"}}},
+			"both land on /data/testdata/a"},
+		{"same item path", testsv1alpha1.Content{TestData: []testsv1alpha1.TestDataSource{
+			{ConfigMap: "a", Items: []testsv1alpha1.TestDataItem{{Key: "k", Path: "/data/x"}}},
+			{ConfigMap: "b", MountPath: "/data/x"}}}, "both land on /data/x"},
+	}
+	for _, tc := range cases {
+		spec := baseValidSpec()
+		spec.Content = tc.content
+		err := validateTest(&spec)
+		if tc.wantErr == "" {
+			assert.NoError(t, err, tc.name)
+			continue
+		}
+		if assert.Error(t, err, tc.name) {
+			assert.Contains(t, err.Error(), tc.wantErr, tc.name)
+		}
 	}
 }

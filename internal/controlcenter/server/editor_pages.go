@@ -51,8 +51,9 @@ type templateOption struct {
 	Command, Args     string
 	Params            []param
 	// MainParam is where the tool finds the Test's files (step 20h): set
-	// from the path in the repository unless typed.
-	MainParam string
+	// from the path in the repository unless typed. MainKind is file or
+	// directory — a directory tool runs a project, from git only (20i).
+	MainParam, MainKind string
 }
 
 type editorData struct {
@@ -93,7 +94,7 @@ func templateOptions(list []testsv1alpha1.TestTemplate, f testForm) []templateOp
 		o := templateOption{Name: t.Name, Tool: t.Labels[labelTool], Image: t.Spec.Container.Image,
 			Command: strings.Join(t.Spec.Container.Command, " "), Args: strings.Join(t.Spec.Container.Args, " ")}
 		o.Params = paramsOf(&testsv1alpha1.TestSpec{Config: t.Spec.Config})
-		o.MainParam = resolver.MainPathParam(t.Spec.Container, t.Spec.Config)
+		o.MainParam, o.MainKind = resolver.MainPathParam(t.Spec.Config)
 		for i := range o.Params {
 			o.Params[i].Value = o.Params[i].Default
 			if v, ok := f.Params[o.Params[i].Name]; ok && t.Name == f.Template {
@@ -339,6 +340,7 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *cluster
 	}
 	// One empty row to add a file to (without JavaScript, too).
 	data.Form.Files = append(slices.Clone(data.Form.Files), fileField{})
+	data.Form.TestData = append(slices.Clone(data.Form.TestData), testDataField{})
 	title, crumbs := "New test", clusterCrumbs(c)
 	if data.Edit {
 		title = "Edit " + data.Form.Name

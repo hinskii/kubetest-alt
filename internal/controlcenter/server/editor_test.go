@@ -44,7 +44,7 @@ func k6Template() *testsv1alpha1.TestTemplate {
 			Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Command: []string{"k6"},
 				Args: []string{"run", "/data/repo/{{ config.script }}"}},
 			Config: map[string]testsv1alpha1.Parameter{
-				"script": {Type: "string"},
+				"script": {Type: "string", Path: "file"},
 				"vus":    {Type: "integer", Default: "10"},
 			},
 		},
@@ -62,7 +62,7 @@ func wizardForm(action string) url.Values {
 	return url.Values{
 		"action": {action}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"checkout"},
 		"template": {"k6"}, "param.k6.script": {""}, "param.k6.vus": {"10"},
-		"useGit": {"1"}, "gitURI": {"https://github.com/org/perf"}, "gitRevision": {"main"},
+		"source": {"git"}, "gitURI": {"https://github.com/org/perf"}, "gitRevision": {"main"},
 		"gitPath":   {"perf/checkout.js"},
 		"gitSecret": {"git-token"},
 		"env":       {"TARGET=https://shop\n"}, "memoryLimit": {"1Gi"},
@@ -273,35 +273,86 @@ func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
 	assert.NotContains(t, out, "managed-by")
 }
 
-func TestEditor_InlineScriptBindsTheMainFileParameter(t *testing.T) {
+func TestEditor_InlineFilesNeedNoPath(t *testing.T) {
 	w := newWorld(t, k6Template())
 	form := url.Values{"action": {actSave}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"inline"},
-		"template": {"k6"}, "param.k6.script": {""}, "useFiles": {"1"},
-		"file.path": {"load.js", "/data/fixtures/users.csv", ""}, "file.content": {"export default function () {}", "id\n1\n", ""}}
+		"template": {"k6"}, "param.k6.script": {""}, "source": {"inline"},
+		"file.path": {"load.js", "/data/users.csv", ""}, "file.content": {"export default function () {}", "id\n1\n", ""}}
 	rec := w.post(t, newURL, developer, form)
 	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
 	got := w.test(t, "inline")
-	assert.Equal(t, "load.js", got.Spec.Config["script"].Default, "k6's script points at the inline file")
-	paths := []string{got.Spec.Content.Files[0].Path, got.Spec.Content.Files[1].Path}
-	assert.Equal(t, []string{"repo/load.js", "fixtures/users.csv"}, paths, "paths are under /data/repo/ unless absolute")
+	assert.NotContains(t, got.Spec.Config, "script", "inline: no path in the Test — the first file is the script")
+	assert.Equal(t, []string{"load.js", "data/users.csv"},
+		[]string{got.Spec.Content.Files[0].Path, got.Spec.Content.Files[1].Path}, "paths relative to /data/repo")
+	assert.Nil(t, got.Spec.Content.Git)
 
-	// The editor shows them back the same way.
 	page := w.get(t, clusterURL+"/tests/team-a/inline/edit", developer).Body.String()
 	assert.Contains(t, page, `name="file.path" value="load.js"`)
-	assert.Contains(t, page, `name="file.path" value="/fixtures/users.csv"`)
+	assert.Contains(t, page, `name="source" value="inline" checked`)
 
-	// A value the user typed stays; with git the files aren't the entry.
+	// A value the user typed stays; with git the path in the repository.
 	form.Set("name", "typed")
 	form.Set("param.k6.script", "main.js")
 	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
 	assert.Equal(t, "main.js", w.test(t, "typed").Spec.Config["script"].Default)
 	form.Set("name", "from-git")
 	form.Set("param.k6.script", "")
-	form.Set("useGit", "1")
+	form.Set("source", "git")
 	form.Set("gitURI", "https://github.com/org/perf")
 	form.Set("gitPath", "load/main.js")
 	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	assert.Equal(t, "load/main.js", w.test(t, "from-git").Spec.Config["script"].Default, "with git, the path in the repository")
+	fromGit := w.test(t, "from-git")
+	assert.Equal(t, "load/main.js", fromGit.Spec.Config["script"].Default)
+	assert.Empty(t, fromGit.Spec.Content.Files, "git or inline, never both")
+
+	// No files at all.
+	form = url.Values{"action": {actPreview}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"empty"},
+		"template": {"k6"}, "source": {"inline"}}
+	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "Inline files: add at least one file.")
+}
+
+func TestEditor_ProjectToolsTakeGitOnly(t *testing.T) {
+	pw := &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "playwright", Namespace: "team-a", Labels: map[string]string{"kubetest.io/tool": "playwright"}},
+		Spec: testsv1alpha1.TestTemplateSpec{
+			Container: testsv1alpha1.ContainerConfig{Image: "mcr.microsoft.com/playwright", Command: []string{"sh", "-c"},
+				Args: []string{"cd /data/repo/{{ config.projectDir }} && npx playwright test"}},
+			Config: map[string]testsv1alpha1.Parameter{"projectDir": {Type: "string", Path: "directory"}},
+		},
+	}
+	w := newWorld(t, pw)
+	page := w.get(t, newURL+"?namespace=team-a", developer).Body.String()
+	assert.Contains(t, page, `data-main-kind="directory"`)
+	form := url.Values{"action": {actPreview}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"web"},
+		"template": {"playwright"}, "source": {"inline"}, "file.path": {"package.json"}, "file.content": {"{}"}}
+	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "playwright runs a project: its code comes from git")
+}
+
+func TestEditor_TestData(t *testing.T) {
+	w := newWorld(t, k6Template())
+	form := wizardForm(actSave)
+	form["td.kind"] = []string{"configMap", "secret", "configMap", ""}
+	form["td.name"] = []string{"products-stage", "account", "fixtures", ""}
+	form["td.where"] = []string{"", "files", "dir", ""}
+	form["td.mountPath"] = []string{"", "", "/data/fixtures", ""}
+	form["td.items"] = []string{"", "env=/data/repo/perf/.env", "", ""}
+	rec := w.post(t, newURL, developer, form)
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	assert.Equal(t, []testsv1alpha1.TestDataSource{
+		{ConfigMap: "products-stage"},
+		{Secret: "account", Items: []testsv1alpha1.TestDataItem{{Key: "env", Path: "/data/repo/perf/.env"}}},
+		{ConfigMap: "fixtures", MountPath: "/data/fixtures"},
+	}, w.test(t, "checkout").Spec.Content.TestData)
+
+	page := w.get(t, clusterURL+"/tests/team-a/checkout/edit", developer).Body.String()
+	assert.Contains(t, page, `name="td.name" value="account"`)
+	assert.Contains(t, page, "env=/data/repo/perf/.env</textarea>")
+
+	bad := wizardForm(actPreview)
+	bad["td.name"] = []string{"x"}
+	bad["td.where"] = []string{"files"}
+	bad["td.items"] = []string{"no-path"}
+	assert.Contains(t, w.post(t, newURL, developer, bad).Body.String(), "is not key=/absolute/path")
 }
 
 func TestEditor_GitPathIsRequiredAndStatedOnce(t *testing.T) {
@@ -311,12 +362,12 @@ func TestEditor_GitPathIsRequiredAndStatedOnce(t *testing.T) {
 	body := w.post(t, newURL, developer, form).Body.String()
 	assert.Contains(t, body, "Path in the repository: required")
 
-	// No git, no files: the main path parameter is required, with its
+	// Git without the parameter's value or a path: required, with its
 	// description.
 	form = wizardForm(actPreview)
-	form.Del("useGit")
+	form.Set("gitPath", "")
 	k6 := k6Template()
-	k6.Spec.Config["script"] = testsv1alpha1.Parameter{Type: "string", Description: "The k6 script."}
+	k6.Spec.Config["script"] = testsv1alpha1.Parameter{Type: "string", Path: "file", Description: "The k6 script."}
 	w = newWorld(t, k6)
 	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "script: required — The k6 script.")
 

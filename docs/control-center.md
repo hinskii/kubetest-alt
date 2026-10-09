@@ -154,14 +154,20 @@ links to open it in a new tab or download it.
 
 1. **Basics** — namespace, name, and the tool: a TestTemplate of that
    namespace's catalog (k6, Cypress, JMeter, …) or an own image.
-2. **Source** — a git repository and/or inline files. With git, **Path
-   in the repository** is required: where the tests are, a file or a
+2. **Source** — where the code comes from, one of: a **git repository**,
+   **inline files** (typed in, for single-file tools — k6, JMeter, newman,
+   Locust, Artillery, kubepug, SoapUI), or **none** (an own image that
+   needs no files). Tools that run a project (Playwright, Cypress, Gradle,
+   Maven, pytest, Cucumber, Gatling) take git only. With git, **Path in
+   the repository** is required: where the tests are, a file or a
    directory (`perf/checkout.js`, `e2e/web`; `.` for all of it). It fills
    the template's main path parameter and the sparse checkout (the
    directory, or a file's directory); *Sparse paths* (advanced) override
    the latter, and the review warns when the main path falls outside
-   them. Inline file paths are under `/data/repo/`, where a template's
-   tool looks (a leading `/` means under `/data`).
+   them. Inline files sit below `/data/repo/`, and need no path at all:
+   the first file is the test. **Test data** — ConfigMaps and Secrets
+   mounted as files, with any source — is set in the same step
+   (docs/test-data.md).
 3. **Parameters & container** — the template's parameters (a Test keeps
    only those that differ from the template's defaults; a run can still
    override them), image, command, arguments, environment, CPU/memory.
@@ -190,13 +196,19 @@ Admins can **delete** a GUI-managed Test; its run history stays.
 
 ### "Not ready to run"
 
-A Test that doesn't say where its files are — the template's main path
-parameter left empty — shows **not ready** in the list and a banner on its
-page with what to set ("set spec.config.script: The k6 script, relative to
-the repository root …"). The operator keeps this in the Test's
-`status.conditions` (`Ready=False`, reason `ParameterMissing`, or
-`TemplateMissing` for a template in `spec.use` that doesn't exist); a run
-of such a Test fails at once instead of running the repository's root.
+A Test that can't run as it is shows **not ready** in the list and a
+banner on its page saying why. The operator keeps this in the Test's
+`status.conditions` (`Ready=False`) with a reason:
+
+- `ParameterMissing` — a git Test doesn't say where its files are ("set
+  spec.config.script: The k6 script, relative to the repository root …");
+- `InlineNotSupported` — a tool that runs a project was given inline
+  files ("put it in git");
+- `ContentConflict` — the Test and its templates bring code from more
+  than one source;
+- `TemplateMissing` — a template in `spec.use` doesn't exist.
+
+A run of such a Test fails at once instead of running the wrong thing.
 Templates never default that path, so Tests that relied on an old default
 (`projectDir: "."`, `locustfile.py`, …) need it set.
 

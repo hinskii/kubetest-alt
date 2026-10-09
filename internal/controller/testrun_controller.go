@@ -495,6 +495,14 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 	if err := r.PodPolicy.Check(resolvedSpec, run.Spec.Pod); err != nil {
 		return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError, ReasonPolicyDenied, err.Error())
 	}
+	// Test data must exist before the pod does: a missing ConfigMap or
+	// Secret leaves the pod in ContainerCreating until the deadline.
+	if err := r.checkTestData(ctx, run.Namespace, resolvedSpec.Content.TestData); err != nil {
+		if apierrors.IsNotFound(err) || errors.Is(err, errTestDataKey) {
+			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError, ReasonTestDataMissing, err.Error())
+		}
+		return ctrl.Result{}, err
+	}
 
 	// Step 17: composite cycle detection at setup — resolves the whole
 	// execute graph ONCE using live Test specs, then fails fast if a

@@ -77,6 +77,17 @@ spec:
                       items:
                         type: string
                       type: array
+                    path:
+                      description: |-
+                        Path marks the template's main path parameter — where the tool finds
+                        a Test's files: "file" (a script, a plan) or "directory" (a
+                        project). Never defaulted: a git Test must set it; with inline files
+                        a "file" parameter is the first file, and "directory" tools take
+                        projects from git only (step 20i). At most one per template.
+                      enum:
+                      - file
+                      - directory
+                      type: string
                     pattern:
                       type: string
                     type:
@@ -89,7 +100,12 @@ spec:
                   required:
                   - type
                   type: object
+                maxProperties: 128
                 type: object
+                x-kubernetes-validations:
+                - message: at most one config parameter may set path (the main path
+                    parameter)
+                  rule: self.filter(k, has(self[k].path)).size() <= 1
               container:
                 description: |-
                   ContainerConfig captures per-step container overrides. Defaults defined at
@@ -634,21 +650,30 @@ spec:
                 type: object
               content:
                 description: |-
-                  Content describes how the test payload arrives inside the pod. Sources are
-                  combined (git files + inline files + tarballs) into a shared /data mount by
-                  the content fetcher (step 06).
+                  Content is how a Test's code and data arrive in the pod (step 20i). The
+                  code comes from exactly ONE source — git, inline files or a tarball —
+                  and lands in /data/repo; test data from ConfigMaps and Secrets is
+                  separate (testData) and lands in /data/testdata/<name>, or where the
+                  entry says. The validating webhook enforces the single code source.
                 properties:
                   files:
+                    description: |-
+                      Files: the code is typed into the Test, each file at
+                      /data/repo/<path>.
                     items:
                       description: |-
-                        FileContent carries an inline file. The aggregate size of all inline files
-                        on a Test is bounded by the validating webhook (see CLAUDE.md §15.7).
+                        FileContent carries an inline file of a Test's code, at /data/repo/<path>.
+                        The aggregate size of all inline files on a Test is bounded by the
+                        validating webhook (see CLAUDE.md §15.7).
                       properties:
                         content:
                           type: string
                         contentFrom:
-                          description: EnvVarSource represents a source for the value
-                            of an EnvVar.
+                          description: |-
+                            ContentFrom is not supported: it never delivered a file (step 20i
+                            found the fetcher couldn't read it). The webhook refuses it and points
+                            to content.testData; it stays in the schema so it is refused, not
+                            silently pruned.
                           properties:
                             configMapKeyRef:
                               description: Selects a key of a ConfigMap.
@@ -781,15 +806,15 @@ spec:
                           format: int32
                           type: integer
                         path:
+                          description: Path is relative to /data/repo (e.g. load.js,
+                            tests/smoke.spec.js).
                           type: string
                       required:
                       - path
                       type: object
                     type: array
                   git:
-                    description: |-
-                      GitContent points at a git repository. Auth is secret-backed; no plaintext
-                      credentials on the CR.
+                    description: 'Git: the code is a repository, checked out at /data/repo.'
                     properties:
                       authType:
                         enum:
@@ -1217,6 +1242,50 @@ spec:
                           type: string
                       required:
                       - url
+                      type: object
+                    type: array
+                  testData:
+                    description: |-
+                      TestData: ConfigMaps and Secrets mounted read-only as files, next to
+                      the code from any source.
+                    items:
+                      description: |-
+                        TestDataSource mounts one ConfigMap or Secret of the Test's namespace as
+                        files: by default every key at /data/testdata/<name>/<key>; with
+                        mountPath every key in that directory; with items the chosen keys at
+                        exact paths (the only way to replace a file of the code). A mountPath
+                        over a non-empty directory of the code fails the run instead of hiding
+                        its files. Field names follow Kubernetes volumes.
+                      properties:
+                        configMap:
+                          description: |-
+                            ConfigMap is the name of a ConfigMap. Exactly one of configMap and
+                            secret.
+                          type: string
+                        items:
+                          description: |-
+                            Items are single keys at exact file paths (absolute). Not with
+                            mountPath.
+                          items:
+                            description: TestDataItem places one key of a ConfigMap
+                              or Secret at a file path.
+                            properties:
+                              key:
+                                type: string
+                              path:
+                                type: string
+                            required:
+                            - key
+                            - path
+                            type: object
+                          type: array
+                        mountPath:
+                          description: MountPath is the directory the keys appear
+                            in, as files (absolute).
+                          type: string
+                        secret:
+                          description: Secret is the name of a Secret.
+                          type: string
                       type: object
                     type: array
                 type: object

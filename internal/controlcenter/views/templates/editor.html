@@ -65,7 +65,7 @@
     <div class="choices">
       {{range $d.Templates}}
       <label class="choice">
-        <input type="radio" name="template" value="{{.Name}}"{{if eq .Name $f.Template}} checked{{end}} data-image="{{.Image}}" data-command="{{.Command}}" data-args="{{.Args}}">
+        <input type="radio" name="template" value="{{.Name}}"{{if eq .Name $f.Template}} checked{{end}} data-image="{{.Image}}" data-command="{{.Command}}" data-args="{{.Args}}" data-main-kind="{{.MainKind}}">
         <span><strong>{{.Name}}</strong>{{with .Tool}}{{if ne . $.Data.Form.Template}} <span class="chip">{{.}}</span>{{end}}{{end}}<br><span class="muted small mono">{{.Image}}</span></span>
       </label>
       {{end}}
@@ -81,9 +81,14 @@
 
   <section class="panel wizard-step" data-step="2">
     <h2>2. Source</h2>
-    <p class="muted small">Lands under <span class="mono">/data</span> in the test pod: git at <span class="mono">/data/repo</span>, files at <span class="mono">/data/&lt;path&gt;</span>.</p>
-    <label class="check"><input type="checkbox" name="useGit" value="1"{{if $f.UseGit}} checked{{end}} data-toggles="git"> From a git repository</label>
-    <div class="run-form" data-toggled="git">
+    <p class="muted small">The code comes from one place and lands in <span class="mono">/data/repo</span> in the test pod; test data from ConfigMaps and Secrets is separate.</p>
+    <div class="choices source">
+      <label class="choice"><input type="radio" name="source" value="git"{{if eq $f.Source "git"}} checked{{end}} data-toggles-source="git"> <span><strong>Git repository</strong><br><span class="muted small">projects and anything that changes with the app</span></span></label>
+      <label class="choice" id="source-inline"><input type="radio" name="source" value="inline"{{if eq $f.Source "inline"}} checked{{end}} data-toggles-source="inline"> <span><strong>Inline files</strong><br><span class="muted small">typed here — single-file tools (k6, JMeter, newman, …)</span></span></label>
+      <label class="choice"><input type="radio" name="source" value=""{{if eq $f.Source ""}} checked{{end}} data-toggles-source="none"> <span><strong>None</strong><br><span class="muted small">the image needs no files</span></span></label>
+    </div>
+    <p class="muted small" id="project-note" hidden>This tool runs a project: its code comes from git.</p>
+    <div class="run-form" data-source="git">
       <label><span>Repository</span><input type="text" name="gitURI" value="{{$f.GitURI}}" placeholder="https://github.com/org/repo" autocomplete="off"></label>
       <label><span>Path in the repository <span class="muted">required — the tests: a file or a directory; "." for all of it</span></span><input type="text" name="gitPath" value="{{$f.GitPath}}" placeholder="perf/checkout.js" class="mono" autocomplete="off" id="git-path"></label>
       <label><span>Revision <span class="muted">branch, tag or commit</span></span><input type="text" name="gitRevision" value="{{$f.GitRevision}}" placeholder="main" autocomplete="off"></label>
@@ -91,9 +96,8 @@
       <label><span>Token Secret <span class="muted">private repos, optional</span></span><input type="text" name="gitSecret" value="{{$f.GitSecret}}" placeholder="git-token" autocomplete="off"></label>
       <label><span>Key in the Secret</span><input type="text" name="gitSecretKey" value="{{$f.GitSecretKey}}" placeholder="token" autocomplete="off"></label>
     </div>
-    <label class="check"><input type="checkbox" name="useFiles" value="1"{{if $f.UseFiles}} checked{{end}} data-toggles="files"> Inline files <span class="muted small">(up to 512 KB in all; bigger content belongs in git)</span></label>
-    <p class="muted small" data-toggled-note="files">Paths are under <span class="mono">/data/repo/</span>, where the tool looks (a leading <span class="mono">/</span> means under <span class="mono">/data</span>). With a template, its main-file parameter (k6's <span class="mono">script</span>, JMeter's <span class="mono">plan</span>, …) points at the first file unless you set it.</p>
-    <div data-toggled="files" id="files">
+    <div data-source="inline" id="files">
+      <p class="muted small">Up to 512 KB in all. The first file is the test (k6's script, JMeter's plan, …) unless you set the parameter on the next step — no path to type.</p>
       {{range $f.Files}}
       <div class="file-row">
         <label class="path"><span class="muted mono">/data/repo/</span><input type="text" name="file.path" value="{{.Path}}" placeholder="load.js" class="mono" autocomplete="off" aria-label="Path under /data/repo/"></label>
@@ -101,6 +105,24 @@
       </div>
       {{end}}
       <button type="button" class="button secondary" id="add-file" hidden>Add a file</button>
+    </div>
+
+    <h3>Test data <span class="muted small">optional — ConfigMaps and Secrets of the namespace, mounted read-only as files</span></h3>
+    <div id="test-data">
+      {{range $f.TestData}}
+      <div class="data-row run-form">
+        <label><span>Kind</span><select name="td.kind"><option value="configMap"{{if ne .Kind "secret"}} selected{{end}}>ConfigMap</option><option value="secret"{{if eq .Kind "secret"}} selected{{end}}>Secret</option></select></label>
+        <label><span>Name</span><input type="text" name="td.name" value="{{.Name}}" placeholder="products-stage" class="mono" autocomplete="off"></label>
+        <label><span>Where</span><select name="td.where">
+          <option value=""{{if eq .Where ""}} selected{{end}}>/data/testdata/&lt;name&gt;/&lt;key&gt;</option>
+          <option value="dir"{{if eq .Where "dir"}} selected{{end}}>all keys in a directory</option>
+          <option value="files"{{if eq .Where "files"}} selected{{end}}>keys as single files</option>
+        </select></label>
+        <label><span>Directory <span class="muted">absolute, empty or new — never over files of the code</span></span><input type="text" name="td.mountPath" value="{{.MountPath}}" placeholder="/data/repo/e2e/data" class="mono" autocomplete="off"></label>
+        <label><span>Files <span class="muted">key=/absolute/path per line; replaces those files only</span></span><textarea name="td.items" rows="2" class="mono" placeholder="env=/data/repo/e2e/.env">{{.Items}}</textarea></label>
+      </div>
+      {{end}}
+      <button type="button" class="button secondary" id="add-data" hidden>Add test data</button>
     </div>
   </section>
 

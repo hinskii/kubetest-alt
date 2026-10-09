@@ -110,6 +110,18 @@ the run with `error`, reason `PolicyDenied`, and a message naming each
 field. The admission webhooks refuse Tests and TestRuns that break it at
 `kubectl apply` time (a template's pod settings are caught at run time).
 
+## Test data
+
+`spec.content.testData` mounts ConfigMaps and Secrets of the Test's
+namespace into the test pod — read-only volumes, never environment
+variables, and only in the test container (not the init containers). The
+operator reads them uncached to check they exist before creating the pod
+(`get` on Secrets, which it already had); the API server gets no access to
+ConfigMaps or Secrets — Control Center's wizard has the names typed.
+Whoever may create Tests in a namespace can mount that namespace's Secrets
+into a test pod, as with any pod spec: give Test-writing rights
+accordingly.
+
 ## Remaining risks
 
 - **One shared token.** It is a credential, not an identity per caller;

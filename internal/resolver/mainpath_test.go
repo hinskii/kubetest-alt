@@ -25,21 +25,51 @@ import (
 )
 
 func TestMainPathParam(t *testing.T) {
-	params := map[string]testsv1alpha1.Parameter{"script": {Type: "string"}, "projectDir": {Type: "string"}, "vus": {Type: "integer"}}
-	cases := []struct {
-		name string
-		c    testsv1alpha1.ContainerConfig
-		want string
-	}{
-		{"argument", testsv1alpha1.ContainerConfig{Args: []string{"run", "--out", "/data/repo/results/x.json", "/data/repo/{{ config.script }}"}}, "script"},
-		{"inside a shell line", testsv1alpha1.ContainerConfig{Command: []string{"sh", "-c"},
-			Args: []string{"cd /data/repo/{{config.projectDir}} && npm test --vus {{ config.vus }}"}}, "projectDir"},
-		{"working directory", testsv1alpha1.ContainerConfig{WorkingDir: "/data/repo/{{ config.projectDir }}"}, "projectDir"},
-		{"not below /data/repo", testsv1alpha1.ContainerConfig{Args: []string{"{{ config.script }}", "/data/{{ config.script }}"}}, ""},
-		{"not a parameter", testsv1alpha1.ContainerConfig{Args: []string{"/data/repo/{{ config.other }}"}}, ""},
-		{"none", testsv1alpha1.ContainerConfig{Args: []string{"zap-baseline.py", "-t", "{{ config.target }}"}}, ""},
+	name, kind := MainPathParam(map[string]testsv1alpha1.Parameter{
+		"vus": {Type: "integer"}, "projectDir": {Type: "string", Path: PathDirectory}})
+	assert.Equal(t, "projectDir", name)
+	assert.Equal(t, PathDirectory, kind)
+	name, _ = MainPathParam(map[string]testsv1alpha1.Parameter{"target": {Type: "string"}})
+	assert.Empty(t, name, "none marked: a tool aimed at a URL")
+}
+
+func k6Like(files []testsv1alpha1.FileContent, git *testsv1alpha1.GitContent, scriptDefault string) *testsv1alpha1.TestSpec {
+	return &testsv1alpha1.TestSpec{
+		Config: map[string]testsv1alpha1.Parameter{
+			"script": {Type: "string", Path: PathFile, Default: scriptDefault, Description: "The k6 script."}},
+		Content: testsv1alpha1.Content{Files: files, Git: git},
 	}
-	for _, tc := range cases {
-		assert.Equal(t, tc.want, MainPathParam(tc.c, params), tc.name)
+}
+
+func TestBindInlineMainFile(t *testing.T) {
+	files := []testsv1alpha1.FileContent{{Path: "load.js"}, {Path: "data.csv"}}
+	s := k6Like(files, nil, "")
+	bindInlineMainFile(s)
+	assert.Equal(t, "load.js", s.Config["script"].Default, "the first file")
+
+	s = k6Like([]testsv1alpha1.FileContent{{Path: "repo/old.js"}}, nil, "")
+	bindInlineMainFile(s)
+	assert.Equal(t, "old.js", s.Config["script"].Default, "a path stored the old way")
+
+	s = k6Like(files, nil, "data-driven.js")
+	bindInlineMainFile(s)
+	assert.Equal(t, "data-driven.js", s.Config["script"].Default, "an explicit value wins")
+
+	s = k6Like(nil, &testsv1alpha1.GitContent{URI: "https://x"}, "")
+	bindInlineMainFile(s)
+	assert.Empty(t, s.Config["script"].Default, "git: the Test must say")
+	assert.Equal(t, "script", MissingMainPath(s))
+	assert.Equal(t, "set spec.config.script: The k6 script.", MainPathMessage(s, "script"))
+}
+
+func TestCheckContent(t *testing.T) {
+	git := &testsv1alpha1.GitContent{URI: "https://x"}
+	assert.NoError(t, CheckContent(k6Like(nil, git, "")))
+	assert.ErrorContains(t, CheckContent(k6Like([]testsv1alpha1.FileContent{{Path: "a.js"}}, git, "")), "more than one source")
+
+	project := &testsv1alpha1.TestSpec{
+		Config:  map[string]testsv1alpha1.Parameter{"projectDir": {Type: "string", Path: PathDirectory}},
+		Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "package.json"}}},
 	}
+	assert.ErrorIs(t, CheckContent(project), ErrInlineProject)
 }

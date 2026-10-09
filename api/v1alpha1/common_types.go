@@ -86,16 +86,54 @@ type ContainerConfig struct {
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
-// Content describes how the test payload arrives inside the pod. Sources are
-// combined (git files + inline files + tarballs) into a shared /data mount by
-// the content fetcher (step 06).
+// Content is how a Test's code and data arrive in the pod (step 20i). The
+// code comes from exactly ONE source — git, inline files or a tarball —
+// and lands in /data/repo; test data from ConfigMaps and Secrets is
+// separate (testData) and lands in /data/testdata/<name>, or where the
+// entry says. The validating webhook enforces the single code source.
 type Content struct {
+	// Git: the code is a repository, checked out at /data/repo.
 	// +optional
 	Git *GitContent `json:"git,omitempty"`
+	// Files: the code is typed into the Test, each file at
+	// /data/repo/<path>.
 	// +optional
 	Files []FileContent `json:"files,omitempty"`
 	// +optional
 	Tarball []Tarball `json:"tarball,omitempty"`
+	// TestData: ConfigMaps and Secrets mounted read-only as files, next to
+	// the code from any source.
+	// +optional
+	TestData []TestDataSource `json:"testData,omitempty"`
+}
+
+// TestDataSource mounts one ConfigMap or Secret of the Test's namespace as
+// files: by default every key at /data/testdata/<name>/<key>; with
+// mountPath every key in that directory; with items the chosen keys at
+// exact paths (the only way to replace a file of the code). A mountPath
+// over a non-empty directory of the code fails the run instead of hiding
+// its files. Field names follow Kubernetes volumes.
+type TestDataSource struct {
+	// ConfigMap is the name of a ConfigMap. Exactly one of configMap and
+	// secret.
+	// +optional
+	ConfigMap string `json:"configMap,omitempty"`
+	// Secret is the name of a Secret.
+	// +optional
+	Secret string `json:"secret,omitempty"`
+	// MountPath is the directory the keys appear in, as files (absolute).
+	// +optional
+	MountPath string `json:"mountPath,omitempty"`
+	// Items are single keys at exact file paths (absolute). Not with
+	// mountPath.
+	// +optional
+	Items []TestDataItem `json:"items,omitempty"`
+}
+
+// TestDataItem places one key of a ConfigMap or Secret at a file path.
+type TestDataItem struct {
+	Key  string `json:"key"`
+	Path string `json:"path"`
 }
 
 // GitContent points at a git repository. Auth is secret-backed; no plaintext
@@ -122,12 +160,18 @@ type GitContent struct {
 	SSHKeyFrom *corev1.EnvVarSource `json:"sshKeyFrom,omitempty"`
 }
 
-// FileContent carries an inline file. The aggregate size of all inline files
-// on a Test is bounded by the validating webhook (see CLAUDE.md §15.7).
+// FileContent carries an inline file of a Test's code, at /data/repo/<path>.
+// The aggregate size of all inline files on a Test is bounded by the
+// validating webhook (see CLAUDE.md §15.7).
 type FileContent struct {
+	// Path is relative to /data/repo (e.g. load.js, tests/smoke.spec.js).
 	Path string `json:"path"`
 	// +optional
 	Content string `json:"content,omitempty"`
+	// ContentFrom is not supported: it never delivered a file (step 20i
+	// found the fetcher couldn't read it). The webhook refuses it and points
+	// to content.testData; it stays in the schema so it is refused, not
+	// silently pruned.
 	// +optional
 	ContentFrom *corev1.EnvVarSource `json:"contentFrom,omitempty"`
 	// +optional
@@ -157,6 +201,14 @@ type Parameter struct {
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Description string `json:"description,omitempty"`
+	// Path marks the template's main path parameter — where the tool finds
+	// a Test's files: "file" (a script, a plan) or "directory" (a
+	// project). Never defaulted: a git Test must set it; with inline files
+	// a "file" parameter is the first file, and "directory" tools take
+	// projects from git only (step 20i). At most one per template.
+	// +kubebuilder:validation:Enum=file;directory
+	// +optional
+	Path string `json:"path,omitempty"`
 }
 
 // ArtifactSpec describes files to scrape after a run (globs via doublestar).

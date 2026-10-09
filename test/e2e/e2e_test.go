@@ -262,9 +262,8 @@ func scenarioK6Passing(t *testing.T, ctx context.Context, c client.Client) {
 					// `repo/` prefix matches the platform's git-mount convention
 					// (§CLAUDE Content§, /data/repo). k6/jmeter/gatling templates
 					// expand `{{ config.script }}` under /data/repo/ — inline
-					// content.files[] paths must land there too or the tool's
-					// argv points at a non-existent file.
-					Path: "repo/script.js",
+					// content.files[] paths are relative to it (step 20i).
+					Path: "script.js",
 					// sleep keeps the pod Running long enough for the
 					// operator to observe it and start the log tailer —
 					// the log assertion below needs streamed chunks.
@@ -366,7 +365,7 @@ export default function () {
 			Container: testsv1alpha1.ContainerConfig{
 				Image: "grafana/k6:1.4.0", Command: []string{"k6"}, Args: []string{"run", "/data/repo/script.js"},
 			},
-			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/script.js", Content: script}}},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "script.js", Content: script}}},
 			Services: map[string]testsv1alpha1.ServiceSpec{"web": {
 				Image: "nginx:1.27-alpine",
 				ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{
@@ -523,7 +522,7 @@ func scenarioJMeterFailing(t *testing.T, ctx context.Context, c client.Client) {
 			Use:               []string{"jmeter"},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
-					Path:    "repo/smoke.jmx",
+					Path:    "smoke.jmx",
 					Content: plan,
 				}},
 			},
@@ -644,7 +643,7 @@ func scenarioCron(t *testing.T, ctx context.Context, c client.Client) {
 			},
 			Content: testsv1alpha1.Content{
 				Files: []testsv1alpha1.FileContent{{
-					Path:    "repo/s.js",
+					Path:    "s.js",
 					Content: "export default function() {}",
 				}},
 			},
@@ -711,7 +710,7 @@ func scenarioCompositeSkipOnFail(t *testing.T, ctx context.Context, c client.Cli
 		Spec: testsv1alpha1.TestSpec{
 			ConcurrencyPolicy: "Allow",
 			Use:               []string{"jmeter"},
-			Content:           testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/smoke.jmx", Content: plan}}},
+			Content:           testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "smoke.jmx", Content: plan}}},
 			Config:            map[string]testsv1alpha1.Parameter{"plan": {Type: "string", Default: "smoke.jmx"}},
 		},
 	}
@@ -730,7 +729,7 @@ func scenarioCompositeSkipOnFail(t *testing.T, ctx context.Context, c client.Cli
 				Command: []string{"k6"},
 				Args:    []string{"run", "/data/repo/script.js"},
 			},
-			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/script.js", Content: "export default function() { /* pass */ }"}}},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "script.js", Content: "export default function() { /* pass */ }"}}},
 		},
 	}
 	require.NoError(t, c.Create(ctx, load))

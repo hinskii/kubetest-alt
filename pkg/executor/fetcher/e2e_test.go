@@ -94,15 +94,16 @@ func TestE2E_512KBInline_ThroughCompilerAndFetcher(t *testing.T) {
 	f.Stderr = &bytes.Buffer{}
 	require.NoError(t, f.Fetch(context.Background(), got, dst))
 
-	// Step 4: assert both files landed with the EXACT bytes we started with.
+	// Step 4: assert both files landed with the EXACT bytes we started with,
+	// below /data/repo (inline paths are relative to it — step 20i).
 	// #nosec G304 -- test path.
-	fileA, err := os.ReadFile(filepath.Join(dst, "big-a.txt"))
+	fileA, err := os.ReadFile(filepath.Join(dst, "repo", "big-a.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, chunk, len(fileA), "big-a.txt size mismatch")
 	assert.Equal(t, payloadA, string(fileA))
 
 	// #nosec G304 -- test path.
-	fileB, err := os.ReadFile(filepath.Join(dst, "sub/big-b.txt"))
+	fileB, err := os.ReadFile(filepath.Join(dst, "repo", "sub/big-b.txt"))
 	require.NoError(t, err)
 	assert.Equal(t, chunk, len(fileB), "sub/big-b.txt size mismatch")
 	assert.Equal(t, payloadB, string(fileB))

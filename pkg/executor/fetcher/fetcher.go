@@ -124,7 +124,45 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 			return err
 		}
 	}
+	if err := checkEmptyMounts(dstDir, c.EmptyMounts); err != nil {
+		return err
+	}
 	return shareWithAnyUID(dstDir)
+}
+
+// checkEmptyMounts refuses a testData mountPath that would hide fetched
+// files: a mount covers whatever its directory held, silently.
+func checkEmptyMounts(dstDir string, mounts []EmptyMount) error {
+	for _, m := range mounts {
+		rel, err := filepath.Rel(DefaultDataDir, filepath.Clean(m.Path))
+		if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+			continue // not below the data dir: nothing of ours to hide
+		}
+		target := filepath.Join(dstDir, rel)
+		info, err := os.Stat(target)
+		if err != nil {
+			continue // missing: the mount creates it
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("testData %s: mountPath %s is a file of the code — mount single files with items", m.Name, m.Path)
+		}
+		n := 0
+		_ = filepath.WalkDir(target, func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				n++
+			}
+			return nil
+		})
+		if n > 0 {
+			files := "files"
+			if n == 1 {
+				files = "file"
+			}
+			return fmt.Errorf("testData %s: mountPath %s would hide %d %s of the code — "+
+				"mount single files with items, or pick an empty directory", m.Name, m.Path, n, files)
+		}
+	}
+	return nil
 }
 
 // writeContentInfo records what was checked out for the wrapper to report

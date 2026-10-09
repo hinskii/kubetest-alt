@@ -17,34 +17,111 @@ limitations under the License.
 package resolver
 
 import (
-	"regexp"
+	"errors"
+	"fmt"
+	"maps"
 	"slices"
+	"strings"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
 
-// RepoDir is where a Test's files are, in the pod: the git checkout, or
-// inline files under repo/ (CLAUDE.md §12). Templates point their tool at
-// a path below it.
-const RepoDir = "/data/repo"
+// Where a Test's code and data are in the pod (steps 20h, 20i).
+const (
+	// RepoDir holds the code: the git checkout, the inline files or the
+	// unpacked tarball. Templates point their tool at a path below it.
+	RepoDir = "/data/repo"
+	// TestDataDir holds content.testData entries without a mountPath or
+	// items: /data/testdata/<name>/<key>.
+	TestDataDir = "/data/testdata"
+	// legacyRepoPrefix: inline file paths used to be relative to /data
+	// ("repo/load.js"); they are relative to /data/repo now. Stored Tests
+	// written the old way keep working; the webhook refuses new ones.
+	legacyRepoPrefix = "repo/"
+)
 
-// mainPathRef is a parameter placed right below RepoDir.
-var mainPathRef = regexp.MustCompile(regexp.QuoteMeta(RepoDir) + `/\{\{\s*config\.([A-Za-z0-9_]+)\s*\}\}`)
+// Main path kinds (Parameter.path).
+const (
+	PathFile      = "file"
+	PathDirectory = "directory"
+)
 
-// MainPathParam is the parameter naming where the tool finds the Test's
-// files — the one c puts right after /data/repo/ in its command,
-// arguments or working directory: k6's script, JMeter's plan, newman's
-// collection, playwright's projectDir, … — or "" when there is none (a
-// tool aimed at a URL, an own image). It is read from the container
-// itself, so no tool is named in code. A Test must give it a value: a
-// template never defaults it (step 20h).
-func MainPathParam(c testsv1alpha1.ContainerConfig, config map[string]testsv1alpha1.Parameter) string {
-	for _, s := range slices.Concat(c.Command, c.Args, []string{c.WorkingDir}) {
-		for _, m := range mainPathRef.FindAllStringSubmatch(s, -1) {
-			if _, ok := config[m[1]]; ok {
-				return m[1]
-			}
+// ErrInlineProject: a template that runs a project (main path a
+// directory) was given inline files — projects come from git (step 20i).
+var ErrInlineProject = errors.New("this tool runs a project — put it in git (content.git); inline files are for single-file tools")
+
+// MainPathParam is the parameter marked as the main path — where the tool
+// finds a Test's files (k6's script, JMeter's plan, playwright's
+// projectDir, …) — and its kind, file or directory; "" when there is none
+// (a tool aimed at a URL, an own image). Templates mark it with
+// `path:`; at most one per object (a CEL rule on the CRD).
+func MainPathParam(config map[string]testsv1alpha1.Parameter) (name, kind string) {
+	for _, k := range slices.Sorted(maps.Keys(config)) {
+		if p := config[k].Path; p != "" {
+			return k, p
 		}
 	}
+	return "", ""
+}
+
+// InlineFilePath is where inline file p lands, relative to RepoDir. Paths
+// stored the old way ("repo/x", relative to /data) mean the same file.
+func InlineFilePath(p string) string {
+	return strings.TrimPrefix(p, legacyRepoPrefix)
+}
+
+// inlineCode reports whether spec's code is inline files.
+func inlineCode(spec *testsv1alpha1.TestSpec) bool {
+	return spec.Content.Git == nil && len(spec.Content.Files) > 0
+}
+
+// bindInlineMainFile points an unset main path parameter of kind file at
+// the first inline file: with inline code nobody types a path (step 20i).
+// An explicit value wins.
+func bindInlineMainFile(spec *testsv1alpha1.TestSpec) {
+	name, kind := MainPathParam(spec.Config)
+	if kind != PathFile || !inlineCode(spec) {
+		return
+	}
+	p := spec.Config[name]
+	if p.Default != "" {
+		return
+	}
+	p.Default = InlineFilePath(spec.Content.Files[0].Path)
+	spec.Config[name] = p
+}
+
+// CheckContent reports a merged spec whose content can't run: code from
+// more than one source, or a project given inline.
+func CheckContent(spec *testsv1alpha1.TestSpec) error {
+	sources := 0
+	for _, has := range []bool{spec.Content.Git != nil, len(spec.Content.Files) > 0, len(spec.Content.Tarball) > 0} {
+		if has {
+			sources++
+		}
+	}
+	if sources > 1 {
+		return errors.New("the code comes from more than one source (git, inline files, tarball) — a Test and its templates must use one")
+	}
+	if _, kind := MainPathParam(spec.Config); kind == PathDirectory && inlineCode(spec) {
+		return ErrInlineProject
+	}
+	return nil
+}
+
+// MissingMainPath is the main path parameter a merged spec leaves empty,
+// or "".
+func MissingMainPath(spec *testsv1alpha1.TestSpec) string {
+	if name, _ := MainPathParam(spec.Config); name != "" && spec.Config[name].Default == "" {
+		return name
+	}
 	return ""
+}
+
+// MainPathMessage says what to set, with the parameter's description.
+func MainPathMessage(spec *testsv1alpha1.TestSpec, name string) string {
+	if d := spec.Config[name].Description; d != "" {
+		return fmt.Sprintf("set spec.config.%s: %s", name, d)
+	}
+	return fmt.Sprintf("set spec.config.%s — where the Test's files are", name)
 }

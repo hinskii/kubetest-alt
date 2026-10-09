@@ -61,13 +61,45 @@
   radios.forEach(function (r) { r.addEventListener("change", chooseTemplate); });
   chooseTemplate();
 
-  // Sections behind a checkbox (git, files).
-  form.querySelectorAll("[data-toggles]").forEach(function (box) {
-    var target = form.querySelector('[data-toggled="' + box.getAttribute("data-toggles") + '"]');
-    function sync() { target.hidden = !box.checked; }
-    box.addEventListener("change", sync);
-    sync();
-  });
+  // The code's source: git, inline files or none — one at a time. A
+  // template that runs a project (main path a directory) takes git only.
+  var sources = Array.prototype.slice.call(form.querySelectorAll('input[name="source"]'));
+  var inlineChoice = document.getElementById("source-inline");
+  var projectNote = document.getElementById("project-note");
+  function syncSource() {
+    var chosen = radios.filter(function (r) { return r.checked; })[0];
+    var project = chosen && chosen.getAttribute("data-main-kind") === "directory";
+    var inline = inlineChoice && inlineChoice.querySelector("input");
+    if (inline) {
+      inline.disabled = project;
+      if (project && inline.checked) {
+        sources.filter(function (r) { return r.value === "git"; })[0].checked = true;
+      }
+    }
+    if (projectNote) projectNote.hidden = !project;
+    var current = (sources.filter(function (r) { return r.checked; })[0] || {}).value || "none";
+    form.querySelectorAll("[data-source]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-source") !== current;
+    });
+  }
+  sources.forEach(function (r) { r.addEventListener("change", syncSource); });
+  radios.forEach(function (r) { r.addEventListener("change", syncSource); });
+  syncSource();
+
+  // More test-data rows.
+  var data = document.getElementById("test-data");
+  var addData = document.getElementById("add-data");
+  if (data && addData) {
+    addData.hidden = false;
+    addData.addEventListener("click", function () {
+      var rows = data.querySelectorAll(".data-row");
+      var row = rows[rows.length - 1].cloneNode(true);
+      row.querySelectorAll("input, textarea").forEach(function (el) { el.value = ""; });
+      row.querySelectorAll("select").forEach(function (el) { el.selectedIndex = 0; });
+      data.insertBefore(row, addData);
+      row.querySelector('input[name="td.name"]').focus();
+    });
+  }
 
   // Another namespace means another catalog: offer to load it.
   var ns = form.querySelector('input[name="namespace"][data-loaded]');

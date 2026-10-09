@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -41,7 +42,7 @@ func pathTemplate(ns string) *testsv1alpha1.TestTemplate {
 			Container: testsv1alpha1.ContainerConfig{Image: "busybox", Command: []string{"sh", "-c"},
 				Args: []string{"cd /data/repo/{{ config.projectDir }} && true"}},
 			Config: map[string]testsv1alpha1.Parameter{
-				"projectDir": {Type: "string", Description: "The project, relative to the repository root."},
+				"projectDir": {Type: "string", Path: "directory", Description: "The project, relative to the repository root."},
 			},
 		},
 	}
@@ -129,4 +130,58 @@ func TestReadiness_NoMainPath(t *testing.T) {
 		require.NoError(t, err, name)
 		assert.Equal(t, ReasonResolved, c.Reason, name)
 	}
+}
+
+func TestTestReady_InlineProjectAndInlineFile(t *testing.T) {
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, pathTemplate(ns)))
+	project := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns},
+		Spec: testsv1alpha1.TestSpec{Use: []string{"pw"},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "package.json", Content: "{}"}}}},
+	}
+	require.NoError(t, k8sClient.Create(ctx, project))
+	c := eventuallyReason(t, readyOf(ns), ReasonInlineNotSupported)
+	assert.Contains(t, c.Message, "put it in git")
+}
+
+func TestTestReady_InlineSingleFileNeedsNoPath(t *testing.T) {
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	k6 := pathTemplate(ns)
+	k6.Spec.Container.Args = []string{"run", "/data/repo/{{ config.script }}"}
+	k6.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string", Path: "file"}}
+	require.NoError(t, k8sClient.Create(ctx, k6))
+	require.NoError(t, k8sClient.Create(ctx, &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: ns},
+		Spec: testsv1alpha1.TestSpec{Use: []string{"pw"},
+			Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "load.js", Content: "x"}}}},
+	}))
+	eventuallyReason(t, readyOf(ns), ReasonResolved)
+}
+
+func TestReconcile_TestDataMissingFailsFast(t *testing.T) {
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	test := newTestFixture(ns, "with-data")
+	test.Spec.Content.TestData = []testsv1alpha1.TestDataSource{
+		{ConfigMap: "products"},
+		{Secret: "account", Items: []testsv1alpha1.TestDataItem{{Key: "env", Path: "/data/repo/.env"}}},
+	}
+	require.NoError(t, k8sClient.Create(ctx, test))
+
+	run := newRunFixture(ns, "with-data-1", "with-data")
+	require.NoError(t, k8sClient.Create(ctx, run))
+	got := waitForPhase(t, ctx, client.ObjectKeyFromObject(run), testsv1alpha1.PhaseError, 10*time.Second)
+	assert.Contains(t, got.Status.Message, "no ConfigMap products in namespace "+ns)
+
+	require.NoError(t, k8sClient.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "products", Namespace: ns},
+		Data: map[string]string{"products.csv": "1"}}))
+	require.NoError(t, k8sClient.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "account", Namespace: ns},
+		Data: map[string][]byte{"user": []byte("u")}}))
+	run2 := newRunFixture(ns, "with-data-2", "with-data")
+	require.NoError(t, k8sClient.Create(ctx, run2))
+	got = waitForPhase(t, ctx, client.ObjectKeyFromObject(run2), testsv1alpha1.PhaseError, 10*time.Second)
+	assert.Contains(t, got.Status.Message, `Secret account has no key "env"`)
 }

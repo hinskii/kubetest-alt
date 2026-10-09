@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/robfig/cron/v3"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
@@ -206,6 +208,9 @@ func validateTest(spec *testsv1alpha1.TestSpec) error {
 	if git := spec.Content.Git; git != nil && git.URI == "" {
 		return errors.New("spec.content.git.uri is required when spec.content.git is set")
 	}
+	if err := validateContent(&spec.Content); err != nil {
+		return err
+	}
 	if size := inlineContentSize(spec.Content.Files); size > MaxInlineContentBytes {
 		return fmt.Errorf(oversizeMessage, MaxInlineContentBytes, size)
 	}
@@ -229,7 +234,7 @@ func validateCompositeShape(spec *testsv1alpha1.TestSpec) error {
 	if len(spec.Use) > 0 {
 		return errors.New("spec.steps and spec.use are mutually exclusive (composite composes children, not templates)")
 	}
-	if spec.Content.Git != nil || len(spec.Content.Files) > 0 || len(spec.Content.Tarball) > 0 {
+	if spec.Content.Git != nil || len(spec.Content.Files) > 0 || len(spec.Content.Tarball) > 0 || len(spec.Content.TestData) > 0 {
 		return errors.New("spec.steps and spec.content are mutually exclusive (children carry their own content)")
 	}
 	if spec.Verdict != nil {
@@ -486,6 +491,117 @@ func validateRelativeGlob(field, p string) error {
 	}
 	if !doublestar.ValidatePattern(p) {
 		return fmt.Errorf("%s %q is not a valid glob pattern", field, p)
+	}
+	return nil
+}
+
+// Where code and data are in the test pod (step 20i).
+const (
+	repoDir     = "/data/repo"
+	testDataDir = "/data/testdata"
+)
+
+// platformDirs are the platform's own mounts: test data can't go there.
+var platformDirs = []string{"/kubetest-bin", "/etc/kubetest"}
+
+// validateContent: the code comes from one source; inline files sit below
+// /data/repo; data from the cluster is testData, mounted where it can't
+// clash (step 20i).
+func validateContent(c *testsv1alpha1.Content) error {
+	sources := 0
+	for _, has := range []bool{c.Git != nil, len(c.Files) > 0, len(c.Tarball) > 0} {
+		if has {
+			sources++
+		}
+	}
+	if sources > 1 {
+		return errors.New("spec.content: a Test's code comes from git, inline files or a tarball — one of them, not several; " +
+			"data from ConfigMaps and Secrets goes in spec.content.testData")
+	}
+	for i, f := range c.Files {
+		field := fmt.Sprintf("spec.content.files[%d]", i)
+		if f.ContentFrom != nil {
+			return fmt.Errorf("%s.contentFrom isn't supported — mount the ConfigMap or Secret with spec.content.testData "+
+				"(- configMap: <name>, or items: [{key: <key>, path: %s/%s}])", field, repoDir, strings.TrimPrefix(f.Path, "repo/"))
+		}
+		if rest, ok := strings.CutPrefix(f.Path, "repo/"); ok {
+			return fmt.Errorf("%s.path %q: inline paths are relative to %s now — write %q", field, f.Path, repoDir, rest)
+		}
+		if err := relativePath(field+".path", f.Path); err != nil {
+			return err
+		}
+	}
+	seen := map[string]string{}
+	claim := func(p, what string) error {
+		if other, ok := seen[p]; ok {
+			return fmt.Errorf("%s and %s both land on %s", what, other, p)
+		}
+		seen[p] = what
+		return nil
+	}
+	for i, d := range c.TestData {
+		field := fmt.Sprintf("spec.content.testData[%d]", i)
+		if (d.ConfigMap == "") == (d.Secret == "") {
+			return fmt.Errorf("%s: set exactly one of configMap or secret", field)
+		}
+		name := d.ConfigMap + d.Secret
+		if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
+			return fmt.Errorf("%s: %q is not a valid name: %s", field, name, strings.Join(errs, "; "))
+		}
+		switch {
+		case d.MountPath != "" && len(d.Items) > 0:
+			return fmt.Errorf("%s: mountPath (all keys in a directory) or items (keys at exact paths) — not both", field)
+		case len(d.Items) > 0:
+			for j, it := range d.Items {
+				f := fmt.Sprintf("%s.items[%d]", field, j)
+				if it.Key == "" {
+					return fmt.Errorf("%s.key is required", f)
+				}
+				if err := dataPath(f+".path", it.Path); err != nil {
+					return err
+				}
+				if err := claim(path.Clean(it.Path), f); err != nil {
+					return err
+				}
+			}
+		case d.MountPath != "":
+			if err := dataPath(field+".mountPath", d.MountPath); err != nil {
+				return err
+			}
+			if err := claim(path.Clean(d.MountPath), field); err != nil {
+				return err
+			}
+		default:
+			if err := claim(path.Join(testDataDir, name), field); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// relativePath: a path below a directory — not absolute, no "..".
+func relativePath(field, p string) error {
+	if p == "" || path.IsAbs(p) || slices.Contains(strings.Split(path.Clean(p), "/"), "..") {
+		return fmt.Errorf("%s %q must be relative to %s, without .. segments", field, p, repoDir)
+	}
+	return nil
+}
+
+// dataPath: where test data may be mounted — absolute, no "..", not over
+// the whole data dir or the code, not into the platform's directories.
+func dataPath(field, p string) error {
+	clean := path.Clean(p)
+	if !path.IsAbs(p) || strings.Contains(p, "..") {
+		return fmt.Errorf("%s %q must be an absolute path without .. segments", field, p)
+	}
+	if slices.Contains([]string{"/", "/data", repoDir}, clean) {
+		return fmt.Errorf("%s %q would cover the whole %s — pick a directory below it", field, p, clean)
+	}
+	for _, dir := range platformDirs {
+		if clean == dir || strings.HasPrefix(clean, dir+"/") {
+			return fmt.Errorf("%s %q is the platform's directory %s", field, p, dir)
+		}
 	}
 	return nil
 }

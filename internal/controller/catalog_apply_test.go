@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -387,27 +388,40 @@ func TestCatalog_SamplesRunTheCatalogProjects(t *testing.T) {
 	}
 }
 
-// TestCatalog_MainPathParamsAreRequired: a template never defaults where
-// a Test's files are (step 20h), says what to put there, and every sample
-// says it.
+// TestCatalog_MainPathParamsAreRequired: every file-based template marks
+// its main path parameter (path: file|directory, step 20i), never defaults
+// it (step 20h), says what to put there, and really points its tool at it
+// below /data/repo; the project tools are exactly the directory ones; every
+// sample sets the path.
 func TestCatalog_MainPathParamsAreRequired(t *testing.T) {
 	repoRoot, err := findRepoRoot()
 	require.NoError(t, err)
 	tmplFiles, err := listYAML(filepath.Join(repoRoot, "config", "templates"))
 	require.NoError(t, err)
 	mainParam := map[string]string{}
+	var projects []string
 	for _, f := range tmplFiles {
 		tmpl, err := readTestTemplate(f)
 		require.NoError(t, err, "parse %s", f)
-		p := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+		p, kind := resolver.MainPathParam(tmpl.Spec.Config)
 		if p == "" {
 			continue // aimed at a URL (zap-baseline), not at files
 		}
 		mainParam[tmpl.Name] = p
+		if kind == resolver.PathDirectory {
+			projects = append(projects, tmpl.Name)
+		}
 		assert.Empty(t, tmpl.Spec.Config[p].Default, "%s: %s must have no default", tmpl.Name, p)
 		assert.NotEmpty(t, tmpl.Spec.Config[p].Description, "%s: %s needs a description", tmpl.Name, p)
+		c := tmpl.Spec.Container
+		used := regexp.MustCompile(`/data/repo/\{\{\s*config\.` + p + `\s*\}\}`)
+		assert.True(t, slices.ContainsFunc(slices.Concat(c.Command, c.Args, []string{c.WorkingDir}), used.MatchString),
+			"%s: the container must use %s below /data/repo", tmpl.Name, p)
 	}
 	assert.GreaterOrEqual(t, len(mainParam), 14, "the file-based tools: %v", mainParam)
+	slices.Sort(projects)
+	assert.Equal(t, []string{"cucumber", "cypress", "gatling", "gradle", "maven", "playwright", "pytest"}, projects,
+		"the project tools — from git only")
 
 	sampleFiles, err := listYAML(filepath.Join(repoRoot, "config", "samples", "tools"))
 	require.NoError(t, err)

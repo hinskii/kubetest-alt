@@ -42,6 +42,8 @@ spec:
           value: sample-run
         - name: KUBETEST_TEST_REF
           value: sample
+        - name: KUBETEST_TESTDATA_DIR
+          value: /data/testdata
         - name: FEATURE_X
           value: "on"
         image: grafana/k6:2.2.0

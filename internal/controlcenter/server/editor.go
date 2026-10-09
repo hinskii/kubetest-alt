@@ -65,9 +65,12 @@ type testForm struct {
 	Tool          string
 	Image         string
 	Command, Args string // one item per line
-	UseGit        bool
-	GitURI        string
-	GitRevision   string
+	// Source is where the code comes from: git, inline files, or none (an
+	// own image that needs no files) — one, never several (step 20i).
+	Source      string
+	UseGit      bool
+	GitURI      string
+	GitRevision string
 	// GitPath is where the tests are in the repository (a file or a
 	// directory): the template's main path parameter and, unless GitPaths
 	// says otherwise, the sparse checkout. Required with git (step 20h).
@@ -77,6 +80,8 @@ type testForm struct {
 	GitSecretKey string
 	UseFiles     bool
 	Files        []fileField
+	// TestData are ConfigMaps/Secrets mounted as files, with any source.
+	TestData []testDataField
 	// Params are the template's parameters (name → value).
 	Params map[string]string
 	Env    string // NAME=value per line
@@ -93,6 +98,24 @@ type testForm struct {
 }
 
 type fileField struct{ Path, Content string }
+
+// testDataField is one content.testData row: a ConfigMap or Secret, and
+// where its keys land — the default directory, a directory, or single
+// files ("key=/path" per line).
+type testDataField struct {
+	Kind, Name, Where string // Kind: configMap | secret; Where: default | dir | files
+	MountPath, Items  string
+}
+
+// Code sources and testData placements in the form.
+const (
+	sourceGit     = "git"
+	kindConfigMap = "configMap"
+	sourceInline  = "inline"
+	kindSecret    = "secret"
+	whereDir      = "dir"
+	whereFiles    = "files"
+)
 
 // Form field names.
 const (
@@ -111,11 +134,11 @@ func formFromValues(v url.Values) testForm {
 		Namespace: strings.TrimSpace(v.Get(fNamespace)), Name: strings.TrimSpace(v.Get(fName)),
 		Template: v.Get(fTemplate), Tool: strings.TrimSpace(v.Get("tool")),
 		Image: strings.TrimSpace(v.Get("image")), Command: v.Get("command"), Args: v.Get("args"),
-		UseGit: v.Get("useGit") != "", GitURI: strings.TrimSpace(v.Get("gitURI")),
+		Source: v.Get("source"), GitURI: strings.TrimSpace(v.Get("gitURI")),
 		GitRevision: strings.TrimSpace(v.Get("gitRevision")), GitPaths: v.Get("gitPaths"),
 		GitPath:   strings.Trim(strings.TrimSpace(v.Get("gitPath")), "/"),
 		GitSecret: strings.TrimSpace(v.Get("gitSecret")), GitSecretKey: strings.TrimSpace(v.Get("gitSecretKey")),
-		UseFiles: v.Get("useFiles") != "", Env: v.Get("env"),
+		Env:        v.Get("env"),
 		CPURequest: strings.TrimSpace(v.Get("cpuRequest")), MemoryRequest: strings.TrimSpace(v.Get("memoryRequest")),
 		CPULimit: strings.TrimSpace(v.Get("cpuLimit")), MemoryLimit: strings.TrimSpace(v.Get("memoryLimit")),
 		ServiceAccount: strings.TrimSpace(v.Get("serviceAccount")),
@@ -125,6 +148,20 @@ func formFromValues(v url.Values) testForm {
 	}
 	if f.Mode != modeYAML {
 		f.Mode = modeForm
+	}
+	f.UseGit, f.UseFiles = f.Source == sourceGit, f.Source == sourceInline
+	kinds, names, wheres, mounts, items := v["td.kind"], v["td.name"], v["td.where"], v["td.mountPath"], v["td.items"]
+	for i, name := range names {
+		at := func(xs []string) string {
+			if i < len(xs) {
+				return strings.TrimSpace(xs[i])
+			}
+			return ""
+		}
+		if name = strings.TrimSpace(name); name != "" {
+			f.TestData = append(f.TestData, testDataField{Kind: at(kinds), Name: name, Where: at(wheres),
+				MountPath: at(mounts), Items: at(items)})
+		}
 	}
 	paths, bodies := v[fFilePath], v[fFileBody]
 	for i, p := range paths {
@@ -154,6 +191,8 @@ func formUnsupported(t *testsv1alpha1.Test) string {
 		return "A composite Test (spec.steps) is edited as YAML."
 	case len(t.Spec.Use) > 1:
 		return "This Test uses more than one template; it is edited as YAML."
+	case len(t.Spec.Content.Tarball) > 0:
+		return "This Test's code is a tarball; it is edited as YAML."
 	}
 	return ""
 }
@@ -179,14 +218,39 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 	}
 	for _, file := range s.Content.Files {
 		if file.ContentFrom == nil {
-			f.Files = append(f.Files, fileField{Path: formPath(file.Path), Content: file.Content})
+			f.Files = append(f.Files, fileField{Path: resolver.InlineFilePath(file.Path), Content: file.Content})
 		}
 	}
 	f.UseFiles = len(f.Files) > 0
+	switch {
+	case s.Content.Git != nil:
+		f.Source = sourceGit
+	case f.UseFiles:
+		f.Source = sourceInline
+	}
+	f.UseGit = s.Content.Git != nil
+	for _, d := range s.Content.TestData {
+		row := testDataField{Kind: kindConfigMap, Name: d.ConfigMap, MountPath: d.MountPath}
+		if d.Secret != "" {
+			row.Kind, row.Name = kindSecret, d.Secret
+		}
+		switch {
+		case len(d.Items) > 0:
+			row.Where = whereFiles
+			var ls []string
+			for _, it := range d.Items {
+				ls = append(ls, it.Key+"="+it.Path)
+			}
+			row.Items = strings.Join(ls, "\n")
+		case d.MountPath != "":
+			row.Where = whereDir
+		}
+		f.TestData = append(f.TestData, row)
+	}
 	if g := s.Content.Git; g != nil {
 		main := ""
 		if tmpl != nil {
-			main = resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+			main, _ = resolver.MainPathParam(tmpl.Spec.Config)
 		}
 		if own, ok := s.Config[main]; ok && main != "" {
 			f.GitPath = own.Default
@@ -198,7 +262,7 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 		}
 	}
 	if tmpl != nil {
-		main := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+		main, _ := resolver.MainPathParam(tmpl.Spec.Config)
 		for name, p := range tmpl.Spec.Config {
 			f.Params[name] = p.Default
 			if own, ok := s.Config[name]; ok {
@@ -365,12 +429,12 @@ func (b *builder) container() {
 	b.check(setQuantity(&c.Resources.Limits, corev1.ResourceMemory, "Memory limit", f.MemoryLimit))
 }
 
-// content sets the git source and the inline files; git settings the
-// form doesn't show (auth type, SSH key, mount path) and files from
-// Secrets or ConfigMaps stay.
+// content sets the code — git or inline files, one of them (step 20i) —
+// and the test data. Git settings the form doesn't show (auth type, SSH
+// key, mount path) stay.
 func (b *builder) content(was *testsv1alpha1.GitContent) {
 	f, c := b.form, &b.t.Spec.Content
-	c.Git = nil
+	c.Git, c.Files, c.Tarball = nil, nil, nil
 	if f.UseGit {
 		g := testsv1alpha1.GitContent{URI: f.GitURI, Revision: f.GitRevision, Paths: lines(f.GitPaths)}
 		if len(g.Paths) == 0 {
@@ -395,17 +459,52 @@ func (b *builder) content(was *testsv1alpha1.GitContent) {
 		}
 		c.Git = &g
 	}
-	files := slices.DeleteFunc(slices.Clone(c.Files), func(x testsv1alpha1.FileContent) bool { return x.ContentFrom == nil })
 	if f.UseFiles {
 		for _, file := range f.Files {
-			if file.Path == "" {
+			p := strings.Trim(strings.TrimSpace(file.Path), "/")
+			if p == "" {
 				b.fail("Files: every file needs a path.")
 				continue
 			}
-			files = append(files, testsv1alpha1.FileContent{Path: dataPath(file.Path), Content: file.Content})
+			c.Files = append(c.Files, testsv1alpha1.FileContent{Path: p, Content: file.Content})
+		}
+		if len(c.Files) == 0 {
+			b.fail("Inline files: add at least one file.")
 		}
 	}
-	c.Files = files
+	b.testData()
+}
+
+// testData sets content.testData from the rows.
+func (b *builder) testData() {
+	c := &b.t.Spec.Content
+	c.TestData = nil
+	for _, row := range b.form.TestData {
+		d := testsv1alpha1.TestDataSource{ConfigMap: row.Name}
+		if row.Kind == kindSecret {
+			d = testsv1alpha1.TestDataSource{Secret: row.Name}
+		}
+		switch row.Where {
+		case whereDir:
+			if !strings.HasPrefix(row.MountPath, "/") {
+				b.fail(fmt.Sprintf("Test data %s: the directory must be an absolute path, e.g. /data/repo/e2e/data.", row.Name))
+			}
+			d.MountPath = row.MountPath
+		case whereFiles:
+			for _, l := range lines(row.Items) {
+				k, p, ok := strings.Cut(l, "=")
+				if !ok || strings.TrimSpace(k) == "" || !strings.HasPrefix(strings.TrimSpace(p), "/") {
+					b.fail(fmt.Sprintf("Test data %s: %q is not key=/absolute/path.", row.Name, l))
+					continue
+				}
+				d.Items = append(d.Items, testsv1alpha1.TestDataItem{Key: strings.TrimSpace(k), Path: strings.TrimSpace(p)})
+			}
+			if len(d.Items) == 0 {
+				b.fail(fmt.Sprintf("Test data %s: list the files, one key=/path per line.", row.Name))
+			}
+		}
+		c.TestData = append(c.TestData, d)
+	}
 }
 
 // params: the Test keeps a template parameter only where its value
@@ -420,12 +519,15 @@ func (b *builder) params(tmpl *testsv1alpha1.TestTemplate, changed bool) {
 			}
 		}
 	}
-	main := resolver.MainPathParam(tmpl.Spec.Container, tmpl.Spec.Config)
+	main, kind := resolver.MainPathParam(tmpl.Spec.Config)
+	if kind == resolver.PathDirectory && b.form.UseFiles {
+		b.fail(fmt.Sprintf("%s runs a project: its code comes from git (choose Git as the source) — inline files are for single-file tools.", tmpl.Name))
+	}
 	for _, name := range slices.Sorted(maps.Keys(tmpl.Spec.Config)) {
 		p, v := tmpl.Spec.Config[name], b.form.Params[name]
 		if name == main {
 			v = b.mainPathValue(p, v)
-			if v == "" {
+			if v == "" && !b.form.UseFiles {
 				b.fail(fmt.Sprintf("%s: required — %s", name, cmp.Or(p.Description, "where the Test's files are.")))
 				continue
 			}
@@ -448,36 +550,11 @@ func (b *builder) params(tmpl *testsv1alpha1.TestTemplate, changed bool) {
 	}
 }
 
-// repoDir is where a template's tool looks for the Test's files
-// (/data/repo/, CLAUDE.md §12); the editor's file paths are relative to it.
-const repoDir = "repo/"
-
-// dataPath turns an editor file path into the Test's (relative to /data):
-// "load.js" → "repo/load.js"; a leading "/" means under /data itself
-// ("/x.json" → "x.json"), and "/data/…" is understood too.
-func dataPath(p string) string {
-	p = strings.TrimSpace(p)
-	if rest, ok := strings.CutPrefix(p, "/data/"); ok {
-		return rest
-	}
-	if strings.HasPrefix(p, "/") {
-		return strings.TrimLeft(p, "/")
-	}
-	return repoDir + p
-}
-
-// formPath is dataPath's inverse, for the form.
-func formPath(p string) string {
-	if rest, ok := strings.CutPrefix(p, repoDir); ok {
-		return rest
-	}
-	return "/" + p
-}
-
 // mainPathValue is the template's main path parameter (resolver.
 // MainPathParam: k6's script, JMeter's plan, playwright's projectDir, …):
-// what the user typed, else the path in the repository (git), else the
-// first inline file when the value names none of the Test's files.
+// what the user typed, else with git the path in the repository. With
+// inline files it stays unset unless typed — the operator takes the first
+// file (step 20i), so the Test's YAML names no path.
 func (b *builder) mainPathValue(p testsv1alpha1.Parameter, v string) string {
 	if v != "" && v != p.Default {
 		return v
@@ -485,16 +562,7 @@ func (b *builder) mainPathValue(p testsv1alpha1.Parameter, v string) string {
 	if b.form.UseGit {
 		return cmp.Or(v, b.form.GitPath)
 	}
-	var inline []string
-	for _, file := range b.t.Spec.Content.Files {
-		if rest, ok := strings.CutPrefix(file.Path, repoDir); ok {
-			inline = append(inline, rest)
-		}
-	}
-	if len(inline) == 0 || (v != "" && slices.Contains(inline, v)) {
-		return v
-	}
-	return inline[0]
+	return v
 }
 
 // checkInCheckout warns when the main path lies outside the sparse

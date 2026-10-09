@@ -35,6 +35,7 @@ import (
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	"github.com/hinskii/kubetest-alt/internal/names"
+	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
@@ -261,9 +262,17 @@ func compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options,
 	// Content spec ships as a ConfigMap key alongside request.json (see step
 	// 03 NOTE + step 06). The env-var approach broke on inline files near
 	// 512KB — pod object bloat in etcd, ARG_MAX risk, leaks in kubectl describe.
-	contentJSON, err := json.Marshal(test.Spec.Content)
+	content, err := toFetcherContent(test.Spec.Content)
+	if err != nil {
+		return nil, nil, err
+	}
+	contentJSON, err := json.Marshal(content)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal content spec: %w", err)
+	}
+	dataVolumes, dataMounts, err := testDataVolumes(test.Spec.Content.TestData)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	cmName := target.Name + "-request"
@@ -308,6 +317,7 @@ func compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options,
 		}},
 	)
 	volumes = append(volumes, mergedPod.Volumes...)
+	volumes = append(volumes, dataVolumes...)
 
 	// Content-fetcher image (with optional ImageRegistry prefix).
 	fetcherImage := opts.ContentFetcherImage
@@ -363,6 +373,7 @@ func compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options,
 			Name: ServiceHostEnv(name), Value: names.ServiceHost(run.Name, run.Namespace, name),
 		})
 	}
+	wrapperEnv = append(wrapperEnv, corev1.EnvVar{Name: EnvTestDataDir, Value: resolver.TestDataDir})
 	wrapperEnv = append(wrapperEnv, target.Env...)
 	wrapperEnv = append(wrapperEnv, test.Spec.Container.Env...)
 
@@ -389,6 +400,7 @@ func compile(test *testsv1alpha1.Test, run *testsv1alpha1.TestRun, opts Options,
 		corev1.VolumeMount{Name: VolumeKubetestBin, MountPath: KubetestBinMountPath},
 	)
 	wrapperMounts = append(wrapperMounts, test.Spec.Container.VolumeMounts...)
+	wrapperMounts = append(wrapperMounts, dataMounts...)
 
 	// Workflows model (step 11): the pod runs the tool image verbatim,
 	// with Container.Command = [/kubetest-bin/entry] and Container.Args =

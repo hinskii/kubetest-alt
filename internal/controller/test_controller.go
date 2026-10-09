@@ -45,6 +45,10 @@ const (
 	ReasonResolved         = "Resolved"
 	ReasonParameterMissing = "ParameterMissing"
 	ReasonTemplateMissing  = "TemplateMissing"
+	// ReasonInlineNotSupported: a project tool (main path a directory)
+	// given inline files, or code from more than one source (step 20i).
+	ReasonInlineNotSupported = "InlineNotSupported"
+	ReasonContentConflict    = "ContentConflict"
 )
 
 // TestReconciler keeps a Test's Ready condition. It only reads Tests and
@@ -92,12 +96,14 @@ func readiness(test *testsv1alpha1.Test, store resolver.TemplateStore) (metav1.C
 	if err != nil {
 		return metav1.Condition{}, err
 	}
-	if p := resolver.MainPathParam(merged.Container, merged.Config); p != "" && merged.Config[p].Default == "" {
-		msg := fmt.Sprintf("set spec.config.%s — where the Test's files are", p)
-		if d := merged.Config[p].Description; d != "" {
-			msg = fmt.Sprintf("set spec.config.%s: %s", p, d)
+	if err := resolver.CheckContent(merged); err != nil {
+		if errors.Is(err, resolver.ErrInlineProject) {
+			return notReady(ReasonInlineNotSupported, err.Error()), nil
 		}
-		return notReady(ReasonParameterMissing, msg), nil
+		return notReady(ReasonContentConflict, err.Error()), nil
+	}
+	if p := resolver.MissingMainPath(merged); p != "" {
+		return notReady(ReasonParameterMissing, resolver.MainPathMessage(merged, p)), nil
 	}
 	return metav1.Condition{Type: ConditionReady, Status: metav1.ConditionTrue, Reason: ReasonResolved}, nil
 }

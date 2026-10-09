@@ -35,8 +35,9 @@ spec:
   config:
     testsDir:
       type: string
-      # Required, no default: a Test says where its files are (step 20h).
-      description: "The directory with the tests, relative to the repository root (git) or to /data/repo (inline files); \".\" for the root itself."
+      # The main path, a directory: a project, from git only. No default (steps 20h, 20i).
+      path: directory
+      description: "The directory with the tests, relative to the repository root; \".\" for the root itself."
     # Bumping this in a Test lets a specific project pin an older/newer
     # pytest without forking the template.
     pytestVersion:

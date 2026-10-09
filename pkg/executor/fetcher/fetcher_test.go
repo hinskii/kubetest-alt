@@ -222,3 +222,20 @@ func TestGitMountDir(t *testing.T) {
 		assert.Equal(t, c.want, got, c.mount)
 	}
 }
+
+func TestCheckEmptyMounts(t *testing.T) {
+	dst := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dst, "repo", "e2e", "data"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "repo", "e2e", "data", "a.csv"), []byte("x"), 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "repo", "e2e", "data", "b.csv"), []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(dst, "repo", "empty"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(dst, "repo", "file.txt"), []byte("x"), 0o600))
+
+	err := checkEmptyMounts(dst, []EmptyMount{{Name: "fixtures", Path: "/data/repo/e2e/data"}})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "testData fixtures: mountPath /data/repo/e2e/data would hide 2 files of the code")
+	assert.ErrorContains(t, checkEmptyMounts(dst, []EmptyMount{{Name: "f", Path: "/data/repo/file.txt"}}),
+		"is a file of the code")
+	assert.NoError(t, checkEmptyMounts(dst, []EmptyMount{
+		{Name: "a", Path: "/data/repo/empty"}, {Name: "b", Path: "/data/repo/missing"}, {Name: "c", Path: "/etc/app"}}))
+}

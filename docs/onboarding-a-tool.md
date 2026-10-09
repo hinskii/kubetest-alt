@@ -221,21 +221,30 @@ Users override defaults on their Test.spec.config (redeclaring the
 parameter with a new default) OR on TestRun.spec.config (per-run
 override).
 
-**The main path parameter never has a default.** The parameter your
-container puts right after `/data/repo/` — in the command, the arguments
-or `workingDir` (k6's `script`, JMeter's `plan`, playwright's
-`projectDir`, …) — says where a Test's files are. Every Test must set it
-(step 20h): a default like `projectDir: "."` would let a Test run whatever
-sits at the repository's root without saying so. Give it a
-`description` instead — the operator quotes it when a Test leaves the
-parameter out (`Ready=False`, reason `ParameterMissing`), and Control
-Center's wizard fills it from the Test's path in the repository.
+**Mark the main path parameter, and never default it.** The parameter
+your container puts right after `/data/repo/` — in the command, the
+arguments or `workingDir` (k6's `script`, JMeter's `plan`, playwright's
+`projectDir`, …) — says where a Test's files are. Mark it with `path:`:
+
+- `path: file` — the tool takes a file (a script, a plan, a collection).
+  Tests bring it from git (they must name it) or inline (then the first
+  file is it, nothing to name).
+- `path: directory` — the tool runs a project (package.json + config,
+  pom.xml, …). Tests bring it from git only; inline files report
+  `InlineNotSupported`.
+
+At most one parameter per template sets `path` (the CRD refuses more). No
+default (step 20h): `projectDir: "."` would let a Test run whatever sits at
+the repository's root without saying so. Give it a `description` — the
+operator quotes it when a git Test leaves the parameter out (`Ready=False`,
+reason `ParameterMissing`), and the wizard fills it from the Test's path in
+the repository.
 
 ```yaml
     projectDir:
       type: string
-      # Required, no default: a Test says where its files are (step 20h).
-      description: "The project (where package.json is), relative to the repository root (git) or to /data/repo (inline files); \".\" for the root itself."
+      path: directory   # the main path: a project, from git only
+      description: "The project (where package.json is), relative to the repository root; \".\" for the root itself."
 ```
 
 `internal/controller` tests every catalog template for this.

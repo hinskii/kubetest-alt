@@ -69,7 +69,7 @@ func scenarioCLI(t *testing.T, ctx context.Context, c client.Client) {
 			Spec: testsv1alpha1.TestSpec{
 				Container: testsv1alpha1.ContainerConfig{Image: "grafana/k6:1.4.0", Command: []string{"k6"},
 					Args: []string{"run", "/data/repo/script.js"}},
-				Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "repo/script.js", Content: script}}},
+				Content: testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "script.js", Content: script}}},
 			},
 		}))
 	}

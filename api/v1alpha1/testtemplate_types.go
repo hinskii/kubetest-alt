@@ -35,6 +35,8 @@ type TestTemplateSpec struct {
 	// +optional
 	Pod *PodConfig `json:"pod,omitempty"`
 
+	// +kubebuilder:validation:MaxProperties=128
+	// +kubebuilder:validation:XValidation:rule="self.filter(k, has(self[k].path)).size() <= 1",message="at most one config parameter may set path (the main path parameter)"
 	// +optional
 	Config map[string]Parameter `json:"config,omitempty"`
 

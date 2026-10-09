@@ -48,6 +48,8 @@ spec:
           value: kubetest-artifacts
         - name: KUBETEST_S3_ENDPOINT
           value: minio.kubetest.svc:9000
+        - name: KUBETEST_TESTDATA_DIR
+          value: /data/testdata
         - name: FEATURE_X
           value: "on"
         envFrom:

@@ -66,15 +66,14 @@ metadata:
   namespace: demo
 spec:
   use: [k6]                       # the catalog template: image, report, metrics, live view
-  config:
-    script: {type: string, default: hello.js}
+  config:                         # no script: with inline files, the first file is the script
     vus: {type: integer, default: "2"}
   container:
     env:                          # {{ }} works in args and env, not in file contents
       - {name: VUS, value: "{{ config.vus }}"}
   content:
     files:
-      - path: repo/hello.js       # lands at /data/repo/hello.js
+      - path: hello.js            # lands at /data/repo/hello.js
         content: |
           import http from 'k6/http';
           import { check, sleep } from 'k6';

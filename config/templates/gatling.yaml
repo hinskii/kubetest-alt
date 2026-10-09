@@ -56,8 +56,9 @@ spec:
     # Path to the Scala/Java simulations folder inside content-fetcher tree.
     simulationsFolder:
       type: string
-      # Required, no default: a Test says where its files are (step 20h).
-      description: "The folder with the simulations, relative to the repository root (git) or to /data/repo (inline files), e.g. gatling/user-files/simulations."
+      # The main path, a directory: a project, from git only. No default (steps 20h, 20i).
+      path: directory
+      description: "The folder with the simulations, relative to the repository root, e.g. gatling/user-files/simulations."
     # Fully-qualified simulation class (package.ClassName).
     simulation:
       type: string

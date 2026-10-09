@@ -46,6 +46,8 @@ spec:
           value: gcs
         - name: KUBETEST_STORAGE_BUCKET
           value: kubetest-artifacts
+        - name: KUBETEST_TESTDATA_DIR
+          value: /data/testdata
         - name: FEATURE_X
           value: "on"
         image: grafana/k6:2.2.0

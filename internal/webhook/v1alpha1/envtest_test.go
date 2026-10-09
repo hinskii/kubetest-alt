@@ -511,3 +511,40 @@ func TestMetricsFormatEnumMatchesParsers(t *testing.T) {
 	enum := findEnum(t, crd, "spec.versions[0].schema.openAPIV3Schema.properties.spec.properties.metrics.properties.from")
 	assert.ElementsMatch(t, report.Formats, enum)
 }
+
+// TestEnvtest_GitOrInline_Sentinel: git + inline files can't be expressed
+// in the schema — only the webhook refuses them (step 20i).
+func TestEnvtest_GitOrInline_Sentinel(t *testing.T) {
+	spec := baseValidWireSpec()
+	spec.Content = testsv1alpha1.Content{
+		Git:   &testsv1alpha1.GitContent{URI: "https://example.com/r.git"},
+		Files: []testsv1alpha1.FileContent{{Path: "extra.js", Content: "x"}},
+	}
+	err := k8sClient.Create(context.Background(), &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "git-and-inline", Namespace: "default"}, Spec: spec})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "one of them, not several")
+}
+
+// TestEnvtest_TestDataCollision_Sentinel: two testData entries on one
+// path pass the schema; the webhook refuses them.
+func TestEnvtest_TestDataCollision_Sentinel(t *testing.T) {
+	spec := baseValidWireSpec()
+	spec.Content.TestData = []testsv1alpha1.TestDataSource{{ConfigMap: "a"}, {Secret: "a"}}
+	err := k8sClient.Create(context.Background(), &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: "data-collision", Namespace: "default"}, Spec: spec})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "both land on /data/testdata/a")
+}
+
+// TestEnvtest_TwoMainPaths_CEL: the CRD's CEL rule allows one main path
+// parameter per object.
+func TestEnvtest_TwoMainPaths_CEL(t *testing.T) {
+	err := k8sClient.Create(context.Background(), &testsv1alpha1.TestTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "two-paths", Namespace: "default"},
+		Spec: testsv1alpha1.TestTemplateSpec{Config: map[string]testsv1alpha1.Parameter{
+			"script": {Type: "string", Path: "file"}, "dir": {Type: "string", Path: "directory"}}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at most one config parameter may set path")
+}

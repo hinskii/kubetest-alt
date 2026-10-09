@@ -49,6 +49,9 @@ const (
 	// ReasonPolicyDenied: the test pod asks for something the platform's
 	// test-pod policy forbids (service account, volume, privileges).
 	ReasonPolicyDenied = "PolicyDenied"
+	// ReasonTestDataMissing: a ConfigMap/Secret (or a key of it) in
+	// content.testData doesn't exist — the pod would hang on FailedMount.
+	ReasonTestDataMissing = "TestDataMissing"
 
 	// k8sReasonDeadlineExceeded is the string batch/v1 sets on JobCondition
 	// when activeDeadlineSeconds fires. Kept as an unexported const so goconst
