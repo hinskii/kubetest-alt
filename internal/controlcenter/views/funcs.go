@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
@@ -37,27 +38,30 @@ import (
 // escaper: html/template encodes values after "?" in URL attributes itself,
 // so escaping them again breaks the link.
 var funcs = template.FuncMap{
-	"when":         when,
-	"duration":     duration,
-	"phaseClass":   func(p any) string { return "status-" + fmt.Sprint(p) },
-	"terminal":     terminal,
-	"sortedKeys":   sortedKeys,
-	"toYAML":       toYAML,
-	"pathEscape":   url.PathEscape,
-	"canRun":       func(u auth.User) bool { return u.Can(auth.RoleDeveloper) },
-	"canDelete":    func(u auth.User) bool { return u.Can(auth.RoleAdmin) },
-	"hasPrefix":    strings.HasPrefix,
-	"artifactPath": artifactPath,
-	"pct":          pct,
-	"deltaMs":      deltaMs,
-	"sub":          func(a, b int) int { return a - b },
-	"dict":         dict,
-	"shortSHA":     shortSHA,
-	"commitURL":    commitURL,
-	"num":          FormatNumber,
-	"durationF":    func(ms float64) string { return duration(int64(math.Round(ms))) },
-	"inc":          func(n int) int { return n + 1 },
-	"runID":        RunID,
+	"when":       when,
+	"duration":   duration,
+	"phaseClass": func(p any) string { return "status-" + fmt.Sprint(p) },
+	"terminal":   terminal,
+	"sortedKeys": sortedKeys,
+	"toYAML":     toYAML,
+	// specYAML / highlightYAML: YAML for people, highlighted (Chroma).
+	"specYAML":      specYAML,
+	"highlightYAML": yamlview.Highlight,
+	"pathEscape":    url.PathEscape,
+	"canRun":        func(u auth.User) bool { return u.Can(auth.RoleDeveloper) },
+	"canDelete":     func(u auth.User) bool { return u.Can(auth.RoleAdmin) },
+	"hasPrefix":     strings.HasPrefix,
+	"artifactPath":  artifactPath,
+	"pct":           pct,
+	"deltaMs":       deltaMs,
+	"sub":           func(a, b int) int { return a - b },
+	"dict":          dict,
+	"shortSHA":      shortSHA,
+	"commitURL":     commitURL,
+	"num":           FormatNumber,
+	"durationF":     func(ms float64) string { return duration(int64(math.Round(ms))) },
+	"inc":           func(n int) int { return n + 1 },
+	"runID":         RunID,
 }
 
 // RunID is the id the API finds a run by: its name while the TestRun
@@ -272,4 +276,13 @@ func artifactPath(p string) string {
 		segs[i] = url.PathEscape(s)
 	}
 	return strings.Join(segs, "/")
+}
+
+// specYAML renders a TestSpec as highlighted YAML in reading order.
+func specYAML(v any) template.HTML {
+	out, err := yamlview.Format(v, yamlview.Spec)
+	if err != nil {
+		return template.HTML(template.HTMLEscapeString(err.Error())) // #nosec G203 -- escaped
+	}
+	return yamlview.Highlight(out)
 }

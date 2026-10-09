@@ -332,3 +332,11 @@ fieldset.params legend { font-weight: 600; padding: 0; }
 /* The hidden attribute wins over layout rules (.run-form is a grid,
    .choice a flex box): scripts hide sections with it. */
 [hidden] { display: none !important; }
+
+/* Highlighted code (Chroma, /static/highlight.css): a scrolling panel
+   with line numbers that copying leaves out. */
+.code-view { margin: 0.75rem 0 0; max-height: 32rem; overflow: auto; background: var(--surface-muted);
+  border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 0.8rem; line-height: 1.5; }
+.code-view pre { margin: 0; padding: 0.75rem 1rem; white-space: pre; }
+.code-view .ln { user-select: none; -webkit-user-select: none; display: inline-block; min-width: 2.2em; flex-shrink: 0;
+  margin-right: 1em; text-align: right; color: var(--muted); }

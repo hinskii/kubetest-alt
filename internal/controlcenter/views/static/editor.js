@@ -159,7 +159,7 @@
     }
     btn.hidden = false;
     btn.addEventListener("click", function () {
-      navigator.clipboard.writeText(src.textContent).then(function () {
+      navigator.clipboard.writeText(src.value !== undefined ? src.value : src.textContent).then(function () {
         btn.textContent = "Copied";
         setTimeout(function () { btn.textContent = "Copy YAML"; }, 1500);
       });

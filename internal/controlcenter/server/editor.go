@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
 )
@@ -707,37 +708,14 @@ func manifestOf(t *testsv1alpha1.Test) manifest {
 	return m
 }
 
-// manifestYAML renders a Test for Git, without the empty objects
-// ("resources: {}", "content: {}") the Go types leave behind.
+// manifestYAML renders a Test for Git, for people: keys in reading order,
+// scripts as | blocks, no empty objects (yamlview).
 func manifestYAML(t *testsv1alpha1.Test) string {
-	b, err := json.Marshal(manifestOf(t))
+	out, err := yamlview.Format(manifestOf(t), yamlview.Manifest)
 	if err != nil {
 		return err.Error()
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(b, &doc); err != nil {
-		return err.Error()
-	}
-	pruneEmpty(doc)
-	out, err := yaml.Marshal(doc)
-	if err != nil {
-		return err.Error()
-	}
-	return string(out)
-}
-
-// pruneEmpty drops empty objects, recursively; "spec: {}" stays. List
-// items are left alone: there an empty object can mean something
-// (a volume's "emptyDir: {}").
-func pruneEmpty(m map[string]any) {
-	for k, v := range m {
-		if v, ok := v.(map[string]any); ok {
-			pruneEmpty(v)
-			if len(v) == 0 && k != "spec" {
-				delete(m, k)
-			}
-		}
-	}
+	return out
 }
 
 // parseManifest reads the YAML mode's text onto base: its labels,

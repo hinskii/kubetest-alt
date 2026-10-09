@@ -193,7 +193,8 @@
     <h2>5. Review</h2>
     {{if $d.Preview}}
       {{template "check" $d}}
-      <pre class="code" id="yaml-preview">{{$d.Preview}}</pre>
+      <div class="code-view">{{highlightYAML $d.Preview}}</div>
+      <textarea id="yaml-preview" hidden readonly>{{$d.Preview}}</textarea>
       <div class="actions wrap">
         <button type="submit" name="action" value="save" class="button">{{if $d.Edit}}Save changes{{else}}Create test{{end}}</button>
         <button type="submit" name="action" value="download" class="button secondary">Download YAML</button>

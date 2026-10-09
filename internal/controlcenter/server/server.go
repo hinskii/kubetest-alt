@@ -33,6 +33,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 )
 
 // defaultProbeTimeout bounds one cluster health probe on the home page.
@@ -75,6 +76,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.home)
 	mux.Handle("GET /static/", views.Static())
+	// Highlighting styles, generated from Chroma's github / github-dark.
+	highlightCSS := []byte(yamlview.CSS())
+	mux.HandleFunc("GET /static/highlight.css", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		_, _ = w.Write(highlightCSS)
+	})
 	mux.HandleFunc("GET /healthz", ok)
 	// Local readiness only: one unreachable cluster must not take the
 	// whole UI out of the Service. Cluster health is on the home page
