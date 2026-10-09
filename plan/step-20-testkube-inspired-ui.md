@@ -443,8 +443,11 @@ We take that shape and keep what we do better (templates, inline scripts,
 dry run, YAML for Git).
 
 **Create: three short steps**
-1. *What do you test?* — name, namespace (suggested), the tool as cards
-   (k6, Playwright, JMeter, …, Own image).
+1. *What do you test?* — name, namespace (suggested), the tool from a
+   **drop-down list** (the namespace's catalog, "Own image" last) — not
+   tiles; one line under it says what the chosen tool is (its image, a
+   short description). The code's source (git / inline / none) is a plain
+   row of radio buttons, not cards.
 2. *Where is the test?* — asked the tool's way:
    - single-file tools: two big choices, **Paste the script** (one editor,
      nothing else) or **From Git** (repository, path, branch);
