@@ -108,8 +108,12 @@ jobs:
         run: |
           set -euo pipefail
           ./test/e2e/run.sh 2>&1 | tee /tmp/catalog.log
-          # Guard against a silent skip: the tool's timing marker must exist.
-          for marker in "${{ matrix.tool }}" "${{ matrix.tool }}-git"; do
+          # Guard against a silent skip: the tool's timing markers must exist.
+          # A project tool (main path a directory) runs from git only (step
+          # 20i): its inline case doesn't exist, the git one must.
+          markers="${{ matrix.tool }}-git"
+          grep -q "path: directory" "config/templates/${{ matrix.tool }}.yaml" || markers="${{ matrix.tool }} $markers"
+          for marker in $markers; do
             grep -q "CATALOG_TIMING tool=$marker " /tmp/catalog.log || {
               echo "::error::no CATALOG_TIMING marker for $marker — the case did not run"
               exit 1

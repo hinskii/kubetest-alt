@@ -108,8 +108,8 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	wizard := url.Values{
 		"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-k6"}, "template": {"k6"},
 		"param.k6.dashboardPeriod": {"1s"},
-		// Just the inline file: the wizard points k6's script at it.
-		"useFiles": {"1"}, "file.path": {"live.js"},
+		// Just the inline file: no script parameter — the first file is it.
+		"source": {"inline"}, "file.path": {"live.js"},
 		"file.content": {"import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"},
 	}
 	newPage := ccPage(t, ui+"/clusters/local/tests/new?namespace="+workloadNS, ccDeveloper)
@@ -133,7 +133,9 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	test := &testsv1alpha1.Test{}
 	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, test))
 	assert.Equal(t, "ui", test.Labels["app.kubernetes.io/managed-by"])
-	assert.Equal(t, "live.js", test.Spec.Config["script"].Default)
+	assert.NotContains(t, test.Spec.Config, "script", "inline: the Test names no path (step 20i)")
+	require.Len(t, test.Spec.Content.Files, 1)
+	assert.Equal(t, "live.js", test.Spec.Content.Files[0].Path)
 
 	tests := ccPage(t, ui+"/clusters/local", ccDeveloper)
 	assert.Contains(t, tests, ">e2e-cc-k6<")
