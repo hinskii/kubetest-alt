@@ -118,8 +118,8 @@
           <option value="dir"{{if eq .Where "dir"}} selected{{end}}>all keys in a directory</option>
           <option value="files"{{if eq .Where "files"}} selected{{end}}>keys as single files</option>
         </select></label>
-        <label><span>Directory <span class="muted">absolute, empty or new — never over files of the code</span></span><input type="text" name="td.mountPath" value="{{.MountPath}}" placeholder="/data/repo/e2e/data" class="mono" autocomplete="off"></label>
-        <label><span>Files <span class="muted">key=/absolute/path per line; replaces those files only</span></span><textarea name="td.items" rows="2" class="mono" placeholder="env=/data/repo/e2e/.env">{{.Items}}</textarea></label>
+        <label data-where="dir"><span>Directory <span class="muted">absolute, empty or new — never over files of the code</span></span><input type="text" name="td.mountPath" value="{{.MountPath}}" placeholder="/data/repo/e2e/data" class="mono" autocomplete="off"></label>
+        <label data-where="files"><span>Files <span class="muted">key=/absolute/path per line; replaces those files only</span></span><textarea name="td.items" rows="2" class="mono" placeholder="env=/data/repo/e2e/.env">{{.Items}}</textarea></label>
       </div>
       {{end}}
       <button type="button" class="button secondary" id="add-data" hidden>Add test data</button>

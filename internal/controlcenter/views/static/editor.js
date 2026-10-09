@@ -86,6 +86,19 @@
   radios.forEach(function (r) { r.addEventListener("change", syncSource); });
   syncSource();
 
+  // A test-data row shows the field its "Where" needs: a directory, or
+  // the key=path lines — nothing for the default directory.
+  function syncWhere(row) {
+    var where = row.querySelector('select[name="td.where"]').value;
+    row.querySelectorAll("[data-where]").forEach(function (el) {
+      el.hidden = el.getAttribute("data-where") !== where;
+    });
+  }
+  form.addEventListener("change", function (e) {
+    if (e.target.name === "td.where") syncWhere(e.target.closest(".data-row"));
+  });
+  form.querySelectorAll(".data-row").forEach(syncWhere);
+
   // More test-data rows.
   var data = document.getElementById("test-data");
   var addData = document.getElementById("add-data");
@@ -97,6 +110,7 @@
       row.querySelectorAll("input, textarea").forEach(function (el) { el.value = ""; });
       row.querySelectorAll("select").forEach(function (el) { el.selectedIndex = 0; });
       data.insertBefore(row, addData);
+      syncWhere(row);
       row.querySelector('input[name="td.name"]').focus();
     });
   }

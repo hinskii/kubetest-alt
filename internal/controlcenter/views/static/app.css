@@ -328,3 +328,7 @@ fieldset.params legend { font-weight: 600; padding: 0; }
 .notice.warning { background: var(--warning-bg); color: var(--warning-text); }
 .notice.warning ul { margin: 0.4rem 0 0; padding-left: 1.2rem; }
 .chip.warning { background: var(--warning-bg); color: var(--warning-text); }
+
+/* The hidden attribute wins over layout rules (.run-form is a grid,
+   .choice a flex box): scripts hide sections with it. */
+[hidden] { display: none !important; }

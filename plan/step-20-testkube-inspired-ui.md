@@ -13,7 +13,7 @@ banners, a SPA. Control Center stays server-rendered html/template with
 small same-origin scripts (CSP: no inline script), stateless (no database),
 and every page keeps working without JavaScript.
 
-Order: 20h (done) → 20i → 20a … 20g, one commit each, gates green before the next
+Order: 20h, 20i (done) → 20j → 20a … 20g, one commit each, gates green before the next
 (`make lint test test-coverage openapi-check`; e2e in CI).
 
 ---
@@ -430,6 +430,61 @@ only explicitly (`items`), and hiding repository files is an error.
   pasted k6 script creates a Test with no `script` in its config.
 - Catalog e2e green: directory tools from git, single-file inline, one
   `testData` case.
+
+---
+
+## 20j — A wizard people can follow; details in the Test's Settings
+
+20i's wizard put a dozen fields on one step (git, token, sparse paths,
+test data with mountPath / key=path) and its jargon (`/data/repo`,
+sparse, mountPath) up front. Testkube's dashboard creates a Test from two
+fields and keeps the rest in the Test's *Settings*, split in sections.
+We take that shape and keep what we do better (templates, inline scripts,
+dry run, YAML for Git).
+
+**Create: three short steps**
+1. *What do you test?* — name, namespace (suggested), the tool as cards
+   (k6, Playwright, JMeter, …, Own image).
+2. *Where is the test?* — asked the tool's way:
+   - single-file tools: two big choices, **Paste the script** (one editor,
+     nothing else) or **From Git** (repository, path, branch);
+   - project tools: git fields only, no choice shown;
+   - own image: image and command (+ optional git).
+   A private repository's token sits behind "Private repository?".
+3. *Parameters* — the tool's parameters only; **Create test**; the YAML
+   and **Download YAML** behind "Show YAML". The dry run still checks it.
+
+**Everything else: the Test page's Settings tab** (GUI-managed Tests;
+read-only view for Git-managed ones), sections as in Testkube:
+- *General* — name/description, labels;
+- *Source* — git (repository, revision, path, sparse paths, token) or
+  inline files (editor per file, add/remove);
+- *Test data* — "Add test data"; a row is kind + name; "Where" reveals one
+  field only when needed (a directory; or key → path rows, not key=path
+  text);
+- *Parameters*, *Resources*, *Pod* (annotations, labels, service
+  account), *Schedule*, *Timeout*;
+- *YAML* — the full Test, editable (what the wizard's YAML mode does).
+Each section saves on its own (a merge patch of that part, conditional on
+the version shown — as the edit wizard does today).
+
+**Language:** no `/data/repo`, sparse or mountPath in the primary UI;
+plain words ("the folder with your tests", "replace a file in the
+repository"); the technical terms only in the advanced fields' help.
+
+**Bug fixed with it (shipped ahead):** sections the scripts hide stayed
+visible — layout CSS (`display: grid/flex`) beat the `hidden`
+attribute; test-data rows showed every field.
+
+**Acceptance**
+- Creating an inline k6 Test: name, k6, paste, Create — three screens, no
+  other field touched.
+- Creating a Playwright Test from git: name, Playwright, repo + path,
+  Create.
+- Settings: each section saves alone and keeps the others; Git-managed
+  Tests read-only with Duplicate.
+- Page tests for every section; a browser check (headless Chrome over
+  CDP, as for refresh.js) of the step flow and the hidden sections.
 
 ---
 
