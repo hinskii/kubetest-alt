@@ -468,6 +468,37 @@ read-only view for Git-managed ones), sections as in Testkube:
 Each section saves on its own (a merge patch of that part, conditional on
 the version shown — as the edit wizard does today).
 
+**Layout: a narrow form, the YAML growing beside it**
+- Two columns on wide screens: the form in a narrow column (~34rem — one
+  field per line, nothing to scan sideways), and beside it a sticky panel
+  with the Test's YAML, rebuilt as you type. Narrow screens: one column,
+  the YAML in a collapsible panel under the form.
+- Live: on input (debounced ~300 ms) the page posts the form to
+  `…/tests/new/yaml` (and `…/edit/yaml`), which runs the same Go `build`
+  as Create and returns the YAML — one implementation, no JavaScript copy
+  of the rules that could drift. Problems show beside the field they
+  belong to, the YAML keeps its last good state. The dry run through the
+  webhooks stays on Create (and on demand: "Check").
+- Without JavaScript: the YAML appears on the review step, as now.
+
+**YAML that reads well**
+- Formatted for people, not alphabetically: `apiVersion`, `kind`,
+  `metadata` (name, namespace, labels), then `spec` in a fixed order —
+  `use`, `config`, `content`, `container`, `pod`, `timeout`, `schedule`,
+  the rest after. Multi-line strings (inline scripts) as `|` block
+  scalars, not escaped one-liners; empty objects dropped (as now).
+  Built on yaml.v3 nodes from the JSON encoding.
+- Highlighted: keys, strings, numbers/booleans, comments, list dashes,
+  block scalars — rendered server-side into `<span>`s (a small Go
+  tokenizer for the YAML we emit; no CDN, CSP stays 'self'), themed for
+  light and dark. The same component shows YAML everywhere: the wizard's
+  panel, the Test page's Definition, Settings → YAML, the run's resolved
+  spec. Copy and Download buttons on the panel.
+- Editing YAML (Settings → YAML, the wizard's YAML mode): a textarea over
+  the highlighted copy (the overlay technique: transparent text, same
+  font and metrics), line numbers, Tab indents two spaces; the server
+  still parses strictly and points at the line on error.
+
 **Language:** no `/data/repo`, sparse or mountPath in the primary UI;
 plain words ("the folder with your tests", "replace a file in the
 repository"); the technical terms only in the advanced fields' help.
@@ -485,6 +516,10 @@ attribute; test-data rows showed every field.
   Tests read-only with Duplicate.
 - Page tests for every section; a browser check (headless Chrome over
   CDP, as for refresh.js) of the step flow and the hidden sections.
+- The YAML endpoint returns the same YAML as Create; key order and block
+  scalars golden-tested; the highlighter's output for every token kind;
+  the live panel updates in a browser check (type in the form → the
+  YAML changes, an error shows by its field).
 
 ---
 
