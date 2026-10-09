@@ -267,9 +267,12 @@ content:
         ...
   # data — allowed with either
   testData:
-    - configMap: products-stage           # → /data/testdata/products-stage/<key>
-    - secret: shop-test-account           # → /data/testdata/shop-test-account/env
-      keys: [env]                         # optional: only these keys
+    - configMap: products-stage           # default → /data/testdata/products-stage/<key>
+    - configMap: products-stage
+      mountPath: /data/repo/e2e/web/data  # all keys as files in this directory
+    - secret: shop-test-account
+      items:                              # single files at exact paths
+        - {key: env, path: /data/repo/e2e/web/.env}
 ```
 
 - `content.git` and `content.files` are mutually exclusive (Test webhook:
@@ -278,17 +281,35 @@ content:
   `content` (required). `contentFrom` leaves `files` — cluster data is
   `testData`.
 - `testData[]`: exactly one of `configMap` / `secret` (a name in the
-  Test's namespace), optional `keys`. The whole object by default.
-  Webhook: no two entries with the same name (they'd share a directory).
+  Test's namespace); where it lands — at most one of:
+  - nothing: `/data/testdata/<name>/<key>` (the default, recommended for
+    new Tests);
+  - `mountPath`: a directory, all keys as files in it (the user's choice,
+    so existing tests don't have to change where they read);
+  - `items: [{key, path}]`: chosen keys as single files at exact paths
+    (subPath mounts) — the only way to replace a file of the repository,
+    and it shows in the YAML.
+  Field names as in Kubernetes volumes. Webhook: absolute paths, no `..`;
+  not into the platform's directories (`/kubetest-bin`, `/etc/kubetest`,
+  the result directory); no two entries on the same path (nor two
+  default entries with the same name); not `mountPath` and `items`
+  together.
 - Tarballs stay as they are (code source, exclusive with git and files
   too — one code source).
 
 ### Where things are in the pod
 
 - Code: always `/data/repo` (git checkout or inline files).
-- Data: always `/data/testdata/<object name>/<key>`; env
-  `KUBETEST_TESTDATA_DIR=/data/testdata` in the test container. Data never
-  overlays the code.
+- Data: by default `/data/testdata/<object name>/<key>`, env
+  `KUBETEST_TESTDATA_DIR=/data/testdata`; else where `mountPath` / `items`
+  say.
+- **No silent shadowing.** A `mountPath` hides whatever the directory held
+  (any Kubernetes mount does). So after the checkout, the content fetcher
+  checks every `mountPath`: if it exists in /data and isn't empty, the run
+  fails at once — "testData products-stage: mountPath
+  /data/repo/e2e/web/data would hide 3 files from the repository — mount
+  single files with items, or pick an empty directory". `items` replace
+  exactly the files they name, nothing else.
 - `testData` is mounted as read-only ConfigMap/Secret volumes (not copied
   through env vars as `contentFrom` is today): no env-size limit, a
   Secret never passes through the environment. Pod policy already admits
@@ -350,15 +371,18 @@ TestWorkflows allow git + inline files + files from ConfigMaps together
 in one `/data`, files overlaying the checkout (e.g. swapping a config
 file). We don't: one code source, data apart, nothing overwritten
 silently, paths predictable from the YAML. What overlays are mostly used
-for — data, config, secrets for a git Test — is `testData`. If replacing
-a file inside the repository is ever needed, it comes back as an explicit
-opt-in on `testData` (e.g. `overlay: <path>`), visible in the YAML.
+for — data, config, secrets for a git Test — is `testData`, which can land
+where the test already reads (`mountPath`, `items`), so tests moving from
+Testkube don't have to change. Replacing a repository file is possible
+only explicitly (`items`), and hiding repository files is an error.
 
 ### Control Center (wizard)
 
 - *Source* is a choice: Git | Inline files (| none for an own image).
   Inline isn't offered for `directory` templates.
-- A *Test data* section: rows of ConfigMap / Secret + name + optional keys.
+- A *Test data* section: rows of ConfigMap / Secret + name, and where:
+  the default directory, a directory (`mountPath`) or single files
+  (`items`); the review explains the shadowing rule.
   Names are typed — the API doesn't list ConfigMaps or Secrets, so the API
   server gets no new permissions (none on Secrets).
 - The run page shows the Test's data sources (names only).
@@ -390,15 +414,18 @@ opt-in on `testData` (e.g. `overlay: <path>`), visible in the YAML.
 ### Acceptance
 
 - Webhook sentinels (rules the schema can't express): git + files refused;
-  duplicate `testData` names refused; old `contentFrom` / `repo/` shapes
-  refused with the rewrite.
+  `testData` path collisions and `mountPath`+`items` refused; platform
+  directories refused; old `contentFrom` / `repo/` shapes refused with the
+  rewrite.
+- Content fetcher: a `mountPath` over a non-empty directory of the
+  checkout fails with the files counted; an empty or missing one passes.
 - CEL: two `path` parameters in a template refused (envtest).
 - Resolver: inline main file = first file; explicit wins; `directory` +
   inline → error.
 - Controller (envtest): `InlineNotSupported`; inline single-file Test
   without the parameter → `Resolved`.
-- Compiler: `testData` volumes and mounts, read-only, keys honoured,
-  `KUBETEST_TESTDATA_DIR`.
+- Compiler: `testData` volumes and mounts, read-only — default directory,
+  `mountPath`, `items` as subPath mounts; `KUBETEST_TESTDATA_DIR`.
 - Wizard: Source choice, Test data rows, no inline for project tools; a
   pasted k6 script creates a Test with no `script` in its config.
 - Catalog e2e green: directory tools from git, single-file inline, one
