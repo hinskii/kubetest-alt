@@ -18,6 +18,7 @@ package server
 
 import (
 	"context"
+	"html"
 	"net/http"
 	"net/url"
 	"strings"
@@ -78,7 +79,8 @@ func TestEditor_NewTestFromTemplate(t *testing.T) {
 	page := w.get(t, newURL+"?namespace=team-a", developer)
 	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
 	body := page.Body.String()
-	assert.Contains(t, body, `name="template" value="k6"`)
+	assert.Contains(t, body, `<select name="template" id="tool">`, "the tool is a drop-down list")
+	assert.Contains(t, body, `<option value="k6"`)
 	assert.Contains(t, body, `name="param.k6.vus" value="10"`)
 	assert.Contains(t, body, `<option value="team-a">`, "namespaces with Tests are suggested")
 
@@ -223,7 +225,7 @@ spec:
 	back := w.post(t, newURL, developer, url.Values{"action": {actToForm}, "mode": {"yaml"},
 		"yaml": {strings.Replace(yamlText, "with-services", "again", 1)}}).Body.String()
 	assert.Contains(t, back, `name="name" value="again"`)
-	assert.Contains(t, back, `value="k6" checked`)
+	assert.Contains(t, back, `<option value="k6" selected`)
 }
 
 func TestEditor_GitOpsTestIsDuplicatedNotEdited(t *testing.T) {
@@ -411,4 +413,43 @@ func TestTestPages_NotReady(t *testing.T) {
 	page := w.get(t, clusterURL+"/tests/team-a/smoke", developer).Body.String()
 	assert.Contains(t, page, "Not ready to run:</strong> set spec.config.script: The k6 script.")
 	assert.Contains(t, page, `/tests/team-a/smoke/edit">edit the Test</a>`)
+}
+
+func TestEditor_LiveYAML(t *testing.T) {
+	w := newWorld(t, k6Template())
+	live := newURL + "/yaml"
+	rec := w.post(t, live, developer, wizardForm(actPreview))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	body := rec.Body.String()
+	assert.NotContains(t, body, "<html", "a fragment, not a page")
+	assert.Contains(t, body, `class="chroma"`, "highlighted")
+	assert.Contains(t, body, `<textarea id="yaml-live-raw" hidden readonly>`)
+
+	// The same YAML Create's download gives.
+	dl := w.post(t, newURL, developer, wizardForm(actDownload)).Body.String()
+	assert.Contains(t, body, html.EscapeString(dl), "the preview is what Create writes")
+
+	// Incomplete: the YAML so far, and what is missing under it.
+	bad := wizardForm(actPreview)
+	bad.Set("name", "Bad_Name")
+	rec = w.post(t, live, developer, bad)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), "1 to fill in before it can be created")
+	assert.Contains(t, rec.Body.String(), "yaml-live-raw", "the YAML builds while the form is incomplete")
+
+	// Broken YAML (YAML mode) can't be built: 422, the page keeps the last.
+	rec = w.post(t, live, developer, url.Values{"mode": {"yaml"}, "yaml": {"kind: [unclosed"}})
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "yaml-live-raw")
+
+	// Editing: the same for a Test's edit page; viewers can't.
+	existing := smokeTest()
+	existing.Spec.Use = []string{"k6"}
+	existing.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string", Default: "a.js"}}
+	w = newWorld(t, existing, k6Template())
+	form := url.Values{"mode": {"form"}, "template": {"k6"}, "param.k6.script": {"b.js"}}
+	rec = w.post(t, clusterURL+"/tests/team-a/smoke/edit/yaml", developer, form)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), "b.js")
+	assert.Equal(t, http.StatusForbidden, w.post(t, clusterURL+"/tests/team-a/smoke/edit/yaml", "someone@example.com", form).Code)
 }

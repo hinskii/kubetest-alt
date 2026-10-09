@@ -47,6 +47,10 @@ var funcs = template.FuncMap{
 	// specYAML / highlightYAML: YAML for people, highlighted (Chroma).
 	"specYAML":      specYAML,
 	"highlightYAML": yamlview.Highlight,
+	// yamlPanel is the wizard's live YAML panel model, for its first render.
+	"yamlPanel": func(yaml string, errs, warns []string) map[string]any {
+		return map[string]any{"YAML": yaml, "Errors": errs, "Warnings": warns}
+	},
 	// highlightCSS is the highlighting stylesheet's URL, versioned.
 	"highlightCSS": func() string { return "/static/highlight.css?v=" + yamlview.CSSVersion() },
 	"pathEscape":   url.PathEscape,

@@ -113,7 +113,7 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 		"file.content": {"import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"},
 	}
 	newPage := ccPage(t, ui+"/clusters/local/tests/new?namespace="+workloadNS, ccDeveloper)
-	assert.Contains(t, newPage, `name="template" value="k6"`, "the catalog of the namespace")
+	assert.Contains(t, newPage, `<option value="k6"`, "the catalog of the namespace")
 	wizard.Set("action", "preview")
 	review := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, wizard)
 	reviewBody, _ := io.ReadAll(review.Body)

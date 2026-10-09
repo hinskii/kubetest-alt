@@ -97,6 +97,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitNewTest)))
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
+	mux.Handle("POST /clusters/{cluster}/tests/new/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestYAML)))
+	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/delete", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.deleteTest)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)

@@ -340,3 +340,27 @@ fieldset.params legend { font-weight: 600; padding: 0; }
 .code-view pre { margin: 0; padding: 0.75rem 1rem; white-space: pre; }
 .code-view .ln { user-select: none; -webkit-user-select: none; display: inline-block; min-width: 2.2em; flex-shrink: 0;
   margin-right: 1em; text-align: right; color: var(--muted); }
+
+/* Test editor, step 20j: a narrow form, the YAML growing beside it. */
+.editor-layout { display: grid; grid-template-columns: minmax(0, 34rem) minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+.editor-layout.yaml-mode { grid-template-columns: minmax(0, 1fr); }
+.editor-layout .run-form { grid-template-columns: minmax(0, 1fr); }
+.editor-layout .choices { grid-template-columns: minmax(0, 1fr); }
+.yaml-panel { position: sticky; top: 1rem; margin-top: 1.25rem; max-height: calc(100vh - 2rem); overflow: auto;
+  padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.yaml-panel .code-view { max-height: none; }
+.yaml-panel-head { display: flex; align-items: center; gap: 0.6rem; }
+.yaml-panel-head .button { margin-left: auto; }
+.small-button { padding: 0.25rem 0.7rem; font-size: 0.8rem; }
+.panel-errors, .panel-warnings { margin: 0.6rem 0 0; padding: 0.5rem 0.8rem; border-radius: 8px; font-size: 0.85rem; }
+.panel-errors ul, ul.panel-warnings { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+ul.panel-warnings { padding-left: 1.6rem; }
+.panel-errors { background: var(--danger-bg); color: var(--danger-text); }
+.panel-warnings { background: var(--warning-bg); color: var(--warning-text); }
+.radio-row { display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; margin: 0.6rem 0; }
+.radio-row label { display: inline-flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.field select { width: 100%; }
+@media (max-width: 1000px) {
+  .editor-layout { grid-template-columns: minmax(0, 1fr); }
+  .yaml-panel { position: static; max-height: none; }
+}

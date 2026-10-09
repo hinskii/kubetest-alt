@@ -39,13 +39,20 @@
   form.classList.add("js");
   show(current);
 
-  // The chosen template's parameters only; the image hint follows it.
-  var radios = Array.prototype.slice.call(form.querySelectorAll('input[name="template"]'));
+  // The chosen tool's parameters only; the image hint follows it.
+  var tool = document.getElementById("tool");
+  var toolHint = document.getElementById("tool-hint");
   var image = form.querySelector('input[name="image"]');
   var hint = form.querySelector('[data-hint="image"]');
+  function chosenTool() {
+    return tool && tool.selectedIndex >= 0 ? tool.options[tool.selectedIndex] : null;
+  }
   function chooseTemplate() {
-    var chosen = radios.filter(function (r) { return r.checked; })[0];
+    var chosen = chosenTool();
     var name = chosen ? chosen.value : "";
+    if (toolHint) {
+      toolHint.textContent = chosen && chosen.getAttribute("data-image") ? "image " + chosen.getAttribute("data-image") : "";
+    }
     form.querySelectorAll("fieldset.params").forEach(function (fs) {
       var mine = fs.getAttribute("data-template") === name;
       fs.hidden = !mine;
@@ -58,7 +65,7 @@
       hint.textContent = name ? "empty: the template's" : "required";
     }
   }
-  radios.forEach(function (r) { r.addEventListener("change", chooseTemplate); });
+  if (tool) tool.addEventListener("change", chooseTemplate);
   chooseTemplate();
 
   // The code's source: git, inline files or none — one at a time. A
@@ -67,7 +74,7 @@
   var inlineChoice = document.getElementById("source-inline");
   var projectNote = document.getElementById("project-note");
   function syncSource() {
-    var chosen = radios.filter(function (r) { return r.checked; })[0];
+    var chosen = chosenTool();
     var project = chosen && chosen.getAttribute("data-main-kind") === "directory";
     var inline = inlineChoice && inlineChoice.querySelector("input");
     if (inline) {
@@ -83,8 +90,51 @@
     });
   }
   sources.forEach(function (r) { r.addEventListener("change", syncSource); });
-  radios.forEach(function (r) { r.addEventListener("change", syncSource); });
+  if (tool) tool.addEventListener("change", syncSource);
   syncSource();
+
+  // The YAML beside the form, rebuilt as you type: the server builds it
+  // with the code Create uses (no copy of the rules here). With problems
+  // it answers 422 and the problems; the last good YAML stays.
+  var panel = document.getElementById("yaml-panel");
+  var live = document.getElementById("yaml-live");
+  if (panel && live && window.fetch) {
+    var timer = null;
+    var seq = 0;
+    var update = function () {
+      var mine = ++seq;
+      var body = new URLSearchParams(new FormData(form));
+      body.delete("action");
+      fetch(panel.getAttribute("data-src"), {
+        method: "POST", credentials: "same-origin", body: body,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      }).then(function (resp) {
+        return resp.text().then(function (html) { return { ok: resp.ok, status: resp.status, html: html }; });
+      }).then(function (res) {
+        if (mine !== seq) return; // a newer edit is on its way
+        var fresh = document.createElement("div");
+        fresh.innerHTML = res.html;
+        if (res.ok) {
+          live.innerHTML = fresh.innerHTML;
+        } else if (res.status === 422) {
+          live.querySelectorAll(".panel-errors, .panel-warnings").forEach(function (el) { el.remove(); });
+          Array.prototype.slice.call(fresh.querySelectorAll(".panel-errors, .panel-warnings")).reverse().forEach(function (el) {
+            live.insertBefore(el, live.firstChild);
+          });
+        }
+        var copy = panel.querySelector("[data-copy]");
+        if (copy) copy.hidden = !document.getElementById("yaml-live-raw");
+      }).catch(function () { /* keep what is shown */ });
+    };
+    var schedule = function (e) {
+      if (e && e.target && e.target.name === "yaml") return;
+      clearTimeout(timer);
+      timer = setTimeout(update, 300);
+    };
+    form.addEventListener("input", schedule);
+    form.addEventListener("change", schedule);
+    update();
+  }
 
   // A test-data row shows the field its "Where" needs: a directory, or
   // the key=path lines — nothing for the default directory.
@@ -152,16 +202,18 @@
   }
 
   // Copy the YAML for Git.
-  form.querySelectorAll("[data-copy]").forEach(function (btn) {
-    var src = document.getElementById(btn.getAttribute("data-copy"));
-    if (!src || !navigator.clipboard) {
-      return;
-    }
-    btn.hidden = false;
+  document.querySelectorAll("[data-copy]").forEach(function (btn) {
+    if (!navigator.clipboard) return;
+    var label = btn.textContent;
+    // Looked up on click: the live panel replaces its YAML as you type.
+    var source = function () { return document.getElementById(btn.getAttribute("data-copy")); };
+    btn.hidden = !source();
     btn.addEventListener("click", function () {
+      var src = source();
+      if (!src) return;
       navigator.clipboard.writeText(src.value !== undefined ? src.value : src.textContent).then(function () {
         btn.textContent = "Copied";
-        setTimeout(function () { btn.textContent = "Copy YAML"; }, 1500);
+        setTimeout(function () { btn.textContent = label; }, 1500);
       });
     });
   });

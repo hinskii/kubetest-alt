@@ -208,51 +208,105 @@ func (s *Server) submitEditTest(w http.ResponseWriter, r *http.Request) {
 	s.submitEditor(w, r, true)
 }
 
-// submitEditor handles every button of the wizard: preview (dry run),
-// save, download the YAML, switch between form and YAML.
-func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool) {
+// editorState is a submitted wizard: the form, the page's data, the Test
+// being edited (or an empty one), the namespace's catalog and the Test the
+// form describes (nil when it has errors).
+type editorState struct {
+	c         *clusters.Cluster
+	client    *apiclient.Client
+	f         testForm
+	data      editorData
+	base      *testsv1alpha1.Test
+	templates []testsv1alpha1.TestTemplate
+	t         *testsv1alpha1.Test
+}
+
+// prepareEditor reads a submitted wizard and builds the Test it
+// describes — shared by every button and by the live YAML, so the preview
+// is what Create would write. false: an error page was written.
+func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request, edit bool) (*editorState, bool) {
 	c, ok := s.cluster(w, r)
 	if !ok {
-		return
+		return nil, false
 	}
 	if err := r.ParseForm(); err != nil {
 		s.renderError(w, r, http.StatusBadRequest, "Unreadable form: "+err.Error())
-		return
+		return nil, false
 	}
-	client := api(r, c)
-	f := formFromValues(r.PostForm)
-	data := editorData{Cluster: c.Name, Edit: edit, Action: newTestPath(c.Name), Back: clusterPath(c.Name), Step: stepReview}
-	base := &testsv1alpha1.Test{}
+	st := &editorState{c: c, client: api(r, c), f: formFromValues(r.PostForm), base: &testsv1alpha1.Test{}}
+	st.data = editorData{Cluster: c.Name, Edit: edit, Action: newTestPath(c.Name), Back: clusterPath(c.Name), Step: stepReview}
 	if edit {
 		ns, name := r.PathValue("ns"), r.PathValue("name")
-		current, err := client.GetTest(r.Context(), ns, name)
+		current, err := st.client.GetTest(r.Context(), ns, name)
 		if err != nil {
 			s.apiError(w, r, c, err)
-			return
+			return nil, false
 		}
-		base = current
-		f.Namespace, f.Name = ns, name
-		data.Action, data.Back = testPath(c.Name, ns, name)+"/edit", testPath(c.Name, ns, name)
-		data.YAMLOnly = formUnsupported(current)
+		st.base = current
+		st.f.Namespace, st.f.Name = ns, name
+		st.data.Action, st.data.Back = testPath(c.Name, ns, name)+"/edit", testPath(c.Name, ns, name)
+		st.data.YAMLOnly = formUnsupported(current)
 	}
-	action := r.PostForm.Get("action")
-	var t *testsv1alpha1.Test
-	if f.Mode == modeYAML {
-		if t, data.Errors = parseManifest(f.YAML, base); t != nil {
-			f.Namespace = t.Namespace
+	if st.f.Mode == modeYAML {
+		if st.t, st.data.Errors = parseManifest(st.f.YAML, st.base); st.t != nil {
+			st.f.Namespace = st.t.Namespace
 		}
 	}
-	var templates []testsv1alpha1.TestTemplate
-	if f.Namespace != "" {
+	if st.f.Namespace != "" {
 		var err error
-		if templates, err = client.ListTemplates(r.Context(), f.Namespace); err != nil {
-			data.TemplatesErr = messageOf(err)
+		if st.templates, err = st.client.ListTemplates(r.Context(), st.f.Namespace); err != nil {
+			st.data.TemplatesErr = messageOf(err)
 		}
-		data.Templates = templateOptions(templates, f)
+		st.data.Templates = templateOptions(st.templates, st.f)
 	}
-	if f.Mode == modeForm {
-		t, data.Errors, data.Warnings = f.build(base, findTemplate(templates, f.Template))
+	if st.f.Mode == modeForm {
+		st.t, st.data.Errors, st.data.Warnings = st.f.build(st.base, findTemplate(st.templates, st.f.Template))
 	}
+	return st, true
+}
+
+// yamlPanel is the live YAML beside the wizard.
+type yamlPanel struct {
+	YAML             string
+	Errors, Warnings []string
+}
+
+// editorYAML answers the wizard's live preview: the YAML the form would
+// create, highlighted — while the form is still incomplete too, with what
+// is missing listed under it (people fill it in step by step). Only a
+// Test that can't be built at all (broken YAML) is 422, and the page keeps
+// the last YAML. No dry run: that stays on Create.
+func (s *Server) editorYAML(w http.ResponseWriter, r *http.Request, edit bool) {
+	st, ok := s.prepareEditor(w, r, edit)
+	if !ok {
+		return
+	}
+	panel, status := yamlPanel{Errors: st.data.Errors, Warnings: st.data.Warnings}, http.StatusOK
+	if st.t == nil {
+		status = http.StatusUnprocessableEntity
+	} else {
+		panel.YAML = manifestYAML(st.t)
+	}
+	if err := s.Views.RenderFragment(w, status, "editor", "yaml-panel", panel); err != nil {
+		s.Log.Error("render failed", "fragment", "yaml-panel", "err", err)
+	}
+}
+
+// newTestYAML: POST /tests/new/yaml.
+func (s *Server) newTestYAML(w http.ResponseWriter, r *http.Request) { s.editorYAML(w, r, false) }
+
+// editTestYAML: POST /tests/{ns}/{name}/edit/yaml.
+func (s *Server) editTestYAML(w http.ResponseWriter, r *http.Request) { s.editorYAML(w, r, true) }
+
+// submitEditor handles every button of the wizard: preview (dry run),
+// save, download the YAML, switch between form and YAML.
+func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool) {
+	st, ok := s.prepareEditor(w, r, edit)
+	if !ok {
+		return
+	}
+	c, client, f, data, base, templates, t := st.c, st.client, st.f, st.data, st.base, st.templates, st.t
+	action := r.PostForm.Get("action")
 	switch {
 	case action == actToYAML && len(data.Errors) == 0:
 		f.Mode, f.YAML = modeYAML, manifestYAML(t)

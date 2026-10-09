@@ -110,6 +110,23 @@ func (v *Views) Render(w http.ResponseWriter, status int, name string, p Page) e
 	return err
 }
 
+// RenderFragment writes one named template of a page, without the
+// layout — a part of the page a script swaps in (the wizard's live YAML).
+func (v *Views) RenderFragment(w http.ResponseWriter, status int, page, name string, data any) error {
+	t, ok := v.pages[page]
+	if !ok {
+		return fmt.Errorf("views: unknown page %q", page)
+	}
+	var buf bytes.Buffer
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
+		return fmt.Errorf("views: render %s/%s: %w", page, name, err)
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 // Static serves the embedded assets; mount it at /static/.
 func Static() http.Handler {
 	sub, err := fs.Sub(staticFS, "static")

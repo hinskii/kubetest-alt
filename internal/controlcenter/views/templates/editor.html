@@ -13,6 +13,7 @@
 </div>
 {{end}}
 
+<div class="editor-layout{{if eq $f.Mode "yaml"}} yaml-mode{{end}}">
 <form method="post" action="{{$d.Action}}" class="wizard" id="wizard" novalidate data-step="{{$d.Step}}" data-mode="{{$f.Mode}}">
   <input type="hidden" name="mode" value="{{$f.Mode}}">
   <input type="hidden" name="resourceVersion" value="{{$f.ResourceVersion}}">
@@ -59,21 +60,17 @@
     </div>
     {{end}}
 
-    <h3>Tool</h3>
     {{with $d.TemplatesErr}}<p class="muted">The tool catalog could not be listed: {{.}}</p>{{end}}
     {{if not $f.Namespace}}<p class="muted">Pick a namespace to see its tool catalog (TestTemplates).</p>{{end}}
-    <div class="choices">
-      {{range $d.Templates}}
-      <label class="choice">
-        <input type="radio" name="template" value="{{.Name}}"{{if eq .Name $f.Template}} checked{{end}} data-image="{{.Image}}" data-command="{{.Command}}" data-args="{{.Args}}" data-main-kind="{{.MainKind}}">
-        <span><strong>{{.Name}}</strong>{{with .Tool}}{{if ne . $.Data.Form.Template}} <span class="chip">{{.}}</span>{{end}}{{end}}<br><span class="muted small mono">{{.Image}}</span></span>
-      </label>
-      {{end}}
-      <label class="choice">
-        <input type="radio" name="template" value=""{{if not $f.Template}} checked{{end}} data-image="" data-command="" data-args="">
-        <span><strong>Own image</strong><br><span class="muted small">any container: image + command</span></span>
-      </label>
-    </div>
+    <label class="field"><span>Tool</span>
+      <select name="template" id="tool">
+        {{range $d.Templates}}
+        <option value="{{.Name}}"{{if eq .Name $f.Template}} selected{{end}} data-image="{{.Image}}" data-main-kind="{{.MainKind}}">{{.Name}}</option>
+        {{end}}
+        <option value=""{{if not $f.Template}} selected{{end}} data-image="" data-main-kind="">Own image — any container</option>
+      </select>
+      <span class="muted small mono" id="tool-hint"></span>
+    </label>
     <label class="field"><span>Tool label <span class="muted">kubetest.io/tool — groups the Test in the list; a template sets it</span></span>
       <input type="text" name="tool" value="{{$f.Tool}}" placeholder="pytest" autocomplete="off" maxlength="63">
     </label>
@@ -82,10 +79,10 @@
   <section class="panel wizard-step" data-step="2">
     <h2>2. Source</h2>
     <p class="muted small">The code comes from one place and lands in <span class="mono">/data/repo</span> in the test pod; test data from ConfigMaps and Secrets is separate.</p>
-    <div class="choices source">
-      <label class="choice"><input type="radio" name="source" value="git"{{if eq $f.Source "git"}} checked{{end}} data-toggles-source="git"> <span><strong>Git repository</strong><br><span class="muted small">projects and anything that changes with the app</span></span></label>
-      <label class="choice" id="source-inline"><input type="radio" name="source" value="inline"{{if eq $f.Source "inline"}} checked{{end}} data-toggles-source="inline"> <span><strong>Inline files</strong><br><span class="muted small">typed here — single-file tools (k6, JMeter, newman, …)</span></span></label>
-      <label class="choice"><input type="radio" name="source" value=""{{if eq $f.Source ""}} checked{{end}} data-toggles-source="none"> <span><strong>None</strong><br><span class="muted small">the image needs no files</span></span></label>
+    <div class="radio-row" role="radiogroup" aria-label="Where the code comes from">
+      <label><input type="radio" name="source" value="git"{{if eq $f.Source "git"}} checked{{end}}> Git repository</label>
+      <label id="source-inline"><input type="radio" name="source" value="inline"{{if eq $f.Source "inline"}} checked{{end}}> Inline files</label>
+      <label><input type="radio" name="source" value=""{{if eq $f.Source ""}} checked{{end}}> None — the image needs no files</label>
     </div>
     <p class="muted small" id="project-note" hidden>This tool runs a project: its code comes from git.</p>
     <div class="run-form" data-source="git">
@@ -213,6 +210,14 @@
   </div>
 {{end}}
 </form>
+{{if ne $f.Mode "yaml"}}
+<aside class="yaml-panel" id="yaml-panel" data-src="{{$d.Action}}/yaml" aria-live="polite">
+  <div class="yaml-panel-head"><strong>YAML</strong> <span class="muted small">builds as you type</span>
+    <button type="button" class="button secondary small-button" data-copy="yaml-live-raw" hidden>Copy</button></div>
+  <div id="yaml-live">{{template "yaml-panel" (yamlPanel $d.Preview nil nil)}}</div>
+</aside>
+{{end}}
+</div>
 <script src="/static/editor.js" defer></script>
 {{end}}
 
@@ -220,4 +225,11 @@
 {{with .Warnings}}<div class="notice warning" role="status"><strong>Check:</strong><ul>{{range .}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
 {{if .Admitted}}<p class="notice ok" role="status">The API would admit this Test (schema, webhooks, pod policy).</p>
 {{else if .CheckErr}}<div class="notice error" role="alert"><strong>{{if .SaveFailed}}Not saved:{{else}}The API would refuse it:{{end}}</strong> {{.CheckErr}}</div>{{end}}
+{{end}}
+
+{{define "yaml-panel"}}
+{{with .Errors}}<details class="panel-errors"><summary>{{len .}} to fill in before it can be created</summary><ul>{{range .}}<li>{{.}}</li>{{end}}</ul></details>{{end}}
+{{with .Warnings}}<ul class="panel-warnings">{{range .}}<li>{{.}}</li>{{end}}</ul>{{end}}
+{{if .YAML}}<div class="code-view">{{highlightYAML .YAML}}</div><textarea id="yaml-live-raw" hidden readonly>{{.YAML}}</textarea>
+{{else if not .Errors}}<p class="muted small">Fill in the form — the Test's YAML builds here.</p>{{end}}
 {{end}}
