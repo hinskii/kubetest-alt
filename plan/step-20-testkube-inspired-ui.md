@@ -494,10 +494,29 @@ the version shown — as the edit wizard does today).
   light and dark. The same component shows YAML everywhere: the wizard's
   panel, the Test page's Definition, Settings → YAML, the run's resolved
   spec. Copy and Download buttons on the panel.
-- Editing YAML (Settings → YAML, the wizard's YAML mode): a textarea over
-  the highlighted copy (the overlay technique: transparent text, same
-  font and metrics), line numbers, Tab indents two spaces; the server
-  still parses strictly and points at the line on error.
+- Editing YAML (Settings → YAML, the wizard's YAML mode, the inline
+  script editor): **CodeMirror 6**, so it feels like an editor — line
+  numbers, folding, bracket/indent guides, search, Tab = two spaces,
+  undo history; YAML mode for Tests, JavaScript/Python/XML modes for
+  inline scripts by file extension. Server errors (strict parse,
+  admission) become line markers in the gutter. Later, completion of
+  field names from the CRD schema (OpenAPI in the CRD) is possible.
+  - Vendored, not from a CDN: `make vendor-codemirror` bundles pinned
+    packages (`codemirror`, `@codemirror/lang-yaml`, `-lang-javascript`,
+    `-lang-python`, `-lang-xml`, a light and a dark theme matching Control
+    Center) with esbuild into `views/static/vendor/codemirror.min.js`
+    (~150–250 KB), committed with its licenses (MIT) and the exact
+    versions; a test fails if the bundle and the pinned versions drift.
+  - CSP stays `default-src 'self'`: CodeMirror styles through
+    constructable stylesheets (`adoptedStyleSheets`), which CSP doesn't
+    block — verified in the browser check; if a browser falls back to
+    `<style>` elements, `EditorView.cspNonce` with a per-response nonce.
+  - Progressive: the page ships a plain `<textarea>` that CodeMirror
+    replaces and keeps in sync, so the form posts the same field and
+    still works without JavaScript.
+- Read-only YAML (the live panel, Definition, resolved spec) stays the
+  server-side highlighter: light, no script needed, same palette as the
+  editor theme.
 
 **Language:** no `/data/repo`, sparse or mountPath in the primary UI;
 plain words ("the folder with your tests", "replace a file in the
@@ -516,6 +535,9 @@ attribute; test-data rows showed every field.
   Tests read-only with Duplicate.
 - Page tests for every section; a browser check (headless Chrome over
   CDP, as for refresh.js) of the step flow and the hidden sections.
+- CodeMirror in the browser check: loads under the CSP (no console
+  violations), edits post back, a server error marks its line; the
+  bundle-drift test.
 - The YAML endpoint returns the same YAML as Create; key order and block
   scalars golden-tested; the highlighter's output for every token kind;
   the live panel updates in a browser check (type in the form → the
