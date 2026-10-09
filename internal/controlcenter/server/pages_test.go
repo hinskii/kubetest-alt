@@ -184,6 +184,7 @@ func TestTestsPage_GroupsByToolWithLatestRunAndLock(t *testing.T) {
 	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde"`)
 	assert.Contains(t, body, "status-failed")
 	assert.Contains(t, body, `<div id="tests-list" data-refresh>`, "the list refreshes itself (refresh.js)")
+	assert.Regexp(t, `href="/static/highlight.css\?v=[0-9a-f]{12}"`, body, "versioned: a style change is never cached stale")
 	assert.Equal(t, 1, strings.Count(body, ">read-only<"), "only the Test not created by the GUI is locked")
 
 	filtered := w.get(t, clusterURL+"?tool=k6", "").Body.String()

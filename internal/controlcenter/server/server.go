@@ -80,7 +80,8 @@ func (s *Server) Handler() http.Handler {
 	highlightCSS := []byte(yamlview.CSS())
 	mux.HandleFunc("GET /static/highlight.css", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		// The page links it with ?v=<hash of the content>: cache it long.
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		_, _ = w.Write(highlightCSS)
 	})
 	mux.HandleFunc("GET /healthz", ok)

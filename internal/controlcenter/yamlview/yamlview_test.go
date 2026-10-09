@@ -101,3 +101,8 @@ func TestCSS_LightAndDark(t *testing.T) {
 	assert.Contains(t, css, `:root[data-theme="dark"] .chroma .nt {`)
 	assert.Contains(t, css, "background-color: transparent !important")
 }
+
+func TestCSSVersion_FollowsTheContent(t *testing.T) {
+	assert.Len(t, CSSVersion(), 12)
+	assert.Equal(t, CSSVersion(), CSSVersion(), "stable for the same styles")
+}

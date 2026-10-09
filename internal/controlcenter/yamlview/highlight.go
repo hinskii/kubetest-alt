@@ -18,6 +18,8 @@ package yamlview
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"html/template"
 	"strings"
 
@@ -64,6 +66,13 @@ const (
 	lightSelector = `:root:not([data-theme="dark"]) `
 	darkSelector  = `:root[data-theme="dark"] `
 )
+
+// CSSVersion is a short hash of CSS(): the stylesheet's URL carries it,
+// so a browser never keeps a stale copy after a style change.
+func CSSVersion() string {
+	sum := sha256.Sum256([]byte(CSS()))
+	return hex.EncodeToString(sum[:6])
+}
 
 // CSS is the stylesheet for highlighted code: github in the light theme,
 // github-dark in the dark one; the background is left to the page.
