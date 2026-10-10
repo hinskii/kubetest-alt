@@ -475,12 +475,7 @@ WEB_LICENSES ?= MIT Apache-2.0 BSD-2-Clause BSD-3-Clause ISC 0BSD Unlicense
 
 .PHONY: web-licenses
 web-licenses: ## Fail on a production dependency whose license isn't in WEB_LICENSES.
-	@$(PNPM) licenses list --prod --json | node -e '\
-	  const ok = new Set(process.argv[1].split(" ")); let bad = []; \
-	  const d = JSON.parse(require("fs").readFileSync(0, "utf8")); \
-	  for (const [lic, pkgs] of Object.entries(d)) if (!ok.has(lic)) bad.push(lic + ": " + pkgs.map(p => p.name).join(", ")); \
-	  if (bad.length) { console.error("licenses not allowed:\n" + bad.join("\n")); process.exit(1); } \
-	  console.log("web-licenses: " + Object.keys(d).join(", ") + " — all allowed");' "$(WEB_LICENSES)"
+	$(PNPM) --silent licenses list --prod --json | node web/scripts/check-licenses.mjs "$(WEB_LICENSES)"
 
 .PHONY: web-e2e
 web-e2e: ## Playwright against a running Control Center (CC_URL, default `make dev-ui`'s :8090; CC_USER signs in).
