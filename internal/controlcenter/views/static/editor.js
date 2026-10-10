@@ -71,20 +71,38 @@
   // The code's source: git, inline files or none — one at a time. A
   // template that runs a project (main path a directory) takes git only.
   var sources = Array.prototype.slice.call(form.querySelectorAll('input[name="source"]'));
-  var inlineChoice = document.getElementById("source-inline");
+  var sourceChoice = document.getElementById("source-choice");
   var projectNote = document.getElementById("project-note");
-  function syncSource() {
+  // What the chosen tool can take its code from: a project tool (main path
+  // a directory) git only; a single-file tool git or inline; a template
+  // aimed at a URL none or git; an own image anything.
+  function toolKind() {
     var chosen = chosenTool();
-    var project = chosen && chosen.getAttribute("data-main-kind") === "directory";
-    var inline = inlineChoice && inlineChoice.querySelector("input");
-    if (inline) {
-      inline.disabled = project;
-      if (project && inline.checked) {
-        sources.filter(function (r) { return r.value === "git"; })[0].checked = true;
+    if (!chosen || chosen.value === "") return "own";
+    var kind = chosen.getAttribute("data-main-kind");
+    return kind === "directory" || kind === "file" ? kind : "nofile";
+  }
+  function syncSource() {
+    var kind = toolKind();
+    var shown = [];
+    if (sourceChoice) {
+      sourceChoice.querySelectorAll("[data-sources-for]").forEach(function (label) {
+        var ok = label.getAttribute("data-sources-for").split(" ").indexOf(kind) >= 0;
+        label.hidden = !ok;
+        label.querySelector("input").disabled = !ok;
+        if (ok) shown.push(label.querySelector("input"));
+      });
+      // Only one way to bring the code: no choice to make.
+      sourceChoice.hidden = shown.length < 2;
+      // Nothing chosen yet (or a choice this tool can't take): the natural
+      // one — git for tools with files, none for those without.
+      if (shown.length && !shown.some(function (r) { return r.checked; })) {
+        var prefer = kind === "nofile" || kind === "own" ? "" : "git";
+        (shown.filter(function (r) { return r.value === prefer; })[0] || shown[0]).checked = true;
       }
     }
-    if (projectNote) projectNote.hidden = !project;
-    var current = (sources.filter(function (r) { return r.checked; })[0] || {}).value || "none";
+    if (projectNote) projectNote.hidden = kind !== "directory";
+    var current = (sources.filter(function (r) { return r.checked && !r.disabled; })[0] || {}).value || "none";
     form.querySelectorAll("[data-source]").forEach(function (el) {
       el.hidden = el.getAttribute("data-source") !== current;
     });

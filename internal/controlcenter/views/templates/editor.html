@@ -79,12 +79,16 @@
   <section class="panel wizard-step" data-step="2">
     <h2>2. Source</h2>
     <p class="muted small">The code comes from one place and lands in <span class="mono">/data/repo</span> in the test pod; test data from ConfigMaps and Secrets is separate.</p>
-    <div class="radio-row" role="radiogroup" aria-label="Where the code comes from">
-      <label><input type="radio" name="source" value="git"{{if eq $f.Source "git"}} checked{{end}}> Git repository</label>
-      <label id="source-inline"><input type="radio" name="source" value="inline"{{if eq $f.Source "inline"}} checked{{end}}> Inline files</label>
-      <label><input type="radio" name="source" value=""{{if eq $f.Source ""}} checked{{end}}> None — the image needs no files</label>
+    {{/* Only the sources that make sense for the chosen tool show
+         (editor.js): a project tool takes git only, a single-file tool
+         git or inline, a tool without files none (or git), an own image
+         any of them. */}}
+    <div class="radio-row" role="radiogroup" aria-label="Where the code comes from" id="source-choice">
+      <label data-sources-for="directory file nofile own"><input type="radio" name="source" value="git"{{if eq $f.Source "git"}} checked{{end}}> Git repository</label>
+      <label data-sources-for="file own"><input type="radio" name="source" value="inline"{{if eq $f.Source "inline"}} checked{{end}}> Inline files</label>
+      <label data-sources-for="nofile own"><input type="radio" name="source" value=""{{if eq $f.Source ""}} checked{{end}}> None — the image needs no files</label>
     </div>
-    <p class="muted small" id="project-note" hidden>This tool runs a project: its code comes from git.</p>
+    <p class="muted small" id="project-note" hidden>This tool runs a project — its code comes from a Git repository.</p>
     <div class="run-form" data-source="git">
       <label><span>Repository</span><input type="text" name="gitURI" value="{{$f.GitURI}}" placeholder="https://github.com/org/repo" autocomplete="off"></label>
       <label><span>Path in the repository <span class="muted">required — the tests: a file or a directory; "." for all of it</span></span><input type="text" name="gitPath" value="{{$f.GitPath}}" placeholder="perf/checkout.js" class="mono" autocomplete="off" id="git-path"></label>
