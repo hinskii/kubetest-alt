@@ -90,7 +90,7 @@ phase_end "kind_create"
 phase_start "docker_build"
 docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
 docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
-docker build -f Dockerfile -t "kubetest-alt/control-center:${IMAGE_TAG}" --build-arg TARGET_BIN=cmd/control-center .
+docker build -f Dockerfile -t "kubetest-alt/control-center:${IMAGE_TAG}" --build-arg TARGET_BIN=cmd/control-center --build-arg WITH_WEB=true .
 docker pull "$OAUTH2_PROXY_IMAGE"
 echo "FROM $OAUTH2_PROXY_IMAGE" | docker build -t "kubetest-alt/oauth2-proxy:${IMAGE_TAG}" -
 # Content-fetcher Dockerfile COPYs go.mod, go.sum, api/, pkg/, cmd/entry/
@@ -381,6 +381,13 @@ if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   phase_start "go_test"
   go test -tags=e2e -count=1 -v -timeout=15m ./test/e2e/...
   phase_end "go_test"
+
+  # Control Center's React UI in a real browser (web/e2e, Playwright),
+  # past the sign-in proxy as the e2e developer. Needs `make web-install`
+  # and `pnpm --dir web exec playwright install chromium` beforehand.
+  phase_start "web_e2e"
+  CC_USER="dev@e2e.test" make web-e2e
+  phase_end "web_e2e"
   log "all scenarios passed"
 fi
 

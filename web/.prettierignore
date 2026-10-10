@@ -1,0 +1,4 @@
+pnpm-lock.yaml
+src/api/schema.d.ts
+src/routeTree.gen.ts
+src/components/ui/

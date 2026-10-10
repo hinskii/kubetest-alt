@@ -68,6 +68,7 @@ func TestDockerignore_KeepsEveryEmbed(t *testing.T) {
 			}
 			dir := filepath.Dir(path)
 			for pattern := range strings.FieldsSeq(m[1]) {
+				pattern = strings.TrimPrefix(pattern, "all:")
 				matches, err := doublestar.FilepathGlob(filepath.Join(dir, pattern) + "{,/**}")
 				require.NoError(t, err)
 				for _, match := range matches {
@@ -75,6 +76,9 @@ func TestDockerignore_KeepsEveryEmbed(t *testing.T) {
 						continue
 					}
 					file, _ := filepath.Rel(root, match)
+					if builtInImage(filepath.ToSlash(file)) {
+						continue
+					}
 					checked++
 					assert.True(t, included(rules, filepath.ToSlash(file)),
 						"%s embeds %s, but .dockerignore leaves it out of the Docker build context", rel, file)
@@ -84,6 +88,13 @@ func TestDockerignore_KeepsEveryEmbed(t *testing.T) {
 		return sc.Err()
 	}))
 	assert.Positive(t, checked, "found the embeds")
+}
+
+// builtInImage: the UI build is made by the Dockerfile's web stage, not
+// taken from the context — only the directory's placeholder must be there.
+func builtInImage(file string) bool {
+	const dist = "internal/controlcenter/webui/dist/"
+	return strings.HasPrefix(file, dist) && file != dist+".gitkeep"
 }
 
 type ignoreRule struct {

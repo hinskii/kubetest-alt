@@ -29,7 +29,7 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 say "building images from this checkout"
 docker build -q -f Dockerfile -t "kubetest-alt/operator:$TAG" --build-arg TARGET_BIN=cmd/operator .
 docker build -q -f Dockerfile -t "kubetest-alt/apiserver:$TAG" --build-arg TARGET_BIN=cmd/apiserver .
-docker build -q -f Dockerfile -t "kubetest-alt/control-center:$TAG" --build-arg TARGET_BIN=cmd/control-center .
+docker build -q -f Dockerfile -t "kubetest-alt/control-center:$TAG" --build-arg TARGET_BIN=cmd/control-center --build-arg WITH_WEB=true .
 docker build -q -f executors/content-fetcher/Dockerfile -t "kubetest-alt/content-fetcher:$TAG" .
 for img in operator apiserver control-center content-fetcher; do
   kind load docker-image "kubetest-alt/$img:$TAG" --name "$CLUSTER"

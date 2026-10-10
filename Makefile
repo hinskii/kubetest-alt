@@ -66,21 +66,24 @@ vet: ## Run go vet against code.
 	go vet ./...
 
 .PHONY: openapi
-openapi: ## Regenerate openapi/openapi.json from internal/apiserver.OpenAPISpec.
+openapi: ## Regenerate openapi/openapi.json (API server) and openapi/control-center.json (Control Center's UI API).
 	go run ./cmd/gen-openapi openapi/openapi.json
+	go run ./cmd/gen-openapi -spec=control-center openapi/control-center.json
 
 .PHONY: openapi-check
-openapi-check: ## Zero-diff gate: regenerate the spec into a tmpfile and diff against committed.
-	@tmp=$$(mktemp); \
-	go run ./cmd/gen-openapi $$tmp; \
-	if ! diff -q $$tmp openapi/openapi.json >/dev/null; then \
-		echo "openapi-check: openapi/openapi.json is out of date — run 'make openapi'"; \
-		diff -u openapi/openapi.json $$tmp | head -40; \
+openapi-check: ## Zero-diff gate: regenerate both specs into tmpfiles and diff against committed.
+	@for spec in apiserver:openapi/openapi.json control-center:openapi/control-center.json; do \
+		name=$${spec%%:*}; file=$${spec#*:}; tmp=$$(mktemp); \
+		go run ./cmd/gen-openapi -spec=$$name $$tmp; \
+		if ! diff -q $$tmp $$file >/dev/null; then \
+			echo "openapi-check: $$file is out of date — run 'make openapi'"; \
+			diff -u $$file $$tmp | head -40; \
+			rm -f $$tmp; \
+			exit 1; \
+		fi; \
 		rm -f $$tmp; \
-		exit 1; \
-	fi; \
-	rm -f $$tmp; \
-	echo "openapi-check: openapi/openapi.json is in sync with code"
+		echo "openapi-check: $$file is in sync with code"; \
+	done
 
 .PHONY: test
 test: manifests generate fmt vet openapi-check setup-envtest ## Run tests with -race (no Docker).
@@ -161,7 +164,7 @@ test-coverage-integration: test-integration ## Enforce COVERAGE_PKGS_INTEGRATION
 # + secret-safe log redaction. Floor 80 mirrors pkg/executor — every
 # error branch matters (endpoint 4xx vs 5xx vs timeout vs secret-missing
 # splits into distinct outcomes that ALL land on metrics + status).
-COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80 pkg/report:90 pkg/storage:60 internal/controlcenter/auth:90 internal/controlcenter/clusters:80 internal/controlcenter/config:90 internal/controlcenter/server:85 internal/controlcenter/yamlview:85 internal/retention:80 internal/cli:70 internal/podpolicy:90
+COVERAGE_PKGS ?= internal/compiler:90 pkg/executor:80 internal/scraper:85 internal/logstream:85 internal/apiserver:80 internal/scheduler:65 pkg/expr:90 internal/resolver:75 internal/metrics:95 internal/webhookdelivery:80 pkg/report:90 pkg/storage:60 internal/controlcenter/auth:90 internal/controlcenter/clusters:80 internal/controlcenter/config:90 internal/controlcenter/server:85 internal/controlcenter/yamlview:85 internal/controlcenter/api:90 internal/retention:80 internal/cli:70 internal/podpolicy:90
 COVERAGE_MIN ?= 80
 
 .PHONY: test-coverage
@@ -426,11 +429,77 @@ vendor-ui: ## Fetch the pinned UI libraries into Control Center's static/vendor/
 	  echo "tom-select $(TOM_SELECT_VERSION)" > $(UI_VENDOR_DIR)/tom-select/VERSION && \
 	  echo "vendored tom-select $(TOM_SELECT_VERSION) (temp files left in $$tmp)"
 
+##@ Control Center UI (web/, step 20R)
+
+# pnpm comes from corepack, at the version pinned in web/package.json
+# (packageManager). `corepack enable pnpm` once per machine.
+PNPM ?= COREPACK_ENABLE_DOWNLOAD_PROMPT=0 pnpm --dir web
+WEB_DIST := internal/controlcenter/webui/dist
+
+.PHONY: web-install
+web-install: ## Install the UI's dependencies (frozen lockfile).
+	$(PNPM) install --frozen-lockfile
+
+.PHONY: web-dev
+web-dev: ## UI dev server on http://localhost:5173, proxying the API to `make dev-ui` (:8090).
+	$(PNPM) dev
+
+.PHONY: web-build
+web-build: ## Build the UI into Control Center's embed directory (then `go build` embeds it).
+	find $(WEB_DIST) -mindepth 1 ! -name .gitkeep -delete
+	$(PNPM) build
+
+.PHONY: web-test
+web-test: ## UI unit and component tests (Vitest + MSW).
+	$(PNPM) test
+
+.PHONY: web-lint
+web-lint: ## ESLint and Prettier on the UI.
+	$(PNPM) lint
+	$(PNPM) format:check
+
+.PHONY: web-typecheck
+web-typecheck: ## TypeScript check of the UI.
+	$(PNPM) typecheck
+
+.PHONY: web-size
+web-size: ## Bundle budget (size-limit, web/.size-limit.json) on the last web-build.
+	$(PNPM) size
+
+.PHONY: web-audit
+web-audit: ## Known vulnerabilities in the UI's dependencies (high and above fail).
+	$(PNPM) audit --audit-level high
+
+# Licenses the UI may ship (production dependencies only): permissive.
+WEB_LICENSES ?= MIT Apache-2.0 BSD-2-Clause BSD-3-Clause ISC 0BSD Unlicense
+
+.PHONY: web-licenses
+web-licenses: ## Fail on a production dependency whose license isn't in WEB_LICENSES.
+	@$(PNPM) licenses list --prod --json | node -e '\
+	  const ok = new Set(process.argv[1].split(" ")); let bad = []; \
+	  const d = JSON.parse(require("fs").readFileSync(0, "utf8")); \
+	  for (const [lic, pkgs] of Object.entries(d)) if (!ok.has(lic)) bad.push(lic + ": " + pkgs.map(p => p.name).join(", ")); \
+	  if (bad.length) { console.error("licenses not allowed:\n" + bad.join("\n")); process.exit(1); } \
+	  console.log("web-licenses: " + Object.keys(d).join(", ") + " — all allowed");' "$(WEB_LICENSES)"
+
+.PHONY: web-e2e
+web-e2e: ## Playwright against a running Control Center (CC_URL, default `make dev-ui`'s :8090; CC_USER signs in).
+	$(PNPM) e2e
+
+.PHONY: web-gen-api
+web-gen-api: openapi ## Regenerate the UI's API types from openapi/control-center.json.
+	$(PNPM) gen:api
+
+.PHONY: web-gen-api-check
+web-gen-api-check: ## Zero-diff gate: the UI's API types match openapi/control-center.json.
+	$(PNPM) gen:api
+	git diff --exit-code -- web/src/api/schema.d.ts
+
 .PHONY: dev-reload
 dev-reload: ## Rebuild the platform images and restart them in the dev cluster.
 	docker build -q -f Dockerfile -t kubetest-alt/operator:dev --build-arg TARGET_BIN=cmd/operator .
 	docker build -q -f Dockerfile -t kubetest-alt/apiserver:dev --build-arg TARGET_BIN=cmd/apiserver .
-	docker build -q -f Dockerfile -t kubetest-alt/control-center:dev --build-arg TARGET_BIN=cmd/control-center .
+	docker build -q -f Dockerfile -t kubetest-alt/control-center:dev --build-arg TARGET_BIN=cmd/control-center --build-arg WITH_WEB=true .
 	docker build -q -f executors/content-fetcher/Dockerfile -t kubetest-alt/content-fetcher:dev .
 	for img in operator apiserver control-center content-fetcher; do kind load docker-image kubetest-alt/$$img:dev --name $(DEV_CLUSTER); done
 	kubectl --context kind-$(DEV_CLUSTER) apply -f config/crd/bases/

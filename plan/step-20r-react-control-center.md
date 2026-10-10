@@ -44,7 +44,10 @@ second deployment, talking to the kubetest API from the browser directly
 | API types | **openapi-typescript** + openapi-fetch from the BFF's OpenAPI | types generated, never hand-written |
 | Tests | **Vitest** + Testing Library + **MSW** (mocked BFF); **Playwright** e2e | unit/component + browser flows |
 | Lint/format | ESLint (typescript-eslint, react-hooks, jsx-a11y), Prettier | |
-| Package manager | **pnpm**, Node pinned (`.nvmrc`, `packageManager`) | reproducible, lockfile committed |
+| Package manager | **pnpm** through **corepack** (`packageManager: pnpm@12.11.2`), Node pinned (`.nvmrc` 24) | reproducible, lockfile committed; pnpm's release-age guard on (`pnpm-workspace.yaml`) |
+
+Versions are pinned exactly (`pnpm add -E`). TypeScript is 6.0.x:
+typescript-eslint 8.71 supports `<6.1`.
 
 Chroma (server-side highlighting) and Tom Select (vendored) go away at the
 end (R5): CodeMirror read-only and shadcn's combobox replace them.
@@ -77,10 +80,14 @@ browser ── oauth2-proxy ── CC (Go)
 - **OpenAPI for the BFF**, generated in Go like the apiserver's
   (`cmd/gen-openapi`-style), zero-diff checked in CI; the TS client is
   generated from it (`pnpm gen:api`), also zero-diff checked.
-- **CSP stays `default-src 'self'`**: Vite emits no inline scripts; React
-  sets styles through the DOM (allowed); CodeMirror uses constructable
-  stylesheets (verified in the browser check); artifacts and live views
-  keep their sandbox CSPs.
+- **CSP: scripts stay `'self'`; the UI document allows inline styles.**
+  Vite emits no inline scripts (the theme bootstrap is the shared
+  `/static/theme.js`). sonner and Radix inject `<style>` elements at run
+  time, so `index.html` is served with `style-src 'self' 'unsafe-inline'`
+  (`webui.CSP`, found in R0's browser check). Style injection can restyle a
+  page but not run code; the server-rendered pages keep the stricter policy;
+  artifacts and live views keep their sandbox CSPs. Playwright fails any
+  test that logs a console error, so a CSP violation can't slip in.
 - **Auth/roles in the SPA:** `GET /api/v1/me` → email, role; the UI hides
   what a role can't do, the BFF enforces it.
 
@@ -124,9 +131,12 @@ internal/controlcenter/
 
 - **Makefile:** `web-install`, `web-dev` (Vite dev server, proxies `/api`,
   `/live`, `/clusters/*/runs/*/artifacts` to the dev cluster's CC on
-  :8090), `web-build`, `web-test`, `web-lint`, `web-gen-api`; `make build`
-  of CC depends on `web-build`.
-- **Docker:** a `node` stage builds `web/dist`, copied into the Go builder
+  :8090), `web-build`, `web-test`, `web-lint`, `web-typecheck`,
+  `web-gen-api` (+ `-check`), `web-size`, `web-audit`, `web-licenses`,
+  `web-e2e`. `make build` does not need Node: a binary built without the UI
+  serves a "run make web-build" page; images build it (`WITH_WEB=true`).
+- **Docker:** `--build-arg WITH_WEB=true` (Control Center only) selects a
+  `node` stage that builds the UI into `internal/controlcenter/webui/dist`, copied into the Go builder
   before `go build` (go:embed); final image unchanged (distroless).
   `.dockerignore` re-includes `web/` sources (the dockerignore test learns
   the new embed).
@@ -146,7 +156,7 @@ parity (and its old template and handler are deleted in the same commit).
 
 | Phase | Scope | Exit criteria |
 |---|---|---|
-| **R0 Foundation** | `web/` scaffold, toolchain, CI job, Docker stage, embed + SPA fallback, theme (tokens, light/dark, the toggle), app shell (top bar, user + role, breadcrumbs, notices/toasts, error boundary, 404), BFF skeleton (`/me`, `/clusters`), OpenAPI + TS generation, MSW + Playwright harness | the home page in React in the image on kind; e2e sign-in path unchanged |
+| **R0 Foundation** ✅ | `web/` scaffold, toolchain, CI job, Docker stage, embed + SPA fallback, theme (tokens, light/dark, the toggle), app shell (top bar, user + role, breadcrumbs, notices/toasts, error boundary, 404), BFF skeleton (`/me`, `/clusters`), OpenAPI + TS generation, MSW + Playwright harness | the home page in React in the image on kind; e2e sign-in path unchanged. Done: unknown addresses get the UI with a 404 (its not-found page); breadcrumbs come with R1's first nested page |
 | **R1 Browse** | tests list (groups, filters, locked/not-ready chips, auto-refresh), Test page (header, params, run form incl. "start at", schedule panel, run history paging, definition in CodeMirror read-only, delete/duplicate/edit links) | parity checklist ✓; old templates `home`, `tests`, `test` deleted |
 | **R2 Runs** | run page: facts, Now: (events), live log (polling via Query), log download, live view iframe, report iframe + dark inversion + original colours, failed cases, metrics, child runs, comment, abort / rerun / delete, Kubernetes events panel, Run again | parity ✓; `run.html`, `run.js` deleted |
 | **R3 Insights** | analytics (trends, summary, comparison + markdown download), test cases + history, schedules overview, cleanup preview/apply | parity ✓; remaining read pages deleted |

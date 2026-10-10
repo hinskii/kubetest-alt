@@ -47,6 +47,19 @@ jobs:
           chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
           kind version
 
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: web/.nvmrc
+
+      # Playwright (Control Center's UI in a browser) runs after the Go
+      # scenarios; pnpm comes from package.json through corepack.
+      - name: Install UI test dependencies
+        run: |
+          corepack enable pnpm
+          make web-install
+          pnpm --dir web exec playwright install --with-deps chromium
+
       - name: Install helm
         run: |
           curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash

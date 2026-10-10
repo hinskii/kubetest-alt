@@ -1,0 +1,125 @@
+{
+  "components": {
+    "schemas": {
+      "Capabilities": {
+        "properties": {
+          "delete": {
+            "type": "boolean"
+          },
+          "run": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "run",
+          "delete"
+        ],
+        "type": "object"
+      },
+      "Cluster": {
+        "properties": {
+          "displayName": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reachable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "displayName",
+          "reachable"
+        ],
+        "type": "object"
+      },
+      "Error": {
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "Me": {
+        "properties": {
+          "can": {
+            "$ref": "#/components/schemas/Capabilities"
+          },
+          "email": {
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "viewer",
+              "developer",
+              "admin"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "role",
+          "can"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Control Center's backend for its UI. Signed-in identity comes from the sign-in proxy's header; clusters are reached through the Kubernetes service proxy.",
+    "title": "kubetest Control Center",
+    "version": "v1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/clusters": {
+      "get": {
+        "operationId": "listClusters",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Cluster"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The clusters, in config order."
+          }
+        },
+        "summary": "Configured clusters, each probed now."
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "operationId": "getMe",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Me"
+                }
+              }
+            },
+            "description": "The user."
+          }
+        },
+        "summary": "The signed-in user and what their role allows."
+      }
+    }
+  }
+}

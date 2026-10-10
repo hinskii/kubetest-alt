@@ -33,3 +33,9 @@ go.work
 # accumulation. Project-wide policy (deny rules) lives in settings.json.
 .claude/settings.local.json
 cover.func.txt
+
+# Control Center UI (web/, step 20R): dependencies and the build that
+# Control Center embeds — built by `make web-build` / the image's web stage.
+web/node_modules/
+internal/controlcenter/webui/dist/*
+!internal/controlcenter/webui/dist/.gitkeep

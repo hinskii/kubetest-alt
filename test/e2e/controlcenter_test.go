@@ -22,6 +22,7 @@ package e2e
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -98,9 +99,19 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	require.Equal(t, http.StatusFound, resp.StatusCode)
 	assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://accounts.google.com/"), resp.Header.Get("Location"))
 
-	// 2. The UI reaches this cluster's kubetest through the service proxy.
+	// 2. The UI reaches this cluster's kubetest through the service proxy:
+	//    the React home page (built into the image) lists clusters from the
+	//    API, which probes each one.
 	home := ccPage(t, ui+"/", ccDeveloper)
-	assert.Contains(t, home, "connected", "Control Center → service proxy → API server")
+	assert.Contains(t, home, `<div id="root">`, "the UI is built into the image (WITH_WEB=true)")
+	var clusters []struct {
+		Name      string `json:"name"`
+		Reachable bool   `json:"reachable"`
+		Error     string `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(ccPage(t, ui+"/api/v1/clusters", ccDeveloper)), &clusters))
+	require.Len(t, clusters, 1)
+	assert.True(t, clusters[0].Reachable, "Control Center → service proxy → API server: %s", clusters[0].Error)
 
 	// 3. A k6 Test from the catalog template, long enough to watch live,
 	//    made with the wizard: the review is a dry run through the real

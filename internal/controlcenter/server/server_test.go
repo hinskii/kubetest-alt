@@ -17,6 +17,7 @@ limitations under the License.
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -29,10 +30,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"k8s.io/client-go/rest"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
 )
 
 // fakeCluster is a "Kubernetes API" whose service proxy answers /healthz
@@ -95,24 +98,25 @@ func do(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecor
 	return rec
 }
 
-func TestHome_ShowsEachClusterWithItsHealth(t *testing.T) {
+func TestClustersAPI_ShowsEachClusterWithItsHealth(t *testing.T) {
 	h := mkServer(t, map[string]string{
 		"deploy-dev":  fakeCluster(t, http.StatusOK),
 		"deploy-prod": fakeCluster(t, http.StatusServiceUnavailable),
 	})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters", nil)
 	req.Header.Set(auth.HeaderEmail, "dev@example.com")
 	rec := do(t, h, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	body := rec.Body.String()
-	assert.Contains(t, body, `<html lang="en">`)
-	assert.Contains(t, body, `href="/clusters/deploy-dev"`)
-	assert.Contains(t, body, "connected")
-	assert.Contains(t, body, "unreachable")
-	assert.Contains(t, body, "kubetest API 503")
-	assert.Contains(t, body, "dev@example.com")
-	assert.Contains(t, body, ">developer<")
+	var got []uiapi.Cluster
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	byName := map[string]uiapi.Cluster{}
+	for _, c := range got {
+		byName[c.Name] = c
+	}
+	assert.True(t, byName["deploy-dev"].Reachable)
+	assert.False(t, byName["deploy-prod"].Reachable)
+	assert.Contains(t, byName["deploy-prod"].Error, "kubetest API 503")
 	assert.NotEmpty(t, rec.Header().Get("Content-Security-Policy"))
 	assert.Equal(t, "nosniff", rec.Header().Get("X-Content-Type-Options"))
 
@@ -122,13 +126,38 @@ func TestHome_ShowsEachClusterWithItsHealth(t *testing.T) {
 	assert.Contains(t, metrics, `controlcenter_http_requests_total{code="200",method="get"}`)
 }
 
-func TestHome_EscapesUserInput(t *testing.T) {
+func TestMeAPI_IsTheSignedInUser(t *testing.T) {
 	h := mkServer(t, map[string]string{"deploy-dev": fakeCluster(t, http.StatusOK)})
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set(auth.HeaderEmail, "<script>x</script>@example.com")
-	body := do(t, h, req).Body.String()
-	assert.NotContains(t, body, "<script>x")
-	assert.Contains(t, body, "&lt;script&gt;")
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	req.Header.Set(auth.HeaderEmail, "dev@example.com")
+	rec := do(t, h, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+	var me uiapi.Me
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &me))
+	assert.Equal(t, uiapi.Me{Email: "dev@example.com", Role: "developer",
+		Can: uiapi.Capabilities{Run: true}}, me)
+}
+
+func TestHome_IsTheUI(t *testing.T) {
+	h := mkServer(t, map[string]string{"deploy-dev": fakeCluster(t, http.StatusOK)})
+	rec := do(t, h, httptest.NewRequest(http.MethodGet, "/", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+	assert.Contains(t, rec.Body.String(), "<title>")
+	assert.Equal(t, webui.CSP, rec.Header().Get("Content-Security-Policy"), "the UI's own policy wins")
+}
+
+func TestUnknownAddress_BrowserGetsTheUI(t *testing.T) {
+	h := mkServer(t, map[string]string{"deploy-dev": fakeCluster(t, http.StatusOK)})
+	req := httptest.NewRequest(http.MethodGet, "/no/such/page", nil)
+	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec := do(t, h, req)
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, webui.CSP, rec.Header().Get("Content-Security-Policy"), "the UI's page, not the Go error page")
+
+	rec = do(t, h, httptest.NewRequest(http.MethodGet, "/no/such/page", nil))
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.NotEqual(t, webui.CSP, rec.Header().Get("Content-Security-Policy"), "non-browser: the plain 404")
 }
 
 func TestProbesAreLocal(t *testing.T) {

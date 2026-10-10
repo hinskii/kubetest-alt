@@ -235,6 +235,28 @@ lists its child runs, each linked.
   can't reach the API server (its traffic arrives through the service
   proxy, from the control plane, not from a pod).
 
+## Developing the UI
+
+The UI is a React app in `web/` (step 20R moves the pages to it one by
+one; the rest are still server-rendered). It is built into the
+Control Center binary, so the image is still the only thing to deploy.
+Its data comes from Control Center's JSON API under `/api/v1`, described
+by `openapi/control-center.json`.
+
+- Toolchain: Node 24 and pnpm through corepack. Run `corepack enable pnpm`
+  once; the pnpm version comes from `web/package.json`.
+- `make web-install`, then `make dev-ui` (Control Center of the dev
+  cluster on :8090) and `make web-dev` (hot reload on :5173; it proxies the
+  API and the old pages to :8090).
+- Gates: `make web-typecheck web-lint web-test web-build web-size`;
+  Playwright against a running Control Center: `make web-e2e`.
+- After changing the API: `make web-gen-api` regenerates the spec and the
+  UI's types.
+- `go build` without `make web-build` gives a binary whose home page says
+  the UI isn't built. Images build it themselves (`--build-arg WITH_WEB=true`).
+- The UI's page allows inline styles, because its component libraries
+  inject them. Scripts stay same-origin only.
+
 ## Troubleshooting
 
 - **A cluster card says "unreachable"**: the message is the API server's

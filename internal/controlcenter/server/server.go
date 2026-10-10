@@ -19,20 +19,21 @@ limitations under the License.
 package server
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 )
 
@@ -74,7 +75,21 @@ func (s *Server) Handler() http.Handler {
 	s.live = live
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", s.home)
+	// The React UI (step 20R): its pages are index.html plus /assets/*,
+	// its data the JSON API. Routes move to it page by page; the ones
+	// still server-rendered are registered below (s.routes).
+	mux.Handle("GET /{$}", webui.Index())
+	mux.Handle("GET "+webui.AssetsPrefix, webui.Assets())
+	(&uiapi.Server{
+		Clusters: s.Clusters, ProbeTimeout: s.ProbeTimeout, Log: s.Log,
+		OnProbe: func(cluster string, up bool) {
+			v := 0.0
+			if up {
+				v = 1
+			}
+			s.clusterUp.WithLabelValues(cluster).Set(v)
+		},
+	}).Register(mux)
 	mux.Handle("GET /static/", views.Static())
 	// Highlighting styles, generated from Chroma's github / github-dark.
 	highlightCSS := []byte(yamlview.CSS())
@@ -93,7 +108,7 @@ func (s *Server) Handler() http.Handler {
 	// The tool's live UI, by signed link (live.go) — no session needed.
 	mux.HandleFunc("GET /live/{token}/{path...}", s.liveView)
 	s.routes(mux)
-	mux.HandleFunc("/", s.notFound)
+	mux.HandleFunc("/", s.fallback)
 
 	// CrossOriginProtection rejects cross-site non-safe requests
 	// (Sec-Fetch-Site / Origin) — CSRF protection with no tokens and no
@@ -149,42 +164,16 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// clusterStatus is one home-page card.
-type clusterStatus struct {
-	Name        string
-	DisplayName string
-	Err         string // "" = reachable
-}
-
-type homeData struct {
-	Clusters []clusterStatus
-}
-
-func (s *Server) home(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, http.StatusOK, "home", "", homeData{Clusters: s.probeAll(r.Context())})
-}
-
-// probeAll checks every cluster's API server in parallel.
-func (s *Server) probeAll(ctx context.Context) []clusterStatus {
-	list := s.Clusters.List()
-	out := make([]clusterStatus, len(list))
-	var wg sync.WaitGroup
-	for i, c := range list {
-		out[i] = clusterStatus{Name: c.Name, DisplayName: c.DisplayNameOrName()}
-		wg.Go(func() {
-			pctx, cancel := context.WithTimeout(ctx, s.ProbeTimeout)
-			defer cancel()
-			up := 1.0
-			if err := c.API.Healthz(pctx); err != nil {
-				up = 0
-				out[i].Err = err.Error()
-				s.Log.Warn("cluster probe failed", "cluster", c.Name, "err", err)
-			}
-			s.clusterUp.WithLabelValues(c.Name).Set(up)
-		})
+// fallback answers addresses no route owns. A browser navigating (GET,
+// wants HTML) gets the UI, whose router shows its not-found page and
+// will own the address once its page moves to React; anything else gets
+// the plain 404.
+func (s *Server) fallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Accept"), "text/html") {
+		webui.NotFound().ServeHTTP(w, r)
+		return
 	}
-	wg.Wait()
-	return out
+	s.notFound(w, r)
 }
 
 func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {

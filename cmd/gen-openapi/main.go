@@ -23,18 +23,28 @@ limitations under the License.
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 
 	"github.com/hinskii/kubetest-alt/internal/apiserver"
+	ccapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 )
 
 func main() {
-	out := "openapi/openapi.json"
-	if len(os.Args) > 1 {
-		out = os.Args[1]
+	spec := flag.String("spec", "apiserver", "which spec: apiserver (openapi/openapi.json) or control-center (openapi/control-center.json)")
+	flag.Parse()
+	gen, out := apiserver.OpenAPIJSON, "openapi/openapi.json"
+	if *spec == "control-center" {
+		gen, out = ccapi.OpenAPIJSON, "openapi/control-center.json"
+	} else if *spec != "apiserver" {
+		fmt.Fprintln(os.Stderr, "gen-openapi: unknown -spec", *spec)
+		os.Exit(2)
 	}
-	b, err := apiserver.OpenAPIJSON()
+	if flag.NArg() > 0 {
+		out = flag.Arg(0)
+	}
+	b, err := gen()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gen-openapi:", err)
 		os.Exit(1)
@@ -42,8 +52,7 @@ func main() {
 	// Trailing newline so POSIX tools + editors don't grumble.
 	b = append(b, '\n')
 	// CLI tool writing an OpenAPI artifact; out is an operator-supplied
-	// path (defaults to openapi/openapi.json). The process runs with the
-	// user's own permissions, not elevated.
+	// path. The process runs with the user's own permissions, not elevated.
 	if err := os.WriteFile(out, b, 0o600); err != nil { //nolint:gosec // path is operator-controlled
 		fmt.Fprintln(os.Stderr, "gen-openapi: write:", err)
 		os.Exit(1)

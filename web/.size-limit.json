@@ -1,0 +1,8 @@
+[
+  {
+    "name": "UI JavaScript (brotli)",
+    "path": "../internal/controlcenter/webui/dist/assets/*.js",
+    "limit": "180 kB"
+  },
+  { "name": "UI CSS (brotli)", "path": "../internal/controlcenter/webui/dist/assets/*.css", "limit": "15 kB" }
+]

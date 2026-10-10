@@ -1,0 +1,10 @@
+minimumReleaseAgeExclude:
+  - "@tanstack/history@1.162.5"
+  - "@tanstack/react-router@1.170.42"
+  - "@tanstack/router-core@1.171.35"
+  - lucide-react@1.55.0
+  - "@tanstack/router-generator@1.167.41"
+  - "@tanstack/router-plugin@1.168.43"
+  - msw@3.0.3
+  - prettier@3.9.10
+  - "@tanstack/router-cli@1.167.41"
