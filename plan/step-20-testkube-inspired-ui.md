@@ -13,7 +13,10 @@ banners, a SPA. Control Center stays server-rendered html/template with
 small same-origin scripts (CSP: no inline script), stateless (no database),
 and every page keeps working without JavaScript.
 
-Order: 20h, 20i (done) → 20j → 20a … 20g, one commit each, gates green before the next
+Order: 20h, 20i (done); 20j parts 1–2 (done, in Go) → **step 20R
+(plan/step-20r-react-control-center.md): Control Center moves to React
+first** → the rest of 20j as R4 of 20R → 20a … 20g, built in React. One
+commit each, gates green before the next
 (`make lint test test-coverage openapi-check`; e2e in CI).
 
 ---

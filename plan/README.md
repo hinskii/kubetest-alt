@@ -46,3 +46,9 @@ make test-coverage        # core logic packages (compiler, executor, scraper, ex
 | 13 | step-13-templates-expr.md | TestTemplate, config params, {{ }} engine |
 | 14 | step-14-webhooks-metrics.md | Notifications + Prometheus metrics |
 | 15 | step-15-tool-catalog.md | Curated TestTemplate catalog (Testkube parity) — tool names live here |
+| 16 | step-16-helm-e2e.md | Helm chart + kind e2e |
+| 17 | step-17-composition.md | Composite Tests (steps execute other Tests) |
+| 18 | step-18-control-center.md | Control Center (web UI, multi-cluster, sign-in) |
+| 19 | step-19-retry-services-parallel.md | Retry, services, parallel workers |
+| 20R | step-20r-react-control-center.md | Control Center in React (Vite, shadcn/ui, TanStack) — before the rest of 20 |
+| 20 | step-20-testkube-inspired-ui.md | What Testkube's dashboard does better; test paths; content/testData |
