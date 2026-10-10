@@ -82,7 +82,8 @@ func TestEditor_NewTestFromTemplate(t *testing.T) {
 	assert.Contains(t, body, `<select name="template" id="tool">`, "the tool is a drop-down list")
 	assert.Contains(t, body, `<option value="k6"`)
 	assert.Contains(t, body, `name="param.k6.vus" value="10"`)
-	assert.Contains(t, body, `<option value="team-a">`, "namespaces with Tests are suggested")
+	assert.Contains(t, body, `<option value="team-a" selected>team-a</option>`, "the namespace from a list")
+	assert.Contains(t, body, `<option value="__other">Other namespace…</option>`, "or typed")
 
 	// Review: the YAML for Git and the API's dry run; nothing is created.
 	rec := w.post(t, newURL, developer, wizardForm(actPreview))
@@ -452,4 +453,33 @@ func TestEditor_LiveYAML(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	assert.Contains(t, rec.Body.String(), "b.js")
 	assert.Equal(t, http.StatusForbidden, w.post(t, clusterURL+"/tests/team-a/smoke/edit/yaml", "someone@example.com", form).Code)
+}
+
+func TestEditor_NamespaceListAndReload(t *testing.T) {
+	other := k6Template()
+	other.Namespace = "team-b"
+	other.Name = "jmeter"
+	w := newWorld(t, k6Template(), other)
+
+	page := w.get(t, newURL, developer).Body.String()
+	assert.Contains(t, page, `<option value="team-a">team-a</option>`, "namespaces with a catalog are listed")
+	assert.Contains(t, page, `<option value="team-b">team-b</option>`)
+
+	// Choosing another namespace reloads the wizard with its catalog,
+	// keeping what was typed and the step — no checks.
+	form := url.Values{"mode": {"form"}, "namespaceChoice": {"team-b"}, "namespace": {"team-a"},
+		"name": {"kept-name"}, "action": {"reload"}, "step": {"2"}}
+	body := w.post(t, newURL, developer, form).Body.String()
+	assert.Contains(t, body, `<option value="jmeter"`, "team-b's catalog")
+	assert.NotContains(t, body, `<option value="k6"`)
+	assert.Contains(t, body, `value="kept-name"`)
+	assert.Contains(t, body, `data-step="2"`)
+	assert.NotContains(t, body, "Fix these first", "a reload checks nothing")
+
+	// A typed namespace when "Other namespace…" is chosen.
+	form.Set("namespaceChoice", "__other")
+	form.Set("namespace", "brand-new")
+	body = w.post(t, newURL, developer, form).Body.String()
+	assert.Contains(t, body, `<option value="__other" selected>`)
+	assert.Contains(t, body, `name="namespace" value="brand-new"`)
 }

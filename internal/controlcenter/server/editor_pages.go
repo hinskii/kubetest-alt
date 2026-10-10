@@ -21,6 +21,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -43,6 +44,9 @@ const (
 	actDownload = "download"
 	actToYAML   = "to-yaml"
 	actToForm   = "to-form"
+	// actReload re-renders the wizard for another namespace's catalog,
+	// keeping what was typed and the step — no checks, no dry run.
+	actReload = "reload"
 )
 
 // templateOption is one tool of the catalog in the wizard.
@@ -64,7 +68,10 @@ type editorData struct {
 	Back       string
 	Form       testForm
 	Namespaces []string
-	Templates  []templateOption
+	// NamespaceListed: the form's namespace is one of Namespaces (else
+	// "Other namespace…" with the typed name).
+	NamespaceListed bool
+	Templates       []templateOption
 	// TemplatesErr: the catalog couldn't be listed.
 	TemplatesErr string
 	Errors       []string
@@ -125,6 +132,12 @@ func namespacesOf(ctx context.Context, client *apiclient.Client, extra string) [
 	}
 	if tests, err := client.ListTests(ctx, ""); err == nil {
 		for _, t := range tests {
+			set[t.Namespace] = true
+		}
+	}
+	// Namespaces with a tool catalog: where a template-based Test works.
+	if templates, err := client.ListTemplates(ctx, ""); err == nil {
+		for _, t := range templates {
 			set[t.Namespace] = true
 		}
 	}
@@ -308,6 +321,12 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 	c, client, f, data, base, templates, t := st.c, st.client, st.f, st.data, st.base, st.templates, st.t
 	action := r.PostForm.Get("action")
 	switch {
+	case action == actReload:
+		data.Errors, data.Warnings = nil, nil
+		data.Step = min(max(atoi(r.PostForm.Get("step")), stepBasics), stepReview)
+		data.Form = f
+		s.renderEditor(w, r, c, client, data)
+		return
 	case action == actToYAML && len(data.Errors) == 0:
 		f.Mode, f.YAML = modeYAML, manifestYAML(t)
 	case action == actToForm && len(data.Errors) == 0:
@@ -390,7 +409,8 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *cluster
 		data.Templates = templateOptions(list, data.Form)
 	}
 	if !data.Edit {
-		data.Namespaces = namespacesOf(r.Context(), client, data.Form.Namespace)
+		data.Namespaces = namespacesOf(r.Context(), client, "")
+		data.NamespaceListed = slices.Contains(data.Namespaces, data.Form.Namespace)
 	}
 	// One empty row to add a file to (without JavaScript, too).
 	data.Form.Files = append(slices.Clone(data.Form.Files), fileField{})
@@ -416,4 +436,10 @@ func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, clusterPath(c.Name), "Test "+ns+"/"+name+" deleted. Its run history stays.")
+}
+
+// atoi is strconv.Atoi without the error (0 for anything else).
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }

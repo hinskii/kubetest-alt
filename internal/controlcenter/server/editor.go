@@ -129,10 +129,22 @@ const (
 	fParam = "param."
 )
 
+// otherNamespace is the namespace list's "Other namespace…" choice: the
+// name is then typed.
+const otherNamespace = "__other"
+
+// namespaceOf is the chosen namespace: from the list, else typed.
+func namespaceOf(v url.Values) string {
+	if c := v.Get("namespaceChoice"); c != "" && c != otherNamespace {
+		return c
+	}
+	return strings.TrimSpace(v.Get(fNamespace))
+}
+
 // formFromValues reads a submitted form.
 func formFromValues(v url.Values) testForm {
 	f := testForm{
-		Namespace: strings.TrimSpace(v.Get(fNamespace)), Name: strings.TrimSpace(v.Get(fName)),
+		Namespace: namespaceOf(v), Name: strings.TrimSpace(v.Get(fName)),
 		Template: v.Get(fTemplate), Tool: strings.TrimSpace(v.Get("tool")),
 		Image: strings.TrimSpace(v.Get("image")), Command: v.Get("command"), Args: v.Get("args"),
 		Source: v.Get("source"), GitURI: strings.TrimSpace(v.Get("gitURI")),

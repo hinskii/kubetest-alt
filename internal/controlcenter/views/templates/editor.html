@@ -17,6 +17,8 @@
 <form method="post" action="{{$d.Action}}" class="wizard" id="wizard" novalidate data-step="{{$d.Step}}" data-mode="{{$f.Mode}}">
   <input type="hidden" name="mode" value="{{$f.Mode}}">
   <input type="hidden" name="resourceVersion" value="{{$f.ResourceVersion}}">
+  <input type="hidden" name="step" value="{{$d.Step}}" id="step-field">
+  <input type="hidden" name="action" value="reload" id="reload-action" disabled>
 
 {{if eq $f.Mode "yaml"}}
   <input type="hidden" name="namespace" value="{{$f.Namespace}}">
@@ -49,14 +51,20 @@
       <p>{{$f.Namespace}}/<strong>{{$f.Name}}</strong></p>
     {{else}}
     <div class="run-form">
-      <label><span>Namespace</span>
-        <input type="text" name="namespace" value="{{$f.Namespace}}" list="namespaces" placeholder="demo" autocomplete="off" data-loaded="{{$f.Namespace}}">
-        <datalist id="namespaces">{{range $d.Namespaces}}<option value="{{.}}">{{end}}</datalist>
+      <label><span>Namespace <span class="muted">the tool catalog follows it</span></span>
+        <select name="namespaceChoice" id="namespace-choice">
+          {{if not $f.Namespace}}<option value="" selected disabled>Choose a namespace</option>{{end}}
+          {{range $d.Namespaces}}<option value="{{.}}"{{if eq . $f.Namespace}} selected{{end}}>{{.}}</option>{{end}}
+          <option value="__other"{{if and $f.Namespace (not $d.NamespaceListed)}} selected{{end}}>Other namespace…</option>
+        </select>
+      </label>
+      <label id="namespace-other"><span>Namespace name</span>
+        <input type="text" name="namespace" value="{{$f.Namespace}}" placeholder="team-checkout" autocomplete="off" maxlength="63">
       </label>
       <label><span>Name <span class="muted">lowercase, digits, -</span></span>
         <input type="text" name="name" value="{{$f.Name}}" placeholder="checkout-smoke" autocomplete="off" maxlength="200">
       </label>
-      <div><button type="submit" formmethod="get" formaction="{{$d.Action}}" formnovalidate class="button secondary" id="load-catalog">Load the tool catalog</button></div>
+      <noscript><div><button type="submit" name="action" value="reload" formnovalidate class="button secondary">Load the tool catalog</button></div></noscript>
     </div>
     {{end}}
 

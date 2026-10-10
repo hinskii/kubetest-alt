@@ -14,8 +14,10 @@
   var review = form.querySelector('[data-nav="review"]');
   var current = parseInt(form.getAttribute("data-step"), 10) || 1;
 
+  var stepField = document.getElementById("step-field");
   function show(n) {
     current = Math.max(1, Math.min(steps.length, n));
+    if (stepField) stepField.value = current;
     steps.forEach(function (s) {
       s.hidden = parseInt(s.getAttribute("data-step"), 10) !== current;
     });
@@ -183,13 +185,34 @@
     });
   }
 
-  // Another namespace means another catalog: offer to load it.
-  var ns = form.querySelector('input[name="namespace"][data-loaded]');
-  var load = document.getElementById("load-catalog");
-  if (ns && load) {
-    function syncLoad() { load.hidden = ns.value === ns.getAttribute("data-loaded") && ns.value !== ""; }
-    ns.addEventListener("input", syncLoad);
-    syncLoad();
+  // The namespace: from the list, or typed after "Other namespace…".
+  // Another namespace means another catalog: the wizard reloads itself
+  // for it (the server keeps what was typed and the step).
+  var nsChoice = document.getElementById("namespace-choice");
+  var nsOther = document.getElementById("namespace-other");
+  var nsInput = form.querySelector('input[name="namespace"]');
+  var reload = function () {
+    var field = document.getElementById("reload-action");
+    if (!field) return;
+    field.disabled = false;
+    form.submit();
+  };
+  if (nsChoice && nsOther && nsInput) {
+    var loaded = nsInput.value;
+    var syncNs = function () {
+      var other = nsChoice.value === "__other";
+      nsOther.hidden = !other;
+      if (!other) nsInput.value = nsChoice.value;
+    };
+    nsChoice.addEventListener("change", function () {
+      syncNs();
+      if (nsChoice.value !== "__other" && nsChoice.value !== loaded) reload();
+      else if (nsChoice.value === "__other") nsInput.focus();
+    });
+    nsInput.addEventListener("change", function () {
+      if (nsInput.value.trim() && nsInput.value.trim() !== loaded) reload();
+    });
+    syncNs();
   }
 
   // More file rows.
