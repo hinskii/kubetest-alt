@@ -41,6 +41,35 @@
   form.classList.add("js");
   show(current);
 
+  // Nicer drop-downs (Tom Select, vendored): the tool searchable, each
+  // with its image; the namespace searchable, a new one typed in place.
+  // Without the library the plain selects work as they are.
+  var richSelect = function (el, opts) {
+    if (!el || !window.TomSelect) return null;
+    return new window.TomSelect(el, Object.assign({ maxOptions: null, allowEmptyOption: false }, opts));
+  };
+  richSelect(document.getElementById("tool"), {
+    searchField: ["text", "image", "tool"],
+    dataAttr: "data-data",
+    onInitialize: function () {
+      var self = this;
+      Object.keys(self.options).forEach(function (k) {
+        var o = self.input.querySelector('option[value="' + CSS.escape(k) + '"]');
+        if (o) {
+          self.options[k].image = o.getAttribute("data-image") || "";
+          self.options[k].tool = o.getAttribute("data-tool") || "";
+        }
+      });
+    },
+    render: {
+      option: function (d, esc) {
+        return "<div class=\"ts-tool\"><strong>" + esc(d.text) + "</strong>" +
+          (d.image ? "<span class=\"muted mono\">" + esc(d.image) + "</span>" : "") + "</div>";
+      },
+      item: function (d, esc) { return "<div>" + esc(d.text) + "</div>"; },
+    },
+  });
+
   // The chosen tool's parameters only; the image hint follows it.
   var tool = document.getElementById("tool");
   var toolHint = document.getElementById("tool-hint");
@@ -197,7 +226,30 @@
     field.disabled = false;
     form.submit();
   };
-  if (nsChoice && nsOther && nsInput) {
+  if (nsChoice && nsOther && nsInput && window.TomSelect) {
+    // Searchable, and a new namespace is typed right in the list.
+    var other = nsChoice.querySelector('option[value="__other"]');
+    if (other) other.remove();
+    if (nsInput.value && !nsChoice.querySelector('option[value="' + CSS.escape(nsInput.value) + '"]')) {
+      var typed = document.createElement("option");
+      typed.value = typed.textContent = nsInput.value;
+      typed.selected = true;
+      nsChoice.appendChild(typed);
+    }
+    nsOther.hidden = true;
+    var loadedNs = nsInput.value;
+    richSelect(nsChoice, {
+      create: true, createOnBlur: true, placeholder: "Choose or type a namespace",
+      render: {
+        option_create: function (d, esc) { return "<div class=\"create\">New namespace <strong>" + esc(d.input) + "</strong></div>"; },
+        no_results: null, // typing a new one is always possible
+      },
+      onChange: function (value) {
+        nsInput.value = value;
+        if (value && value !== loadedNs) reload();
+      },
+    });
+  } else if (nsChoice && nsOther && nsInput) {
     var loaded = nsInput.value;
     var syncNs = function () {
       var other = nsChoice.value === "__other";

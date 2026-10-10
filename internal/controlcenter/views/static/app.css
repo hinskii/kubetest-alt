@@ -364,3 +364,40 @@ ul.panel-warnings { padding-left: 1.6rem; }
   .editor-layout { grid-template-columns: minmax(0, 1fr); }
   .yaml-panel { position: static; max-height: none; }
 }
+
+/* Drop-downs and choices that look like Control Center (step 20j). */
+/* Plain selects: our colours and a chevron, not the browser's. */
+.wizard select, .run-form select, .filters select {
+  appearance: none; -webkit-appearance: none; padding-right: 2.2rem; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%238b93a7' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 0.8rem center;
+}
+.wizard select:focus, .wizard input:focus, .wizard textarea:focus, .filters select:focus {
+  outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+/* The code's source as a segmented control. */
+.radio-row { display: inline-flex; flex-wrap: wrap; gap: 0; padding: 3px; background: var(--surface-muted);
+  border: 1px solid var(--border); border-radius: 10px; }
+.radio-row label { position: relative; padding: 0.4rem 0.9rem; border-radius: 7px; color: var(--muted); font-weight: 500; }
+.radio-row label:has(input:checked) { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.radio-row label:has(input:focus-visible) { box-shadow: 0 0 0 3px var(--primary-soft); }
+.radio-row input { position: absolute; opacity: 0; pointer-events: none; }
+
+/* Tom Select, themed with our tokens (light and dark). */
+.ts-wrapper .ts-control, .ts-wrapper.single .ts-control, .ts-dropdown {
+  background: var(--surface-muted); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+  font: inherit; box-shadow: none;
+}
+.ts-wrapper.single .ts-control { padding: 0.45rem 2.2rem 0.45rem 0.6rem; background-image: none; }
+.ts-wrapper.focus .ts-control { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+.ts-wrapper.single .ts-control::after { border-color: var(--muted) transparent transparent; right: 0.9rem; }
+.ts-control > input { color: var(--text); font: inherit; }
+.ts-dropdown { margin-top: 4px; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); z-index: 20; }
+.ts-dropdown .option, .ts-dropdown .create { padding: 0.5rem 0.7rem; color: var(--text); }
+.ts-dropdown .active { background: var(--primary-soft); color: var(--text); }
+.ts-dropdown .ts-tool { display: flex; justify-content: space-between; gap: 1rem; }
+.ts-dropdown .ts-tool .mono { font-size: 0.75rem; }
+.ts-dropdown .create strong { color: var(--primary); }
+.ts-wrapper.single.input-active .ts-control, .ts-wrapper.dropdown-active .ts-control,
+.ts-wrapper.single.input-active .ts-control input { background: var(--surface-muted); color: var(--text); }

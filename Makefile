@@ -411,6 +411,21 @@ dev-ui: ## Open Control Center of the dev cluster on http://localhost:8090 (Ctrl
 		echo "port-forward ended; reconnecting in 2s (Ctrl-C to stop)"; sleep 2; \
 	done
 
+# Vendored UI libraries for Control Center (no CDN: CSP stays 'self').
+# Pinned versions; the files are committed under views/static/vendor/.
+TOM_SELECT_VERSION ?= 2.6.2
+UI_VENDOR_DIR := internal/controlcenter/views/static/vendor
+
+.PHONY: vendor-ui
+vendor-ui: ## Fetch the pinned UI libraries into Control Center's static/vendor/.
+	@tmp=$$(mktemp -d) && cd $$tmp && npm pack --silent tom-select@$(TOM_SELECT_VERSION) >/dev/null && \
+	  tar -xzf tom-select-$(TOM_SELECT_VERSION).tgz && cd - >/dev/null && \
+	  mkdir -p $(UI_VENDOR_DIR)/tom-select && \
+	  cp $$tmp/package/dist/js/tom-select.complete.min.js $$tmp/package/dist/css/tom-select.css \
+	     $$tmp/package/LICENSE $(UI_VENDOR_DIR)/tom-select/ && \
+	  echo "tom-select $(TOM_SELECT_VERSION)" > $(UI_VENDOR_DIR)/tom-select/VERSION && \
+	  echo "vendored tom-select $(TOM_SELECT_VERSION) (temp files left in $$tmp)"
+
 .PHONY: dev-reload
 dev-reload: ## Rebuild the platform images and restart them in the dev cluster.
 	docker build -q -f Dockerfile -t kubetest-alt/operator:dev --build-arg TARGET_BIN=cmd/operator .
