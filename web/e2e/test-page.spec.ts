@@ -15,6 +15,7 @@ test("from the tests list to a Test: run form, schedule, definition", async ({ p
   await expect(run.getByLabel(/greeting/)).toHaveValue("hello");
   await expect(run.getByRole("button", { name: "Run test" })).toBeVisible();
 
+  await page.getByRole("tab", { name: "Settings" }).click();
   const schedule = page.getByRole("region", { name: "Schedule" });
   await schedule.getByLabel(/Cron/).fill("0 3 * * *");
   await schedule.getByRole("button", { name: "Save schedule" }).click();
@@ -23,6 +24,7 @@ test("from the tests list to a Test: run form, schedule, definition", async ({ p
   await schedule.getByRole("button", { name: "Remove schedule" }).click();
   await expect(page.getByText("Schedule removed.")).toBeVisible();
 
+  await page.getByRole("tab", { name: "Overview" }).click();
   await page.locator("summary", { hasText: "Definition" }).click();
   const yaml = page.getByLabel("Test definition");
   await expect(yaml.locator(".cm-content")).toContainText("image: busybox:1.37");
@@ -33,4 +35,23 @@ test("from the tests list to a Test: run form, schedule, definition", async ({ p
   await page.getByRole("button", { name: `Switch to ${next} theme` }).click();
   await expect(html).toHaveAttribute("data-theme", next);
   await expect(yaml.locator(".cm-content")).toContainText("image: busybox:1.37");
+});
+
+test("Settings: a section saves alone", async ({ page }) => {
+  await page.goto(`/clusters/${cluster}/tests/${ns}/ui-smoke?tab=settings`);
+  const timeout = page.getByRole("region", { name: "Timeout" });
+  const field = timeout.getByLabel(/^Timeout/);
+  await field.fill("7m");
+  await timeout.getByRole("button", { name: "Save timeout" }).click();
+  await expect(page.getByText("Timeout saved.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "YAML" }).locator(".cm-content")).toContainText(
+    "timeout: 7m0s",
+  );
+
+  // Put it back, so the next run starts from the fixture.
+  await field.fill("");
+  await timeout.getByRole("button", { name: "Save timeout" }).click();
+  await expect(page.getByRole("region", { name: "YAML" }).locator(".cm-content")).not.toContainText(
+    "timeout:",
+  );
 });

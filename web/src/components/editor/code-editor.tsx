@@ -54,6 +54,7 @@ export default function CodeEditor({
   label,
   errors = [],
   minHeight = "16rem",
+  readOnly = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -61,6 +62,7 @@ export default function CodeEditor({
   label: string;
   errors?: string[];
   minHeight?: string;
+  readOnly?: boolean;
 }) {
   const theme = useTheme();
   const ref = useRef<ReactCodeMirrorRef>(null);
@@ -88,6 +90,8 @@ export default function CodeEditor({
       theme={theme === "dark" ? githubDark : githubLight}
       extensions={extensions}
       minHeight={minHeight}
+      editable={!readOnly}
+      readOnly={readOnly}
       aria-label={label}
       basicSetup={{ tabSize: 2 }}
       className="overflow-hidden rounded-lg border text-sm"

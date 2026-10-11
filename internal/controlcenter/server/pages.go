@@ -21,37 +21,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"net/url"
 	pathpkg "path"
-	"slices"
 	"strconv"
 	"strings"
 
-	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
-	"github.com/hinskii/kubetest-alt/pkg/expr"
-)
-
-// Labels Control Center reads from Tests.
-// (The UI's API package owns them; see api/view.go.)
-const (
-	labelTool      = uiapi.LabelTool
-	labelManagedBy = uiapi.LabelManagedBy
-	managedByUI    = uiapi.ManagedByUI
-)
-
-// HTML input types of parameter fields (inputNumber is also the
-// parameter type).
-const (
-	inputNumber = "number"
-	inputText   = "text"
 )
 
 // dispositionInline: the browser shows the file rather than saving it.
@@ -68,9 +48,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("GET /clusters/{cluster}", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/new", webui.Index())
-	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestPage)))
-	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
-	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
+	// The editor is the Test page's Settings tab now (step 20R R4).
+	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/edit", func(w http.ResponseWriter, r *http.Request) {
+		// testPath escapes each segment: always a path on this server.
+		http.Redirect(w, r, testPath(r.PathValue("cluster"), r.PathValue("ns"), r.PathValue("name"))+"?tab=settings", //nolint:gosec // see above
+			http.StatusMovedPermanently)
+	})
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/schedules", webui.Index())
@@ -143,53 +126,7 @@ func redirect(w http.ResponseWriter, r *http.Request, target, notice string) {
 	http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // local path only, checked above
 }
 
-// page renders a page with the notice of the previous action.
-func (s *Server) page(w http.ResponseWriter, r *http.Request, name, title string, crumbs []views.Crumb, data any) {
-	notice := r.URL.Query().Get("notice")
-	if len(notice) > 300 {
-		notice = notice[:300]
-	}
-	p := views.Page{Title: title, User: auth.FromContext(r.Context()), Notice: notice, Breadcrumbs: crumbs, Data: data}
-	if err := s.Views.Render(w, http.StatusOK, name, p); err != nil {
-		s.Log.Error("render failed", "page", name, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}
-}
-
-func clusterCrumbs(c *clusters.Cluster) []views.Crumb {
-	return []views.Crumb{{Label: "Clusters", Href: "/"}, {Label: c.DisplayNameOrName(), Href: clusterPath(c.Name)}}
-}
-
 // --- test page ----------------------------------------------------------------------
-
-// param is one spec.config parameter as a form field.
-type param struct {
-	Name, Type, Default, Pattern, Description string
-	Value                                     string // the editor's current value
-	Enum                                      []string
-	Required                                  bool
-	InputType, Step                           string
-}
-
-func paramsOf(spec *testsv1alpha1.TestSpec) []param {
-	if spec == nil {
-		return nil
-	}
-	out := make([]param, 0, len(spec.Config))
-	for _, name := range slices.Sorted(maps.Keys(spec.Config)) {
-		p := spec.Config[name]
-		f := param{Name: name, Type: p.Type, Default: p.Default, Pattern: p.Pattern,
-			Enum: p.Enum, Required: p.Default == "", InputType: inputText}
-		switch p.Type {
-		case expr.TypeInteger:
-			f.InputType, f.Step = inputNumber, "1"
-		case inputNumber:
-			f.InputType, f.Step = inputNumber, "any"
-		}
-		out = append(out, f)
-	}
-	return out
-}
 
 // runLogDownload streams the whole stored log as a file.
 func (s *Server) runLogDownload(w http.ResponseWriter, r *http.Request) {

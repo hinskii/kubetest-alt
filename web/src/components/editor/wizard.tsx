@@ -1,14 +1,14 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { lazy, Suspense, useState } from "react";
 import { toast } from "sonner";
 
 import type { TestForm, ToolTemplate } from "@/api/client";
 import { createTest, FormRefused, namespacesQuery, templatesQuery } from "@/api/queries";
 import { downloadYAML, usePreview, YamlPanel } from "@/components/editor/live-yaml";
+import { errorsFor, Field, GitFields, ParamFields } from "@/components/editor/fields";
 import { NamespaceCombobox } from "@/components/editor/namespace-combobox";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -34,6 +34,8 @@ const steps: { n: Step; title: string }[] = [
  * takes git only; a single-file tool a pasted script or git; a tool
  * without files nothing (or git); an own image any of them.
  */
+export { errorsFor };
+
 export function sourcesFor(t: ToolTemplate | undefined): Source[] {
   if (!t) return ["", "git", "inline"];
   switch (t.mainKind) {
@@ -57,39 +59,6 @@ export function fileNameFor(t: ToolTemplate | undefined): string {
   const p = t?.params.find((p) => p.name === t.mainParam);
   const eg = /e\.g\. (\S+\.\w+)/.exec(p?.description ?? "")?.[1];
   return eg?.split("/").pop() ?? "script";
-}
-
-/** errorsFor: the build's errors that belong to a field (by its label). */
-export function errorsFor(errors: string[], ...labels: string[]): string[] {
-  return errors.filter((e) => labels.some((l) => e.startsWith(l + ":") || e.startsWith(l + " ")));
-}
-
-function Field({
-  id,
-  label,
-  hint,
-  errors = [],
-  children,
-}: {
-  id: string;
-  label: string;
-  hint?: ReactNode;
-  errors?: string[];
-  children: ReactNode;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>
-        {label} {hint && <span className="text-muted-foreground font-normal">{hint}</span>}
-      </Label>
-      {children}
-      {errors.map((e) => (
-        <p key={e} className="text-destructive text-sm" id={`${id}-error`}>
-          {e}
-        </p>
-      ))}
-    </div>
-  );
 }
 
 /** renamed sets a manifest's metadata.name (Duplicate of a YAML-only Test). */
@@ -118,7 +87,6 @@ export function TestWizard({
   const [step, setStep] = useState<Step>(1);
   const [shown, setShown] = useState<Set<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
-  const [privateRepo, setPrivateRepo] = useState(!!initial.gitSecret);
   const [showYaml, setShowYaml] = useState(false);
   const [checked, setChecked] = useState<{ ok?: boolean; errors: string[] }>();
   const [toolChosen, setToolChosen] = useState(!!initial.template || !!initial.image);
@@ -449,91 +417,7 @@ export function TestWizard({
                   </>
                 )}
                 {form.source === "git" && (
-                  <>
-                    {tmpl?.mainKind === "directory" && (
-                      <p className="text-muted-foreground text-sm">
-                        {tmpl.name} runs a project — its code comes from a Git repository.
-                      </p>
-                    )}
-                    <Field id="git-uri" label="Repository" errors={errs("gitUri", "Git repository")}>
-                      <Input
-                        id="git-uri"
-                        value={form.gitUri ?? ""}
-                        placeholder="https://github.com/org/repo"
-                        autoComplete="off"
-                        onChange={(e) => set({ gitUri: e.target.value })}
-                        onBlur={() => touch("gitUri")}
-                      />
-                    </Field>
-                    <Field
-                      id="git-path"
-                      label="Path in the repository"
-                      hint={
-                        tmpl?.mainKind === "directory"
-                          ? "the folder with your tests; “.” for the root"
-                          : "the test file or its folder"
-                      }
-                      errors={errs("gitPath", "Path in the repository")}
-                    >
-                      <Input
-                        id="git-path"
-                        className="font-mono"
-                        value={form.gitPath ?? ""}
-                        placeholder={tmpl?.mainKind === "directory" ? "e2e" : "perf/checkout.js"}
-                        autoComplete="off"
-                        onChange={(e) => set({ gitPath: e.target.value })}
-                        onBlur={() => touch("gitPath")}
-                      />
-                    </Field>
-                    <Field
-                      id="git-revision"
-                      label="Branch"
-                      hint="or a tag or commit; empty: the default branch"
-                    >
-                      <Input
-                        id="git-revision"
-                        value={form.gitRevision ?? ""}
-                        placeholder="main"
-                        autoComplete="off"
-                        onChange={(e) => set({ gitRevision: e.target.value })}
-                      />
-                    </Field>
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="private-repo"
-                        checked={privateRepo}
-                        onCheckedChange={(v) => {
-                          setPrivateRepo(v === true);
-                          if (v !== true) set({ gitSecret: "", gitSecretKey: "" });
-                        }}
-                      />
-                      <Label htmlFor="private-repo" className="font-normal">
-                        Private repository?
-                      </Label>
-                    </div>
-                    {privateRepo && (
-                      <>
-                        <Field id="git-secret" label="Secret with the token" hint="in the Test's namespace">
-                          <Input
-                            id="git-secret"
-                            value={form.gitSecret ?? ""}
-                            placeholder="git-token"
-                            autoComplete="off"
-                            onChange={(e) => set({ gitSecret: e.target.value })}
-                          />
-                        </Field>
-                        <Field id="git-secret-key" label="Key in the Secret" hint="empty: token">
-                          <Input
-                            id="git-secret-key"
-                            value={form.gitSecretKey ?? ""}
-                            placeholder="token"
-                            autoComplete="off"
-                            onChange={(e) => set({ gitSecretKey: e.target.value })}
-                          />
-                        </Field>
-                      </>
-                    )}
-                  </>
+                  <GitFields form={form} set={set} tmpl={tmpl} errors={errs} onBlur={touch} />
                 )}
                 {!ownImage && !form.source && (
                   <p className="text-muted-foreground text-sm">
@@ -546,63 +430,13 @@ export function TestWizard({
             {step === 3 && (
               <section aria-label="Parameters" className="space-y-4">
                 {tmpl ? (
-                  tmpl.params.length > 0 ? (
-                    <>
-                      <p className="text-muted-foreground text-sm">
-                        Parameters of {tmpl.name} — a run can still override them.
-                      </p>
-                      {tmpl.params.map((p) => {
-                        const id = `param-${p.name}`;
-                        const value = form.params?.[p.name] ?? "";
-                        const setValue = (v: string) => set({ params: { ...form.params, [p.name]: v } });
-                        const main = p.name === tmpl.mainParam;
-                        return (
-                          <Field
-                            key={p.name}
-                            id={id}
-                            label={p.name}
-                            hint={
-                              main
-                                ? "where the tests are — empty: the path in the repository, or the pasted script"
-                                : `${p.type}${p.required ? ", set at run time if empty" : ""}`
-                            }
-                            errors={errs(id, p.name)}
-                          >
-                            {p.enum?.length || p.type === "boolean" ? (
-                              <Select value={value || p.default || ""} onValueChange={setValue}>
-                                <SelectTrigger id={id} className="w-full">
-                                  <SelectValue placeholder="—" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {(p.enum?.length ? p.enum : ["true", "false"]).map((v) => (
-                                    <SelectItem key={v} value={v}>
-                                      {v}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            ) : (
-                              <Input
-                                id={id}
-                                className={cn(main && "font-mono")}
-                                type={p.type === "integer" || p.type === "number" ? "number" : "text"}
-                                step={p.type === "number" ? "any" : undefined}
-                                value={value}
-                                placeholder={p.default}
-                                onChange={(e) => setValue(e.target.value)}
-                                onBlur={() => touch(id)}
-                              />
-                            )}
-                            {p.description && !main && (
-                              <p className="text-muted-foreground text-sm">{p.description}</p>
-                            )}
-                          </Field>
-                        );
-                      })}
-                    </>
-                  ) : (
-                    <p className="text-muted-foreground text-sm">{tmpl.name} has no parameters.</p>
-                  )
+                  <ParamFields
+                    tmpl={tmpl}
+                    params={form.params}
+                    onChange={(params) => set({ params })}
+                    errors={(p) => errs(`param-${p.name}`, p.name)}
+                    onBlur={(p) => touch(`param-${p.name}`)}
+                  />
                 ) : (
                   <p className="text-muted-foreground text-sm">An own image has no template parameters.</p>
                 )}

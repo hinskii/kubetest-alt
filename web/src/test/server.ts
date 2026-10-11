@@ -1,7 +1,16 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
-import type { Cluster, Me, RunDetail, RunRow, TestDetail, TestSummary } from "@/api/client";
+import type {
+  Cluster,
+  Me,
+  RunDetail,
+  RunRow,
+  TestDetail,
+  TestFormOf,
+  TestSummary,
+  ToolTemplate,
+} from "@/api/client";
 
 // Default API answers for component tests; a test overrides with
 // server.use(...).
@@ -107,6 +116,39 @@ export const finishedRun: RunDetail = {
   ],
 };
 
+// smoke as the editor shows it (Settings), and the namespace's catalog.
+export const smokeForm: TestFormOf = {
+  locked: false,
+  form: {
+    namespace: "team-a",
+    name: "smoke",
+    template: "k6",
+    tool: "k6",
+    source: "git",
+    gitUri: "https://github.com/acme/perf",
+    gitPath: "perf/smoke.js",
+    gitRevision: "main",
+    params: { vus: "20" },
+    timeout: "15m",
+    memoryLimit: "1Gi",
+    resourceVersion: "41",
+    mode: "form",
+    yaml: "apiVersion: tests.kubetest.io/v1alpha1\nkind: Test\nmetadata:\n  name: smoke\n",
+  },
+};
+
+export const k6Template: ToolTemplate = {
+  name: "k6",
+  tool: "k6",
+  image: "grafana/k6:1.4.0",
+  mainParam: "script",
+  mainKind: "file",
+  params: [
+    { name: "script", type: "string", required: false, description: "The k6 script, e.g. perf/checkout.js." },
+    { name: "vus", type: "integer", default: "10", required: false },
+  ],
+};
+
 const T = "*/api/v1/clusters/dev/tests/team-a/smoke";
 const R = "*/api/v1/clusters/dev/runs/:ns/:id";
 
@@ -116,6 +158,8 @@ export const server = setupServer(
   http.get("*/api/v1/clusters/dev/tests", () => HttpResponse.json({ tests })),
   http.get(T, () => HttpResponse.json(smoke)),
   http.get(`${T}/runs`, () => HttpResponse.json({ runs })),
+  http.get(`${T}/form`, () => HttpResponse.json(smokeForm)),
+  http.get("*/api/v1/clusters/dev/templates", () => HttpResponse.json({ templates: [k6Template] })),
   http.get("*/api/v1/clusters/dev/schedules", () =>
     HttpResponse.json({
       recurring: [

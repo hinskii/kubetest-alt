@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -99,17 +98,17 @@ func (w *world) get(t *testing.T, path, user string) *httptest.ResponseRecorder 
 	return rec
 }
 
-func (w *world) post(t *testing.T, path, user string, form url.Values) *httptest.ResponseRecorder {
-	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	if user != "" {
-		req.Header.Set(auth.HeaderEmail, user)
-	}
-	rec := httptest.NewRecorder()
-	w.h.ServeHTTP(rec, req)
-	return rec
+// The editor moved to the Test page's Settings tab (step 20R R4): old
+// links land there; the new-test wizard is the UI's for everyone signed in
+// (creating needs the developer role at the API).
+func TestEditor_MovedToTheUI(t *testing.T) {
+	w := newWorld(t, smokeTest())
+	rec := w.get(t, clusterURL+"/tests/team-a/smoke/edit", developer)
+	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
+	assert.Equal(t, clusterURL+"/tests/team-a/smoke?tab=settings", rec.Header().Get("Location"))
+	page := w.get(t, clusterURL+"/tests/new", "someone@example.com")
+	assert.Equal(t, http.StatusOK, page.Code)
+	assert.Contains(t, page.Body.String(), `<div id="root">`)
 }
 
 func smokeTest() *testsv1alpha1.Test {

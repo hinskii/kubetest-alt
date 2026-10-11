@@ -13,7 +13,10 @@ describe("test page", () => {
     renderRoute(page);
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("smoke");
     expect(screen.getByText("Namespace team-a · templates base")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", `${page}/edit`);
+    expect(screen.getByRole("link", { name: "Edit" })).toHaveAttribute("href", `${page}?tab=settings`);
+    expect(screen.getByTestId("schedule-line")).toHaveTextContent(
+      "Runs on a schedule: 0 2 * * * · next 2026-10-08 02:00:00 UTC · change",
+    );
     expect(screen.getByRole("link", { name: "Duplicate" })).toHaveAttribute(
       "href",
       "/clusters/dev/tests/new?namespace=team-a&from=smoke",
@@ -106,7 +109,7 @@ describe("test page", () => {
         );
       }),
     );
-    renderRoute(page);
+    renderRoute(`${page}?tab=settings`);
     const panel = within(await screen.findByRole("region", { name: "Schedule" }));
     expect(panel.getByText("0 2 * * *")).toBeInTheDocument();
     const input = panel.getByLabelText(/Cron/);

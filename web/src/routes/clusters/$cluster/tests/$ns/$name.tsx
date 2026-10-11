@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { z } from "zod";
 
@@ -10,18 +10,22 @@ import { Chip } from "@/components/phase-badge";
 import { DeleteTest } from "@/components/test/delete-test";
 import { RunForm } from "@/components/test/run-form";
 import { RunsTable } from "@/components/test/runs-table";
-import { SchedulePanel } from "@/components/test/schedule-panel";
+import { TestSettings } from "@/components/test/settings";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { goPage } from "@/lib/paths";
+import { when } from "@/lib/format";
 
 // CodeMirror only when the definition is opened.
 const YamlView = lazy(() => import("@/components/yaml-view"));
 
 export const Route = createFileRoute("/clusters/$cluster/tests/$ns/$name")({
-  validateSearch: z.object({ after: z.string().optional().catch(undefined) }),
+  validateSearch: z.object({
+    after: z.string().optional().catch(undefined),
+    tab: z.enum(["settings"]).optional().catch(undefined),
+  }),
   component: TestPage,
 });
 
@@ -55,7 +59,8 @@ function Panel({
 
 function TestPage() {
   const k = Route.useParams();
-  const { after } = Route.useSearch();
+  const { after, tab } = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
   const test = useQuery(testQuery(k));
   const runs = useQuery(testRunsQuery(k, after));
   const me = useQuery(meQuery);
@@ -102,7 +107,9 @@ function TestPage() {
       >
         {editable && (
           <Button variant="outline" asChild>
-            <a href={goPage.edit(k.cluster, k.ns, k.name)}>Edit</a>
+            <Link from={Route.fullPath} search={{ tab: "settings" }}>
+              Edit
+            </Link>
           </Button>
         )}
         {canRun && (
@@ -132,9 +139,9 @@ function TestPage() {
                 <>
                   {" "}
                   —{" "}
-                  <a href={goPage.edit(k.cluster, k.ns, k.name)} className="underline">
+                  <Link from={Route.fullPath} search={{ tab: "settings" }} className="underline">
                     edit the Test
-                  </a>
+                  </Link>
                 </>
               ) : t.locked ? (
                 " — set it where the Test is defined (Git)."
@@ -144,94 +151,115 @@ function TestPage() {
         </Alert>
       )}
 
-      {canRun && (
-        <Panel title="Run" id="run">
-          <RunForm k={k} params={t.params} />
-        </Panel>
-      )}
-
-      {(t.schedule || editable) && (
-        <Panel title="Schedule" id="schedule">
-          <SchedulePanel key={t.schedule?.expr ?? ""} k={k} schedule={t.schedule} editable={editable} />
-          {t.locked && (
-            <p className="text-muted-foreground text-sm">
-              Managed in Git: change <code className="font-mono">spec.schedule</code> there.
-            </p>
-          )}
-        </Panel>
-      )}
-
-      <Panel
-        title="Runs"
-        id="runs"
-        actions={
-          <>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/clusters/$cluster/tests/$ns/$name/cases" params={k}>
-                Test cases &amp; flaky tests
-              </Link>
-            </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link to="/clusters/$cluster/tests/$ns/$name/analytics" params={k}>
-                Analytics &amp; comparison
-              </Link>
-            </Button>
-            {canRun && (
-              <Button variant="outline" size="sm" asChild>
-                <Link to="/clusters/$cluster/tests/$ns/$name/cleanup" params={k}>
-                  Clean up runs
-                </Link>
-              </Button>
-            )}
-          </>
+      <Tabs
+        value={tab ?? "overview"}
+        onValueChange={(v) =>
+          void navigate({ search: (prev) => ({ ...prev, tab: v === "settings" ? "settings" : undefined }) })
         }
       >
-        {runs.isError && <ErrorView error={runs.error} />}
-        {runs.isPending && <Skeleton className="h-24 w-full" />}
-        {runs.data &&
-          (runs.data.runs.length === 0 ? (
-            <p className="text-muted-foreground">No runs yet.</p>
-          ) : (
-            <>
-              <RunsTable cluster={k.cluster} ns={k.ns} runs={runs.data.runs} />
-              <nav className="flex gap-4 text-sm" aria-label="Run history pages">
-                {after && (
-                  <Link from={Route.fullPath} search={{}} className="text-primary hover:underline">
-                    Newest
-                  </Link>
-                )}
-                {runs.data.next && (
-                  <Link
-                    from={Route.fullPath}
-                    search={{ after: runs.data.next }}
-                    className="text-primary hover:underline"
-                  >
-                    Older runs
-                  </Link>
-                )}
-              </nav>
-            </>
-          ))}
-      </Panel>
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="space-y-6 pt-4">
+          {canRun && (
+            <Panel title="Run" id="run">
+              <RunForm k={k} params={t.params} />
+            </Panel>
+          )}
 
-      <details
-        className="bg-card rounded-xl border p-5"
-        onToggle={(e) => setShowDefinition((e.target as HTMLDetailsElement).open)}
-      >
-        <summary className="cursor-pointer font-semibold">
-          Definition{" "}
-          <span className="text-muted-foreground font-normal">
-            (templates merged, expressions not evaluated)
-          </span>
-        </summary>
-        {showDefinition && (
-          <div className="mt-4">
-            <Suspense fallback={<Skeleton className="h-40 w-full" />}>
-              <YamlView value={t.definition} label="Test definition" />
-            </Suspense>
-          </div>
-        )}
-      </details>
+          {t.schedule && (
+            <p className="text-sm" data-testid="schedule-line">
+              Runs on a schedule: <code className="font-mono">{t.schedule.expr}</code>
+              {t.schedule.next?.[0] && <> · next {when(t.schedule.next[0])}</>}
+              {t.schedule.error && <span className="text-destructive"> · {t.schedule.error}</span>} ·{" "}
+              <Link
+                from={Route.fullPath}
+                search={{ tab: "settings" }}
+                hash="settings-schedule"
+                className="underline"
+              >
+                {editable ? "change" : "details"}
+              </Link>
+            </p>
+          )}
+
+          <Panel
+            title="Runs"
+            id="runs"
+            actions={
+              <>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/clusters/$cluster/tests/$ns/$name/cases" params={k}>
+                    Test cases &amp; flaky tests
+                  </Link>
+                </Button>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/clusters/$cluster/tests/$ns/$name/analytics" params={k}>
+                    Analytics &amp; comparison
+                  </Link>
+                </Button>
+                {canRun && (
+                  <Button variant="outline" size="sm" asChild>
+                    <Link to="/clusters/$cluster/tests/$ns/$name/cleanup" params={k}>
+                      Clean up runs
+                    </Link>
+                  </Button>
+                )}
+              </>
+            }
+          >
+            {runs.isError && <ErrorView error={runs.error} />}
+            {runs.isPending && <Skeleton className="h-24 w-full" />}
+            {runs.data &&
+              (runs.data.runs.length === 0 ? (
+                <p className="text-muted-foreground">No runs yet.</p>
+              ) : (
+                <>
+                  <RunsTable cluster={k.cluster} ns={k.ns} runs={runs.data.runs} />
+                  <nav className="flex gap-4 text-sm" aria-label="Run history pages">
+                    {after && (
+                      <Link from={Route.fullPath} search={{}} className="text-primary hover:underline">
+                        Newest
+                      </Link>
+                    )}
+                    {runs.data.next && (
+                      <Link
+                        from={Route.fullPath}
+                        search={{ after: runs.data.next }}
+                        className="text-primary hover:underline"
+                      >
+                        Older runs
+                      </Link>
+                    )}
+                  </nav>
+                </>
+              ))}
+          </Panel>
+
+          <details
+            className="bg-card rounded-xl border p-5"
+            onToggle={(e) => setShowDefinition((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="cursor-pointer font-semibold">
+              Definition{" "}
+              <span className="text-muted-foreground font-normal">
+                (templates merged, expressions not evaluated)
+              </span>
+            </summary>
+            {showDefinition && (
+              <div className="mt-4">
+                <Suspense fallback={<Skeleton className="h-40 w-full" />}>
+                  <YamlView value={t.definition} label="Test definition" />
+                </Suspense>
+              </div>
+            )}
+          </details>
+        </TabsContent>
+        <TabsContent value="settings" className="pt-4">
+          <TestSettings k={k} canEdit={canRun} schedule={t.schedule} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
