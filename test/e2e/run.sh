@@ -88,17 +88,23 @@ kubectl get nodes
 phase_end "kind_create"
 
 phase_start "docker_build"
-docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
-docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
-docker build -f Dockerfile -t "kubetest-alt/control-center:${IMAGE_TAG}" --build-arg TARGET_BIN=cmd/control-center --build-arg WITH_WEB=true .
-docker pull "$OAUTH2_PROXY_IMAGE"
-echo "FROM $OAUTH2_PROXY_IMAGE" | docker build -t "kubetest-alt/oauth2-proxy:${IMAGE_TAG}" -
-# Content-fetcher Dockerfile COPYs go.mod, go.sum, api/, pkg/, cmd/entry/
-# — all repo-root paths. Build context MUST be repo root; the previous
-# `executors/content-fetcher` context left every COPY failing with
-# "/api: not found".
-docker build -f executors/content-fetcher/Dockerfile \
-             -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" .
+if [ "${E2E_PREBUILT_IMAGES:-}" = "1" ]; then
+  # CI builds the images once per workflow run and loads them here
+  # (.github/workflows/build-images.yml); the check below still applies.
+  log "E2E_PREBUILT_IMAGES=1 — using the images already loaded"
+else
+  docker build -f Dockerfile -t "kubetest-alt/operator:${IMAGE_TAG}"   --build-arg TARGET_BIN=cmd/operator  .
+  docker build -f Dockerfile -t "kubetest-alt/apiserver:${IMAGE_TAG}"  --build-arg TARGET_BIN=cmd/apiserver .
+  docker build -f Dockerfile -t "kubetest-alt/control-center:${IMAGE_TAG}" --build-arg TARGET_BIN=cmd/control-center --build-arg WITH_WEB=true .
+  docker pull "$OAUTH2_PROXY_IMAGE"
+  echo "FROM $OAUTH2_PROXY_IMAGE" | docker build -t "kubetest-alt/oauth2-proxy:${IMAGE_TAG}" -
+  # Content-fetcher Dockerfile COPYs go.mod, go.sum, api/, pkg/, cmd/entry/
+  # — all repo-root paths. Build context MUST be repo root; the previous
+  # `executors/content-fetcher` context left every COPY failing with
+  # "/api: not found".
+  docker build -f executors/content-fetcher/Dockerfile \
+               -t "kubetest-alt/content-fetcher:${IMAGE_TAG}" .
+fi
 # Assert each image landed — earlier runs mysteriously passed in 65s
 # which is impossible if the builds actually ran; a missing image at
 # this point should now shout, not silently proceed.

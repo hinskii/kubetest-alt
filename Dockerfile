@@ -12,6 +12,10 @@
 # web-false stage hands over an empty dist, so operator/apiserver builds
 # never pull Node. BuildKit skips the stage that isn't selected.
 ARG WITH_WEB=false
+#
+# Cache mounts (BuildKit) keep Go's module and build caches, and pnpm's
+# store, between builds: the operator, apiserver and Control Center builds
+# share compiled dependencies instead of each compiling them from zero.
 
 FROM node:24-alpine AS web-true
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
@@ -20,7 +24,8 @@ WORKDIR /src/web
 # Dependencies first: cached until the lockfile changes. pnpm's version
 # comes from package.json's packageManager field, via corepack.
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
 COPY web/ ./
 # vite outDir: ../internal/controlcenter/webui/dist
 RUN pnpm build
@@ -38,13 +43,15 @@ ARG TARGET_BIN=cmd/operator
 WORKDIR /workspace
 COPY go.mod go.mod
 COPY go.sum go.sum
-RUN go mod download
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod go mod download
 
 COPY . .
 COPY --from=web /src/internal/controlcenter/webui/dist/ internal/controlcenter/webui/dist/
 
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
-    go build -a -o entrypoint ./${TARGET_BIN}
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuild,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} \
+    go build -o entrypoint ./${TARGET_BIN}
 
 # distroless/static:nonroot — no shell, no libc, non-root by default.
 # Every kubetest platform binary is CGO_ENABLED=0 static so this works

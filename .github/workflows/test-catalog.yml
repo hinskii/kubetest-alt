@@ -19,6 +19,8 @@ on:
       - "internal/controller/**"
       - "test/catalog/**"
       - "test/e2e/run.sh"
+      - "Dockerfile"
+      - ".github/workflows/build-images.yml"
       - ".github/workflows/test-catalog.yml"
   schedule:
     - cron: "17 3 * * *"
@@ -36,7 +38,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  images:
+    uses: ./.github/workflows/build-images.yml
+
   tools:
+    needs: images
     name: Catalog ${{ matrix.tool }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
@@ -96,6 +102,16 @@ jobs:
         with:
           key: catalog
 
+      - name: Load the platform images
+        if: steps.want.outputs.run == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: platform-images
+
+      - name: docker load
+        if: steps.want.outputs.run == 'true'
+        run: zstd -d --stdout images.tar.zst | docker load
+
       - name: Install kind + helm
         if: steps.want.outputs.run == 'true'
         run: |
@@ -108,6 +124,7 @@ jobs:
         shell: bash
         env:
           E2E_SUITE: catalog
+          E2E_PREBUILT_IMAGES: "1"
           CATALOG_TOOLS: ${{ matrix.tool }}
           # Also run each tool's sample (git content) at this exact commit.
           CATALOG_GIT_REVISION: ${{ github.sha }}

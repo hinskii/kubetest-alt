@@ -10,7 +10,7 @@ FROM golang:1.26-alpine AS build
 WORKDIR /workspace
 
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod go mod download
 
 COPY api/ ./api/
 COPY pkg/ ./pkg/
@@ -18,7 +18,9 @@ COPY internal/ ./internal/
 COPY cmd/entry/ ./cmd/entry/
 
 # Same CGO_ENABLED=0 story as executors/k6/Dockerfile — Alpine is musl.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN --mount=type=cache,id=gomod,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuild,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/entry \

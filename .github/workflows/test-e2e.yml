@@ -16,7 +16,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  images:
+    uses: ./.github/workflows/build-images.yml
+
   test-e2e:
+    needs: images
     name: Kind e2e (${{ matrix.storage }} storage)
     runs-on: ubuntu-latest
     strategy:
@@ -45,6 +49,14 @@ jobs:
         uses: ./.github/actions/go-cache
         with:
           key: e2e
+
+      - name: Load the platform images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: platform-images
+
+      - name: docker load
+        run: zstd -d --stdout images.tar.zst | docker load
 
       - name: Install kind
         run: |
@@ -85,6 +97,7 @@ jobs:
         shell: bash
         env:
           E2E_STORAGE: ${{ matrix.storage }}
+          E2E_PREBUILT_IMAGES: "1"
         run: |
           set -euo pipefail
           ./test/e2e/run.sh 2>&1 | tee /tmp/e2e.log
