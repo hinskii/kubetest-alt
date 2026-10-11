@@ -383,6 +383,9 @@ func runTests(m *testing.M) (int, error) {
 	fakeResults = newFakeResultReader()
 	fakeLogRegistry = &RecordingLogRegistry{}
 	fakeRunStore = NewRecordingRunStore()
+	// Composite runs re-poll their children on this interval when no child
+	// event arrives (step timeouts expire by the clock); 3s in production.
+	compositeRequeue = 250 * time.Millisecond
 	real := &TestRunReconciler{
 		Client:       mgr.GetClient(),
 		APIReader:    mgr.GetAPIReader(), // orphan-detection cache-lag guard
