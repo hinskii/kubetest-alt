@@ -2,7 +2,7 @@ import { expect, test } from "./fixtures";
 
 // The fixture Test (e2e/fixtures/ui-smoke.yaml), applied by test/e2e/run.sh.
 const cluster = process.env.CC_CLUSTER ?? "local";
-const ns = process.env.E2E_TEST_NS ?? "kubetest-e2e";
+const ns = process.env.E2E_TEST_NS ?? "kubetest-ui-e2e";
 
 test("from the tests list to a Test: run form, schedule, definition", async ({ page }) => {
   await page.goto(`/clusters/${cluster}?namespace=${ns}`);

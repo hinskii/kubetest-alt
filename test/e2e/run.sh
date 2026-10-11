@@ -386,8 +386,10 @@ if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   # past the sign-in proxy as the e2e developer. Needs `make web-install`
   # and `pnpm --dir web exec playwright install chromium` beforehand.
   phase_start "web_e2e"
-  kubectl -n kubetest-e2e apply -f web/e2e/fixtures/ui-smoke.yaml
-  CC_USER="dev@e2e.test" E2E_TEST_NS=kubetest-e2e make web-e2e
+  # Its own namespace: the Go scenarios delete kubetest-e2e when they end.
+  kubectl create namespace kubetest-ui-e2e --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n kubetest-ui-e2e apply -f web/e2e/fixtures/ui-smoke.yaml
+  CC_USER="dev@e2e.test" E2E_TEST_NS=kubetest-ui-e2e make web-e2e
   phase_end "web_e2e"
   log "all scenarios passed"
 fi
