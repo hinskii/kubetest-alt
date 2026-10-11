@@ -121,6 +121,20 @@ Expected: up to −2 min per Catalog job.
 
 These stay in the plan only if the measurement shows a real win.
 
+### F8 — Keep BuildKit's cache mounts between runs (added after R3)
+
+**Problem.** After F1, an image build was fast only when no Go code changed. A Go change invalidated the build layer, and the Dockerfiles' cache mounts start empty on every runner, so the first Go image compiled every dependency again: ~2 min, and the images job took ~5 min instead of ~40 s.
+
+**Change.** The mounts are kept in GitHub Actions' cache and injected into the builder with `reproducible-containers/buildkit-cache-dance`:
+- the mounts kept are `gomod`, `gobuild` and `pnpm-store`;
+- the key covers `go.sum`, `**/*.go`, the pnpm lockfile and the Dockerfiles;
+- on a hit, nothing was compiled, so saving is skipped;
+- on a change, the newest cache is restored, only what changed is compiled, and the result is saved.
+
+**First attempt.** The key covered only the dependencies. A run that compiled nothing then saved the still-empty mounts (0 MB), and every later run would have hit that key. Adding the Go sources to the key fixed it.
+
+**Measurement.** Still pending: it needs two consecutive commits that change Go code, which the first R4 commits are.
+
 ## 3. Order
 
 1. F2 (smallest change, clear win) → F3 → F1 (biggest, touches both kind
