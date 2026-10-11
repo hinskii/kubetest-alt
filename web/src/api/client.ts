@@ -23,6 +23,9 @@ export type RunDetail = components["schemas"]["RunDetail"];
 export type RunEvent = components["schemas"]["Event"];
 export type CaseStat = components["schemas"]["CaseStat"];
 export type CaseDiff = components["schemas"]["CaseDiff"];
+export type Trend = components["schemas"]["Trend"];
+export type Analytics = components["schemas"]["Analytics"];
+export type Comparison = components["schemas"]["Comparison"];
 
 /** ApiError carries the API's `{error}` message and the HTTP status. */
 export class ApiError extends Error {

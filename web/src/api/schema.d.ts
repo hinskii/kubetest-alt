@@ -195,6 +195,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A Test's last 10/30/100 finished runs: summary, trends, cases. */
+        get: operations["getAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs of the Test side by side (run=, repeated, at most 10), oldest first, with Markdown. */
+        get: operations["compareRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases": {
         parameters: {
             query?: never;
@@ -323,6 +357,14 @@ export interface components {
         AbortRequest: {
             message?: string;
         };
+        Analytics: {
+            cases?: components["schemas"]["CasesSummary"];
+            runs: components["schemas"]["RunRow"][];
+            summary: components["schemas"]["Summary"];
+            trends: components["schemas"]["Trend"][];
+            window: number;
+            windows: number[];
+        };
         Artifact: {
             contentType?: string;
             path: string;
@@ -384,6 +426,11 @@ export interface components {
             skipped: number;
             suite?: string;
         };
+        CasesSummary: {
+            error?: string;
+            failingNow: number;
+            flaky: number;
+        };
         ChildRun: {
             /** Format: int64 */
             durationMs?: number;
@@ -427,6 +474,22 @@ export interface components {
         Commit: {
             sha: string;
             url?: string;
+        };
+        CompareCell: {
+            delta?: string;
+            value?: string;
+        };
+        CompareRow: {
+            cells: components["schemas"]["CompareCell"][];
+            label: string;
+        };
+        Comparison: {
+            facts: components["schemas"]["CompareRow"][];
+            markdown: string;
+            metrics: components["schemas"]["CompareRow"][];
+            missing: string[];
+            params: components["schemas"]["CompareRow"][];
+            runs: components["schemas"]["RunRow"][];
         };
         Error: {
             error: string;
@@ -620,6 +683,19 @@ export interface components {
             /** Format: date-time */
             startedAt?: null | string;
         };
+        Summary: {
+            aborted: number;
+            /** Format: int64 */
+            avgMs?: number;
+            errored: number;
+            failed: number;
+            finished: number;
+            lastFailure?: components["schemas"]["RunRow"];
+            /** Format: int64 */
+            p95Ms?: number;
+            passRate?: string;
+            passed: number;
+        };
         TestCase: {
             class?: string;
             details?: string;
@@ -658,6 +734,20 @@ export interface components {
             namespace: string;
             problem?: string;
             tool: string;
+        };
+        Trend: {
+            /** Format: double */
+            avg: number;
+            delta?: string;
+            label: string;
+            /** Format: double */
+            latest: number;
+            /** Format: double */
+            max: number;
+            /** Format: double */
+            min: number;
+            unit: string;
+            values: number[];
         };
     };
     responses: never;
@@ -1306,6 +1396,103 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAnalytics: {
+        parameters: {
+            query?: {
+                runs?: 10 | 30 | 100;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Analytics"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    compareRuns: {
+        parameters: {
+            query: {
+                run: string[];
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Comparison"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -27,6 +27,45 @@
         },
         "type": "object"
       },
+      "Analytics": {
+        "properties": {
+          "cases": {
+            "$ref": "#/components/schemas/CasesSummary"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunRow"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/Summary"
+          },
+          "trends": {
+            "items": {
+              "$ref": "#/components/schemas/Trend"
+            },
+            "type": "array"
+          },
+          "window": {
+            "type": "integer"
+          },
+          "windows": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "window",
+          "windows",
+          "runs",
+          "summary",
+          "trends"
+        ],
+        "type": "object"
+      },
       "Artifact": {
         "properties": {
           "contentType": {
@@ -241,6 +280,24 @@
         ],
         "type": "object"
       },
+      "CasesSummary": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "failingNow": {
+            "type": "integer"
+          },
+          "flaky": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "flaky",
+          "failingNow"
+        ],
+        "type": "object"
+      },
       "ChildRun": {
         "properties": {
           "durationMs": {
@@ -405,6 +462,81 @@
         },
         "required": [
           "sha"
+        ],
+        "type": "object"
+      },
+      "CompareCell": {
+        "properties": {
+          "delta": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "CompareRow": {
+        "properties": {
+          "cells": {
+            "items": {
+              "$ref": "#/components/schemas/CompareCell"
+            },
+            "type": "array"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "cells"
+        ],
+        "type": "object"
+      },
+      "Comparison": {
+        "properties": {
+          "facts": {
+            "items": {
+              "$ref": "#/components/schemas/CompareRow"
+            },
+            "type": "array"
+          },
+          "markdown": {
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/CompareRow"
+            },
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/CompareRow"
+            },
+            "type": "array"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs",
+          "facts",
+          "metrics",
+          "params",
+          "missing",
+          "markdown"
         ],
         "type": "object"
       },
@@ -1128,6 +1260,47 @@
         ],
         "type": "object"
       },
+      "Summary": {
+        "properties": {
+          "aborted": {
+            "type": "integer"
+          },
+          "avgMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "errored": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "finished": {
+            "type": "integer"
+          },
+          "lastFailure": {
+            "$ref": "#/components/schemas/RunRow"
+          },
+          "p95Ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "passRate": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "finished",
+          "passed",
+          "failed",
+          "errored",
+          "aborted"
+        ],
+        "type": "object"
+      },
       "TestCase": {
         "properties": {
           "class": {
@@ -1273,6 +1446,52 @@
           "namespace",
           "tool",
           "locked"
+        ],
+        "type": "object"
+      },
+      "Trend": {
+        "properties": {
+          "avg": {
+            "format": "double",
+            "type": "number"
+          },
+          "delta": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "latest": {
+            "format": "double",
+            "type": "number"
+          },
+          "max": {
+            "format": "double",
+            "type": "number"
+          },
+          "min": {
+            "format": "double",
+            "type": "number"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "label",
+          "unit",
+          "values",
+          "latest",
+          "min",
+          "avg",
+          "max"
         ],
         "type": "object"
       }
@@ -2212,6 +2431,168 @@
           }
         },
         "summary": "A Test with its templates merged: parameters, schedule, definition."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics": {
+      "get": {
+        "operationId": "getAnalytics",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "runs",
+            "schema": {
+              "default": 30,
+              "enum": [
+                10,
+                30,
+                100
+              ],
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Analytics"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "A Test's last 10/30/100 finished runs: summary, trends, cases."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics/compare": {
+      "get": {
+        "operationId": "compareRuns",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Comparison"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Runs of the Test side by side (run=, repeated, at most 10), oldest first, with Markdown."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases": {

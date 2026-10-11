@@ -166,7 +166,9 @@ function TestPage() {
               </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <a href={goPage.analytics(k.cluster, k.ns, k.name)}>Analytics &amp; comparison</a>
+              <Link to="/clusters/$cluster/tests/$ns/$name/analytics" params={k}>
+                Analytics &amp; comparison
+              </Link>
             </Button>
             {canRun && (
               <Button variant="outline" size="sm" asChild>

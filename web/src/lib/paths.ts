@@ -18,5 +18,4 @@ export const goPage = {
     `/clusters/${seg(c)}/tests/new?namespace=${seg(ns)}&from=${seg(name)}`,
   test: (c: string, ns: string, name: string) => `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(name)}`,
   edit: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/edit`,
-  analytics: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/analytics`,
 };

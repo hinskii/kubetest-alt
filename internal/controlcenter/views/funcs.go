@@ -23,7 +23,6 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -76,12 +75,7 @@ func RunID(r apiclient.Run) string { return uiapi.RunID(r) }
 
 // FormatNumber renders a metric value: integers as such, otherwise up to
 // three decimals.
-func FormatNumber(v float64) string {
-	if v == math.Trunc(v) && math.Abs(v) < 1e15 {
-		return strconv.FormatFloat(v, 'f', 0, 64)
-	}
-	return strconv.FormatFloat(math.Round(v*1000)/1000, 'f', -1, 64)
-}
+func FormatNumber(v float64) string { return uiapi.FormatNumber(v) }
 
 // Duration and ShortSHA are the template helpers for Go code that
 // renders the same values outside a template (Markdown export).
@@ -93,13 +87,8 @@ func When(t time.Time) string { return when(t) }
 // ShortSHA: see shortSHA.
 func ShortSHA(sha string) string { return shortSHA(sha) }
 
-// shortSHA is the 7-character form of a commit SHA.
-func shortSHA(sha string) string {
-	if len(sha) > 7 {
-		return sha[:7]
-	}
-	return sha
-}
+// shortSHA is api.ShortSHA.
+func shortSHA(sha string) string { return uiapi.ShortSHA(sha) }
 
 // dict builds a map for passing several values to a sub-template:
 // {{template "x" (dict "Title" "…" "Rows" .Rows)}}.
@@ -155,19 +144,7 @@ func when(v any) string {
 }
 
 // duration renders milliseconds as "1h 2m", "3m 4s", "5.6s", "" for 0.
-func duration(ms int64) string {
-	if ms <= 0 {
-		return ""
-	}
-	d := time.Duration(ms) * time.Millisecond
-	switch {
-	case d < time.Minute:
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	case d < time.Hour:
-		return fmt.Sprintf("%dm %ds", int(d.Minutes()), int(d.Seconds())%60)
-	}
-	return fmt.Sprintf("%dh %dm", int(d.Hours()), int(d.Minutes())%60)
-}
+func duration(ms int64) string { return uiapi.FormatDuration(ms) }
 
 // terminal reports a finished run phase.
 func terminal(p any) bool {

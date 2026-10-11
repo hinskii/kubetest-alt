@@ -251,7 +251,7 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 		switch {
 		case len(d.Items) > 0:
 			row.Where = whereFiles
-			var ls []string
+			ls := make([]string, 0, len(d.Items))
 			for _, it := range d.Items {
 				ls = append(ls, it.Key+"="+it.Path)
 			}

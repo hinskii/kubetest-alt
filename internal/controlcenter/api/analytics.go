@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package api
 
 import (
 	"cmp"
@@ -23,13 +23,10 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
-	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
@@ -38,11 +35,8 @@ import (
 // history the API returns — rows are whatever the runs carry (duration,
 // JUnit counts, the metric keys of pkg/report), never a per-tool layout.
 
-// analyticsWindows are the run windows offered on the analytics page.
-var analyticsWindows = []int{10, 30, 100}
-
-// maxCompared bounds the runs in one comparison (one API call each).
-const maxCompared = 10
+// MaxCompared bounds the runs in one comparison (one API call each).
+const MaxCompared = 10
 
 // Run phases as the API spells them.
 const (
@@ -52,135 +46,161 @@ const (
 	phaseAborted = string(testsv1alpha1.PhaseAborted)
 )
 
-func analyticsPath(c, ns, test string) string { return testPath(c, ns, test) + "/analytics" }
-
-// series is one trend row: a value per run that has it, oldest first.
-type series struct {
-	Label, Unit          string
-	Values               []float64
-	Latest, Min, Avg     float64
-	Max                  float64
-	Delta                string // latest vs the average of the runs before it
-	Points               string // SVG polyline points
-	LastX, LastY         float64
-	SparkWidth, SparkTop int
+// Analytics is a Test's last Window finished runs, summarized.
+type Analytics struct {
+	Window  int   `json:"window" required:"true"`
+	Windows []int `json:"windows" required:"true" nullable:"false"`
+	// Runs are the finished runs, newest first.
+	Runs    []RunRow `json:"runs" required:"true" nullable:"false"`
+	Summary Summary  `json:"summary" required:"true"`
+	// Trends are duration, JUnit counts (when the runs report them), then
+	// every metric key, in natural order — over passed and failed runs,
+	// oldest first.
+	Trends []Trend `json:"trends" required:"true" nullable:"false"`
+	// Cases is set when the runs reported JUnit.
+	Cases *CasesSummary `json:"cases,omitempty"`
 }
 
-type analyticsSummary struct {
-	Finished, Passed, Failed, Errored, Aborted int
-	PassRate                                   string
-	AvgMs, P95Ms                               int64
-	LastFailure                                *apiclient.Run
+// Summary counts the window's runs.
+type Summary struct {
+	Finished int `json:"finished" required:"true"`
+	Passed   int `json:"passed" required:"true"`
+	Failed   int `json:"failed" required:"true"`
+	Errored  int `json:"errored" required:"true"`
+	Aborted  int `json:"aborted" required:"true"`
+	// PassRate is passed of the runs with a verdict (passed, failed,
+	// error), rounded; "" without any.
+	PassRate string `json:"passRate,omitempty"`
+	// AvgMs and P95Ms are over passed and failed runs (an error or abort
+	// says nothing about the system under test).
+	AvgMs       int64   `json:"avgMs,omitempty"`
+	P95Ms       int64   `json:"p95Ms,omitempty"`
+	LastFailure *RunRow `json:"lastFailure,omitempty"`
 }
 
-type analyticsData struct {
-	Cluster, Namespace, Test string
-	Window                   int
-	Windows                  []int
-	Runs                     []apiclient.Run // finished, newest first
-	Strip                    []apiclient.Run // finished, oldest first
-	Summary                  analyticsSummary
-	Trends                   []series
-	HasCases                 bool
-	FlakyCount, FailingNow   int
-	CasesErr                 string
-	Selected                 map[string]bool
-	Compare                  *comparison
-	Markdown                 string
-	MarkdownHref             string
+// Trend is one value per run, oldest first.
+type Trend struct {
+	Label string `json:"label" required:"true"`
+	// Unit is "ms" for durations, "" otherwise.
+	Unit   string    `json:"unit" required:"true"`
+	Values []float64 `json:"values" required:"true" nullable:"false"`
+	Latest float64   `json:"latest" required:"true"`
+	Min    float64   `json:"min" required:"true"`
+	Avg    float64   `json:"avg" required:"true"`
+	Max    float64   `json:"max" required:"true"`
+	// Delta is the latest against the average of the runs before it
+	// ("+12%", "-3.5%"); "" without a meaningful base.
+	Delta string `json:"delta,omitempty"`
 }
 
-// testAnalyticsPage shows trends over the last ?runs finished runs and,
-// with ?run=<name> (repeated), the comparison of those runs.
-func (s *Server) testAnalyticsPage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
+// CasesSummary is the window's flaky and failing JUnit cases.
+type CasesSummary struct {
+	Flaky      int    `json:"flaky" required:"true"`
+	FailingNow int    `json:"failingNow" required:"true"`
+	Error      string `json:"error,omitempty"`
+}
+
+// Comparison is the selected runs side by side: one column per run
+// (oldest first), one row per fact, metric or parameter.
+type Comparison struct {
+	Runs    []RunRow     `json:"runs" required:"true" nullable:"false"`
+	Facts   []CompareRow `json:"facts" required:"true" nullable:"false"`
+	Metrics []CompareRow `json:"metrics" required:"true" nullable:"false"`
+	Params  []CompareRow `json:"params" required:"true" nullable:"false"`
+	// Missing are requested runs that aren't runs of this Test.
+	Missing []string `json:"missing" required:"true" nullable:"false"`
+	// Markdown is the comparison for a report or a ticket.
+	Markdown string `json:"markdown" required:"true"`
+}
+
+// CompareRow is one fact, metric or parameter across the runs.
+type CompareRow struct {
+	Label string        `json:"label" required:"true"`
+	Cells []CompareCell `json:"cells" required:"true" nullable:"false"`
+}
+
+// CompareCell is one run's value; Delta (metrics only) is against the
+// first column.
+type CompareCell struct {
+	Value string `json:"value,omitempty"`
+	Delta string `json:"delta,omitempty"`
+}
+
+type compareRunsParams struct {
+	Cluster   string `path:"cluster"`
+	Namespace string `path:"ns"`
+	Name      string `path:"name"`
+	// Run names the runs to compare (repeated), at most 10.
+	Run []string `query:"run" required:"true"`
+}
+
+func (s *Server) analytics(w http.ResponseWriter, r *http.Request) {
+	c, client, ok := s.clusterOf(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	window, _ := strconv.Atoi(r.URL.Query().Get("runs"))
-	if !slices.Contains(analyticsWindows, window) {
-		window = 30
-	}
-	client := api(r, c)
-	page, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{Namespace: ns, Test: name, Limit: window})
+	ns, name, n := r.PathValue("ns"), r.PathValue("name"), window(r)
+	page, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{Namespace: ns, Test: name, Limit: n})
 	if err != nil {
-		s.apiError(w, r, c, err)
+		s.apiError(w, c, err)
 		return
 	}
-	data := analyticsData{Cluster: c.Name, Namespace: ns, Test: name, Window: window, Windows: analyticsWindows,
-		Selected: map[string]bool{}}
+	var finished []apiclient.Run
 	for _, run := range page.Runs {
-		if uiapi.Finished(run.Phase) {
-			data.Runs = append(data.Runs, run)
+		if Finished(run.Phase) {
+			finished = append(finished, run)
 		}
 	}
-	data.Strip = slices.Clone(data.Runs)
-	slices.Reverse(data.Strip)
-	data.Summary = summarize(data.Strip)
-	data.Trends = trends(data.Strip)
-
-	for _, run := range data.Runs {
-		if run.TestCounts != nil {
-			data.HasCases = true
-			break
-		}
+	out := Analytics{Window: n, Windows: Windows, Runs: make([]RunRow, 0, len(finished))}
+	hasCases := false
+	for _, run := range finished {
+		out.Runs = append(out.Runs, runRow(run))
+		hasCases = hasCases || run.TestCounts != nil
 	}
-	if data.HasCases {
-		stats, err := client.TestCaseStats(r.Context(), ns, name, window)
+	oldestFirst := slices.Clone(finished)
+	slices.Reverse(oldestFirst)
+	out.Summary = summarize(oldestFirst)
+	out.Trends = trends(oldestFirst)
+	if hasCases {
+		cs := &CasesSummary{}
+		stats, err := client.TestCaseStats(r.Context(), ns, name, n)
 		if err != nil {
-			data.CasesErr = messageOf(err)
+			cs.Error = messageOf(err)
 		}
 		for _, st := range stats {
 			if st.Flaky {
-				data.FlakyCount++
+				cs.Flaky++
 			}
 			if failing(st.LastStatus) {
-				data.FailingNow++
+				cs.FailingNow++
 			}
 		}
+		out.Cases = cs
 	}
-
-	if names := selectedRuns(r); len(names) > 0 {
-		cmpData, err := s.buildComparison(r, client, ns, name, names)
-		if err != nil {
-			s.apiError(w, r, c, err)
-			return
-		}
-		for _, run := range cmpData.Runs {
-			data.Selected[views.RunID(run)] = true
-		}
-		data.Compare = cmpData
-		data.Markdown = comparisonMarkdown(c.DisplayNameOrName(), ns, name, cmpData, time.Now())
-		data.MarkdownHref = analyticsPath(c.Name, ns, name) + "/compare.md?" + r.URL.RawQuery
-	}
-	crumbs := append(clusterCrumbs(c), views.Crumb{Label: name, Href: testPath(c.Name, ns, name)})
-	s.page(w, r, "analytics", name+" · analytics", crumbs, data)
+	writeJSON(w, http.StatusOK, out)
 }
 
-// comparisonMarkdownDownload serves the comparison of ?run=… as Markdown.
-func (s *Server) comparisonMarkdownDownload(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
+func (s *Server) compareRuns(w http.ResponseWriter, r *http.Request) {
+	c, client, ok := s.clusterOf(w, r)
 	if !ok {
 		return
 	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
 	names := selectedRuns(r)
 	if len(names) == 0 {
-		s.renderError(w, r, http.StatusBadRequest, "Pick the runs to compare (?run= is missing).")
+		writeError(w, http.StatusBadRequest, "Pick the runs to compare (?run= is missing).")
 		return
 	}
-	cmpData, err := s.buildComparison(r, api(r, c), ns, name, names)
+	ns, name := r.PathValue("ns"), r.PathValue("name")
+	out, err := buildComparison(r, client, ns, name, names)
 	if err != nil {
-		s.apiError(w, r, c, err)
+		s.apiError(w, c, err)
 		return
 	}
-	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-comparison.md"`, safeFilename(name)))
-	_, _ = w.Write([]byte(comparisonMarkdown(c.DisplayNameOrName(), ns, name, cmpData, time.Now())))
+	out.Markdown = comparisonMarkdown(c.DisplayNameOrName(), ns, name, out, time.Now())
+	writeJSON(w, http.StatusOK, out)
 }
 
-// selectedRuns returns the distinct ?run= values, at most maxCompared.
+// selectedRuns returns the distinct ?run= values, at most MaxCompared.
 func selectedRuns(r *http.Request) []string {
 	var out []string
 	for _, n := range r.URL.Query()["run"] {
@@ -188,29 +208,20 @@ func selectedRuns(r *http.Request) []string {
 			out = append(out, n)
 		}
 	}
-	if len(out) > maxCompared {
-		out = out[:maxCompared]
+	if len(out) > MaxCompared {
+		out = out[:MaxCompared]
 	}
 	return out
-}
-
-func safeFilename(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r == '-' || r == '_' || r == '.' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
-			return r
-		}
-		return '_'
-	}, s)
 }
 
 // summarize counts the phases of runs and the durations of the runs that
 // produced a verdict (passed or failed — error and aborted runs' durations
 // say nothing about the system under test).
-func summarize(runs []apiclient.Run) analyticsSummary {
-	var s analyticsSummary
+func summarize(runs []apiclient.Run) Summary {
+	var s Summary
 	var durations []int64
 	for i := range runs {
-		run := &runs[i]
+		run := runs[i]
 		s.Finished++
 		switch run.Phase {
 		case phasePassed:
@@ -223,7 +234,8 @@ func summarize(runs []apiclient.Run) analyticsSummary {
 			s.Aborted++
 		}
 		if run.Phase == phaseFailed || run.Phase == phaseError {
-			s.LastFailure = run
+			row := runRow(run)
+			s.LastFailure = &row
 		}
 		if (run.Phase == phasePassed || run.Phase == phaseFailed) && run.DurationMs > 0 {
 			durations = append(durations, run.DurationMs)
@@ -246,8 +258,8 @@ func summarize(runs []apiclient.Run) analyticsSummary {
 
 // trends builds the trend rows from runs (oldest first): duration, JUnit
 // counts when the runs report them, then every metric key, natural order.
-func trends(runs []apiclient.Run) []series {
-	var out []series
+func trends(runs []apiclient.Run) []Trend {
+	out := []Trend{}
 	verdict := func(run apiclient.Run) bool { return run.Phase == phasePassed || run.Phase == phaseFailed }
 	add := func(label, unit string, value func(apiclient.Run) (float64, bool)) {
 		var vals []float64
@@ -257,7 +269,7 @@ func trends(runs []apiclient.Run) []series {
 			}
 		}
 		if len(vals) > 0 {
-			out = append(out, newSeries(label, unit, vals))
+			out = append(out, newTrend(label, unit, vals))
 		}
 	}
 	add("Duration", "ms", func(run apiclient.Run) (float64, bool) {
@@ -281,9 +293,7 @@ func trends(runs []apiclient.Run) []series {
 			keys[k] = true
 		}
 	}
-	sorted := slices.Collect(maps.Keys(keys))
-	slices.SortFunc(sorted, views.NaturalCompare)
-	for _, k := range sorted {
+	for _, k := range sortedNatural(keys) {
 		add(k, "", func(run apiclient.Run) (float64, bool) {
 			v, ok := run.Metrics[k]
 			return v, ok && verdict(run) && !math.IsNaN(v) && !math.IsInf(v, 0)
@@ -292,41 +302,21 @@ func trends(runs []apiclient.Run) []series {
 	return out
 }
 
-const (
-	sparkWidth  = 140
-	sparkHeight = 28
-)
-
-func newSeries(label, unit string, vals []float64) series {
-	s := series{Label: label, Unit: unit, Values: vals, Latest: vals[len(vals)-1],
-		Min: slices.Min(vals), Max: slices.Max(vals), SparkWidth: sparkWidth, SparkTop: sparkHeight}
+func newTrend(label, unit string, vals []float64) Trend {
+	t := Trend{Label: label, Unit: unit, Values: vals, Latest: vals[len(vals)-1], Min: slices.Min(vals), Max: slices.Max(vals)}
 	var sum float64
 	for _, v := range vals {
 		sum += v
 	}
-	s.Avg = sum / float64(len(vals))
+	t.Avg = sum / float64(len(vals))
 	if len(vals) > 1 {
 		var prev float64
 		for _, v := range vals[:len(vals)-1] {
 			prev += v
 		}
-		s.Delta = relChange(s.Latest, prev/float64(len(vals)-1))
+		t.Delta = relChange(t.Latest, prev/float64(len(vals)-1))
 	}
-	pts := make([]string, len(vals))
-	for i, v := range vals {
-		x := float64(sparkWidth) / 2
-		if len(vals) > 1 {
-			x = float64(i) * float64(sparkWidth) / float64(len(vals)-1)
-		}
-		y := float64(sparkHeight) / 2
-		if s.Max > s.Min {
-			y = float64(sparkHeight-2) - (v-s.Min)/(s.Max-s.Min)*float64(sparkHeight-4)
-		}
-		pts[i] = fmt.Sprintf("%.1f,%.1f", x, y)
-		s.LastX, s.LastY = x, y
-	}
-	s.Points = strings.Join(pts, " ")
-	return s
+	return t
 }
 
 // relChange renders v against base as "+12%" / "-3.5%"; "" when there is
@@ -345,27 +335,9 @@ func relChange(v, base float64) string {
 	return fmt.Sprintf("%+.1f%%", p)
 }
 
-// comparison is the selected runs side by side: one column per run
-// (oldest first), one row per fact, metric or parameter.
-type comparison struct {
-	Runs    []apiclient.Run
-	Facts   []compareRow
-	Metrics []compareRow
-	Params  []compareRow
-	Missing []string // requested runs that aren't runs of this Test
-}
-
-type compareRow struct {
-	Label string
-	Cells []compareCell
-}
-
-type compareCell struct {
-	Value, Delta string // Delta: against the first column, metrics only
-}
-
-func (s *Server) buildComparison(r *http.Request, client *apiclient.Client, ns, test string, names []string) (*comparison, error) {
-	out := &comparison{}
+func buildComparison(r *http.Request, client *apiclient.Client, ns, test string, names []string) (*Comparison, error) {
+	var runs []apiclient.Run
+	out := &Comparison{Missing: []string{}}
 	for _, n := range names {
 		run, err := client.GetRun(r.Context(), ns, n)
 		switch {
@@ -379,10 +351,10 @@ func (s *Server) buildComparison(r *http.Request, client *apiclient.Client, ns, 
 			out.Missing = append(out.Missing, n)
 			continue
 		}
-		out.Runs = append(out.Runs, *run)
+		runs = append(runs, *run)
 	}
-	slices.SortStableFunc(out.Runs, func(a, b apiclient.Run) int { return cmp.Compare(runTime(a), runTime(b)) })
-	fillComparison(out)
+	slices.SortStableFunc(runs, func(a, b apiclient.Run) int { return cmp.Compare(runTime(a), runTime(b)) })
+	fillComparison(out, runs)
 	return out, nil
 }
 
@@ -396,14 +368,18 @@ func runTime(run apiclient.Run) int64 {
 	return 0
 }
 
-func fillComparison(c *comparison) {
+func fillComparison(c *Comparison, runs []apiclient.Run) {
+	c.Runs, c.Facts, c.Metrics, c.Params = []RunRow{}, []CompareRow{}, []CompareRow{}, []CompareRow{}
+	for _, run := range runs {
+		c.Runs = append(c.Runs, runRow(run))
+	}
 	fact := func(label string, value func(apiclient.Run) string) {
-		row := compareRow{Label: label}
+		row := CompareRow{Label: label}
 		seen := false
-		for _, run := range c.Runs {
+		for _, run := range runs {
 			v := value(run)
 			seen = seen || v != ""
-			row.Cells = append(row.Cells, compareCell{Value: v})
+			row.Cells = append(row.Cells, CompareCell{Value: v})
 		}
 		if seen {
 			c.Facts = append(c.Facts, row)
@@ -416,12 +392,12 @@ func fillComparison(c *comparison) {
 		}
 		return run.StartedAt.UTC().Format("2006-01-02 15:04 UTC")
 	})
-	fact("Duration", func(run apiclient.Run) string { return views.Duration(run.DurationMs) })
+	fact("Duration", func(run apiclient.Run) string { return FormatDuration(run.DurationMs) })
 	fact("Commit", func(run apiclient.Run) string {
 		if run.Git == nil || run.Git.Commit == "" {
 			return ""
 		}
-		v := views.ShortSHA(run.Git.Commit)
+		v := ShortSHA(run.Git.Commit)
 		if run.Git.Revision != "" {
 			v += " (" + run.Git.Revision + ")"
 		}
@@ -434,11 +410,11 @@ func fillComparison(c *comparison) {
 		}
 		return fmt.Sprintf("%d passed · %d failed · %d skipped", tc.Passed, tc.Failed, tc.Skipped)
 	})
-	fact("Started by", func(run apiclient.Run) string { return run.Tags[tagCreatedBy] })
+	fact("Started by", func(run apiclient.Run) string { return run.Tags[TagCreatedBy] })
 
 	metricKeys := map[string]bool{}
 	paramKeys := map[string]bool{}
-	for _, run := range c.Runs {
+	for _, run := range runs {
 		for k := range run.Metrics {
 			metricKeys[k] = true
 		}
@@ -447,15 +423,15 @@ func fillComparison(c *comparison) {
 		}
 	}
 	for _, k := range sortedNatural(metricKeys) {
-		row := compareRow{Label: k}
+		row := CompareRow{Label: k}
 		base, hasBase := 0.0, false
-		for i, run := range c.Runs {
+		for i, run := range runs {
 			v, ok := run.Metrics[k]
 			if !ok {
-				row.Cells = append(row.Cells, compareCell{})
+				row.Cells = append(row.Cells, CompareCell{})
 				continue
 			}
-			cell := compareCell{Value: views.FormatNumber(v)}
+			cell := CompareCell{Value: FormatNumber(v)}
 			if i == 0 {
 				base, hasBase = v, true
 			} else if hasBase {
@@ -466,9 +442,9 @@ func fillComparison(c *comparison) {
 		c.Metrics = append(c.Metrics, row)
 	}
 	for _, k := range sortedNatural(paramKeys) {
-		row := compareRow{Label: k}
-		for _, run := range c.Runs {
-			row.Cells = append(row.Cells, compareCell{Value: run.Config[k]})
+		row := CompareRow{Label: k}
+		for _, run := range runs {
+			row.Cells = append(row.Cells, CompareCell{Value: run.Config[k]})
 		}
 		c.Params = append(c.Params, row)
 	}
@@ -476,13 +452,13 @@ func fillComparison(c *comparison) {
 
 func sortedNatural(set map[string]bool) []string {
 	keys := slices.Collect(maps.Keys(set))
-	slices.SortFunc(keys, views.NaturalCompare)
+	slices.SortFunc(keys, NaturalCompare)
 	return keys
 }
 
 // comparisonMarkdown renders c as a Markdown section for a report or a
 // ticket: one column per run, metrics and parameters as rows.
-func comparisonMarkdown(cluster, ns, test string, c *comparison, now time.Time) string {
+func comparisonMarkdown(cluster, ns, test string, c *Comparison, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "## Test comparison: %s\n\n", mdText(test))
 	fmt.Fprintf(&b, "- Cluster: `%s`, namespace `%s`\n", mdCode(cluster), mdCode(ns))
@@ -502,7 +478,7 @@ func comparisonMarkdown(cluster, ns, test string, c *comparison, now time.Time) 
 		sep[i] = "---"
 	}
 	row(sep)
-	section := func(title string, rows []compareRow) {
+	section := func(title string, rows []CompareRow) {
 		if len(rows) == 0 {
 			return
 		}

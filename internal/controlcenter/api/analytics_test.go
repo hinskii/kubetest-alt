@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package api
 
 import (
 	"net/http"
@@ -49,6 +49,7 @@ func TestSummarize(t *testing.T) {
 	assert.Equal(t, "50%", s.PassRate, "2 of 4: an error run did not pass; aborted runs have no verdict")
 	assert.Equal(t, int64(2000), s.AvgMs, "error and aborted durations don't count")
 	assert.Equal(t, int64(3000), s.P95Ms)
+	require.NotNil(t, s.LastFailure)
 	assert.Equal(t, "c", s.LastFailure.Name)
 
 	assert.Empty(t, summarize([]apiclient.Run{{Phase: "aborted"}}).PassRate)
@@ -65,17 +66,19 @@ func TestTrends_RowsAreWhatTheRunsCarry(t *testing.T) {
 		labels = append(labels, r.Label)
 	}
 	assert.Equal(t, []string{"Duration", "alerts_high", "p95_ms", "rps"}, labels, "no JUnit rows without JUnit runs")
+	assert.Equal(t, "ms", rows[0].Unit)
 	p95 := rows[2]
 	assert.Equal(t, []float64{100, 300}, p95.Values, "error runs' values are left out")
 	assert.Equal(t, "+200%", p95.Delta, "latest vs the average before it")
-	assert.Equal(t, 200.0, p95.Avg)
-	assert.Equal(t, "0.0,26.0 140.0,2.0", p95.Points)
+	assert.Equal(t, Trend{Label: "p95_ms", Values: []float64{100, 300}, Latest: 300, Min: 100, Avg: 200, Max: 300,
+		Delta: "+200%"}, p95)
+	assert.Empty(t, rows[3].Delta, "one value: nothing to compare with")
 
 	junit := trends([]apiclient.Run{{Phase: "failed", TestCounts: &apiclient.TestCounts{Total: 9, Failed: 2}}})
 	require.Len(t, junit, 2)
 	assert.Equal(t, "Tests failed", junit[0].Label)
 	assert.Equal(t, 2.0, junit[0].Latest)
-	assert.Equal(t, "70.0,14.0", junit[0].Points, "one point sits in the middle")
+	assert.Equal(t, []Trend{}, trends(nil))
 }
 
 func TestRelChange(t *testing.T) {
@@ -84,10 +87,12 @@ func TestRelChange(t *testing.T) {
 	assert.Equal(t, "+50%", relChange(-50, -100), "against the magnitude of a negative base")
 	assert.Empty(t, relChange(5, 0), "no base")
 	assert.Empty(t, relChange(100, 100))
+	assert.Empty(t, relChange(100.0001, 100), "below the shown precision")
 }
 
 func TestComparisonMarkdown(t *testing.T) {
-	c := &comparison{Runs: []apiclient.Run{
+	c := &Comparison{Missing: []string{}}
+	fillComparison(c, []apiclient.Run{
 		{Name: "load-1", Phase: "passed", StartedAt: at(0), DurationMs: 61000,
 			Metrics: map[string]float64{"p95_ms": 120, "rps": 10.12345},
 			Config:  map[string]string{"vus": "10", "note": "a|b"}},
@@ -95,8 +100,7 @@ func TestComparisonMarkdown(t *testing.T) {
 			Metrics: map[string]float64{"p95_ms": 180},
 			Config:  map[string]string{"vus": "20"},
 			Git:     &apiclient.GitCheckout{Commit: "0123456789abcdef", Revision: "main"}},
-	}}
-	fillComparison(c)
+	})
 	md := comparisonMarkdown("Deploy (dev)", "team-a", "load", c, time.Date(2026, 10, 7, 13, 0, 0, 0, time.UTC))
 	for _, want := range []string{
 		"## Test comparison: load\n",
@@ -115,7 +119,7 @@ func TestComparisonMarkdown(t *testing.T) {
 		assert.Contains(t, md, want)
 	}
 	assert.NotContains(t, md, "| Tests |", "rows nobody has are left out")
-	assert.Contains(t, comparisonMarkdown("c", "n", "t", &comparison{}, time.Now()), "No runs to compare.")
+	assert.Contains(t, comparisonMarkdown("c", "n", "t", &Comparison{}, time.Now()), "No runs to compare.")
 }
 
 func TestSelectedRuns_DistinctAndBounded(t *testing.T) {
@@ -125,12 +129,12 @@ func TestSelectedRuns_DistinctAndBounded(t *testing.T) {
 		q.WriteString("&run=x" + string(rune('a'+i)))
 	}
 	got := selectedRuns(httptest.NewRequest(http.MethodGet, "/"+q.String(), nil))
-	assert.Len(t, got, maxCompared)
+	assert.Len(t, got, MaxCompared)
 	assert.Equal(t, []string{"a", "b"}, got[:2])
 }
 
-// finishedRun is a finished run of smoke with metrics and parameters.
-func finishedRun(name, uid string, phase testsv1alpha1.Phase, min int, metrics map[string]string, cfg map[string]string) *testsv1alpha1.TestRun {
+// finishedAt is a finished run of smoke with metrics and parameters.
+func finishedAt(name, uid string, phase testsv1alpha1.Phase, min int, metrics, cfg map[string]string) *testsv1alpha1.TestRun {
 	started := metav1.NewTime(*at(min))
 	done := metav1.NewTime(at(min).Add(30 * time.Second))
 	return &testsv1alpha1.TestRun{
@@ -141,53 +145,62 @@ func finishedRun(name, uid string, phase testsv1alpha1.Phase, min int, metrics m
 	}
 }
 
-func TestAnalyticsPage_TrendsAndComparison(t *testing.T) {
-	other := finishedRun("other-1", "00000000-0000-0000-0000-0000000000f1", testsv1alpha1.PhasePassed, 9, nil, nil)
+func TestAnalytics_TrendsAndComparison(t *testing.T) {
+	other := finishedAt("other-1", "uid-f1", testsv1alpha1.PhasePassed, 9, nil, nil)
 	other.Spec.TestRef = "other"
-	w := newWorld(t, smokeTest(), other,
-		finishedRun("smoke-1", "00000000-0000-0000-0000-0000000000a1", testsv1alpha1.PhasePassed, 0,
+	live := runOf("smoke-live", time.Now())
+	live.Status.Phase, live.Status.FinishedAt = testsv1alpha1.PhaseRunning, nil
+	w := newWorld(t, smokeTest(), other, live,
+		finishedAt("smoke-1", "uid-a1", testsv1alpha1.PhasePassed, 0,
 			map[string]string{"p95_ms": "100", "rps": "40"}, map[string]string{"vus": "10"}),
-		finishedRun("smoke-2", "00000000-0000-0000-0000-0000000000a2", testsv1alpha1.PhaseFailed, 10,
+		finishedAt("smoke-2", "uid-a2", testsv1alpha1.PhaseFailed, 10,
 			map[string]string{"p95_ms": "150"}, map[string]string{"vus": "20"}),
-		finishedRun("smoke-3", "00000000-0000-0000-0000-0000000000a3", testsv1alpha1.PhaseError, 20, nil, nil),
-		runOf("smoke-live", testsv1alpha1.PhaseRunning))
-	base := "/clusters/dev/tests/team-a/smoke/analytics"
+		finishedAt("smoke-3", "uid-a3", testsv1alpha1.PhaseError, 20, nil, nil))
+	base := smokePath + "/analytics"
 
-	rec := w.get(t, base, "")
+	rec := w.do(t, http.MethodGet, base, viewer, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body := rec.Body.String()
-	assert.Contains(t, body, "3 finished runs", "the running run isn't part of the trends")
-	assert.Contains(t, body, "33%", "1 passed of 3 verdicts")
-	assert.Less(t, strings.Index(body, `title="smoke-1`), strings.Index(body, `title="smoke-3`), "strip is oldest first")
-	assert.Contains(t, body, `>p95_ms<`)
-	assert.Contains(t, body, `>rps<`)
-	assert.Contains(t, body, "<polyline")
-	assert.Contains(t, body, "&#43;50%", "html/template encodes +")
-	assert.NotContains(t, body, "Comparison", "nothing selected yet")
-	assert.Contains(t, body, `name="run" value="smoke-2"`)
+	a := decodeAs[Analytics](t, rec)
+	assert.Equal(t, 30, a.Window)
+	require.Len(t, a.Runs, 3, "the running run isn't part of the trends")
+	assert.Equal(t, "smoke-3", a.Runs[0].Name, "newest first")
+	assert.Equal(t, 3, a.Summary.Finished)
+	assert.Equal(t, "33%", a.Summary.PassRate, "1 passed of 3 verdicts")
+	require.NotNil(t, a.Summary.LastFailure)
+	assert.Equal(t, "smoke-3", a.Summary.LastFailure.Name)
+	labels := make([]string, 0, len(a.Trends))
+	for _, tr := range a.Trends {
+		labels = append(labels, tr.Label)
+	}
+	assert.Equal(t, []string{"Duration", "p95_ms", "rps"}, labels)
+	assert.Equal(t, "+50%", a.Trends[1].Delta)
+	assert.Nil(t, a.Cases, "no JUnit, no cases summary")
 
-	rec = w.get(t, base+"?run=smoke-2&run=smoke-1&run=other-1", "")
+	rec = w.do(t, http.MethodGet, base+"/compare?run=smoke-2&run=smoke-1&run=other-1", viewer, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body = rec.Body.String()
-	assert.Contains(t, body, "Comparison")
-	assert.Less(t, strings.Index(body, `>smoke-1</a></th>`), strings.Index(body, `>smoke-2</a></th>`), "columns oldest first")
-	assert.Contains(t, body, "Not runs of this Test (skipped): other-1")
-	assert.Contains(t, body, `value="smoke-1" aria-label="compare smoke-1" checked`)
-	assert.Contains(t, body, "| p95_ms | 100 | 150 (&#43;50%) |", "the Markdown is on the page")
-	assert.Contains(t, body, `href="/clusters/dev/tests/team-a/smoke/analytics/compare.md?run=smoke-2&amp;run=smoke-1&amp;run=other-1"`)
+	c := decodeAs[Comparison](t, rec)
+	require.Len(t, c.Runs, 2)
+	assert.Equal(t, "smoke-1", c.Runs[0].Name, "columns oldest first")
+	assert.Equal(t, []string{"other-1"}, c.Missing, "not a run of this Test")
+	assert.Equal(t, CompareRow{Label: "p95_ms", Cells: []CompareCell{{Value: "100"}, {Value: "150", Delta: "+50%"}}},
+		c.Metrics[0])
+	assert.Contains(t, c.Markdown, "| p95_ms | 100 | 150 (+50%) |")
+	assert.Contains(t, c.Markdown, "| vus | 10 | 20 |")
 
-	md := w.get(t, base+"/compare.md?run=smoke-1&run=smoke-2", "")
-	require.Equal(t, http.StatusOK, md.Code)
-	assert.Equal(t, "text/markdown; charset=utf-8", md.Header().Get("Content-Type"))
-	assert.Contains(t, md.Header().Get("Content-Disposition"), `filename="smoke-comparison.md"`)
-	assert.Contains(t, md.Body.String(), "| vus | 10 | 20 |")
-
-	assert.Equal(t, http.StatusBadRequest, w.get(t, base+"/compare.md", "").Code)
+	none := w.do(t, http.MethodGet, base+"/compare", viewer, nil)
+	assert.Equal(t, http.StatusBadRequest, none.Code)
+	assert.Equal(t, "Pick the runs to compare (?run= is missing).", errorOf(t, none))
 }
 
-func TestAnalyticsPage_Empty(t *testing.T) {
-	w := newWorld(t, smokeTest())
-	body := w.get(t, "/clusters/dev/tests/team-a/smoke/analytics?runs=999", "").Body.String()
-	assert.Contains(t, body, "No finished runs yet.")
-	assert.Contains(t, body, `<option value="30" selected>`, "unknown window falls back to 30")
+func TestAnalytics_CasesAndEmpty(t *testing.T) {
+	w := newRunWorld(t, nil, smokeTest(), casesRun())
+	a := decodeAs[Analytics](t, w.do(t, http.MethodGet, smokePath+"/analytics?runs=10", viewer, nil))
+	assert.Equal(t, 10, a.Window)
+	require.NotNil(t, a.Cases, "the runs reported JUnit")
+	assert.Equal(t, &CasesSummary{Flaky: 1, FailingNow: 2}, a.Cases)
+
+	empty := decodeAs[Analytics](t, newWorld(t, smokeTest()).do(t, http.MethodGet, smokePath+"/analytics?runs=999", viewer, nil))
+	assert.Equal(t, 30, empty.Window, "unknown window falls back to 30")
+	assert.Empty(t, empty.Runs)
+	assert.Equal(t, []Trend{}, empty.Trends)
 }

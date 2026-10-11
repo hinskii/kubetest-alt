@@ -196,3 +196,25 @@ export const compareRunQuery = (k: RunKey, withRun?: string) =>
         }),
       ),
   });
+
+export const analyticsQuery = (k: TestKey, runs: Window) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "analytics", runs],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics", {
+          params: { ...testParams(k), query: { runs } },
+        }),
+      ),
+  });
+
+export const comparisonQuery = (k: TestKey, run: string[]) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "analytics", "compare", run],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics/compare", {
+          params: { ...testParams(k), query: { run } },
+        }),
+      ),
+  });
