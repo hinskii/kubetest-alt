@@ -69,7 +69,7 @@ func ParamsOf(spec *testsv1alpha1.TestSpec) []Param {
 	for _, name := range slices.Sorted(maps.Keys(spec.Config)) {
 		p := spec.Config[name]
 		out = append(out, Param{Name: name, Type: p.Type, Default: p.Default, Pattern: p.Pattern,
-			Enum: p.Enum, Required: p.Default == ""})
+			Enum: p.Enum, Required: p.Default == "", Description: p.Description})
 	}
 	return out
 }

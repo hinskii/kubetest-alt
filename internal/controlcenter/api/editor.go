@@ -14,14 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package api
 
 import (
 	"cmp"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/url"
 	"path"
 	"reflect"
 	"slices"
@@ -36,7 +35,6 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
-	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
@@ -49,157 +47,140 @@ import (
 // step posts the whole form back, and the Test the form describes is
 // rebuilt from it every time.
 
-// kindTest is the Test CRD's kind.
-const kindTest = "Test"
+// KindTest is the Test CRD's kind.
+const KindTest = "Test"
 
 // Editor modes.
 const (
-	modeForm = "form"
-	modeYAML = "yaml"
+	ModeForm = "form"
+	ModeYAML = "yaml"
 )
 
-// testForm is everything the wizard edits, as submitted.
-type testForm struct {
-	Namespace, Name string
+// TestForm is everything the wizard edits, as submitted.
+type TestForm struct {
+	Namespace string `json:"namespace" required:"true"`
+	Name      string `json:"name" required:"true"`
 	// Template is the TestTemplate the Test uses; "" = an own image.
-	Template string
+	Template string `json:"template,omitempty"`
 	// Tool is the kubetest.io/tool label (taken from the template).
-	Tool          string
-	Image         string
-	Command, Args string // one item per line
+	Tool  string `json:"tool,omitempty"`
+	Image string `json:"image,omitempty"`
+	// Command and Args: one item per line.
+	Command string `json:"command,omitempty"`
+	Args    string `json:"args,omitempty"`
 	// Source is where the code comes from: git, inline files, or none (an
 	// own image that needs no files) — one, never several (step 20i).
-	Source      string
-	UseGit      bool
-	GitURI      string
-	GitRevision string
+	Source      string `json:"source,omitempty" enum:"git,inline,"`
+	UseGit      bool   `json:"-"`
+	GitURI      string `json:"gitUri,omitempty"`
+	GitRevision string `json:"gitRevision,omitempty"`
 	// GitPath is where the tests are in the repository (a file or a
 	// directory): the template's main path parameter and, unless GitPaths
 	// says otherwise, the sparse checkout. Required with git (step 20h).
-	GitPath      string
-	GitPaths     string // sparse checkout, one per line (advanced)
-	GitSecret    string // Secret with the token, optional
-	GitSecretKey string
-	UseFiles     bool
-	Files        []fileField
+	GitPath string `json:"gitPath,omitempty"`
+	// GitPaths: the sparse checkout, one per line (advanced).
+	GitPaths string `json:"gitPaths,omitempty"`
+	// GitSecret: the Secret with the token, optional.
+	GitSecret    string      `json:"gitSecret,omitempty"`
+	GitSecretKey string      `json:"gitSecretKey,omitempty"`
+	UseFiles     bool        `json:"-"`
+	Files        []FileField `json:"files,omitempty"`
 	// TestData are ConfigMaps/Secrets mounted as files, with any source.
-	TestData []testDataField
+	TestData []TestDataField `json:"testData,omitempty"`
 	// Params are the template's parameters (name → value).
-	Params map[string]string
-	Env    string // NAME=value per line
-	CPURequest, MemoryRequest,
-	CPULimit, MemoryLimit string
-	ServiceAccount            string
-	PodAnnotations, PodLabels string // key=value per line
-	Timeout, Schedule         string
-	Mode                      string // form | yaml
-	YAML                      string // authoritative in yaml mode
+	Params map[string]string `json:"params,omitempty"`
+	// Env: NAME=value per line.
+	Env           string `json:"env,omitempty"`
+	CPURequest    string `json:"cpuRequest,omitempty"`
+	MemoryRequest string `json:"memoryRequest,omitempty"`
+	CPULimit      string `json:"cpuLimit,omitempty"`
+	MemoryLimit   string `json:"memoryLimit,omitempty"`
+	// ServiceAccount, PodAnnotations and PodLabels (key=value per line).
+	ServiceAccount string `json:"serviceAccount,omitempty"`
+	PodAnnotations string `json:"podAnnotations,omitempty"`
+	PodLabels      string `json:"podLabels,omitempty"`
+	Timeout        string `json:"timeout,omitempty"`
+	Schedule       string `json:"schedule,omitempty"`
+	// Mode: the form, or YAML (authoritative in yaml mode).
+	Mode string `json:"mode,omitempty" enum:"form,yaml"`
+	YAML string `json:"yaml,omitempty"`
 	// ResourceVersion: the Test's version the edit started from; saving
 	// is refused if it changed since.
-	ResourceVersion string
+	ResourceVersion string `json:"resourceVersion,omitempty"`
 }
 
-type fileField struct{ Path, Content string }
+// FileField is one inline file: a path in the repository's place and its text.
+type FileField struct {
+	Path    string `json:"path" required:"true"`
+	Content string `json:"content" required:"true"`
+}
 
-// testDataField is one content.testData row: a ConfigMap or Secret, and
+// TestDataField is one content.testData row: a ConfigMap or Secret, and
 // where its keys land — the default directory, a directory, or single
 // files ("key=/path" per line).
-type testDataField struct {
-	Kind, Name, Where string // Kind: configMap | secret; Where: default | dir | files
-	MountPath, Items  string
+type TestDataField struct {
+	Kind  string `json:"kind" required:"true" enum:"configMap,secret"`
+	Name  string `json:"name" required:"true"`
+	Where string `json:"where,omitempty" enum:"default,dir,files,"`
+	// MountPath: the directory (where=dir). Items: key=/path per line
+	// (where=files).
+	MountPath string `json:"mountPath,omitempty"`
+	Items     string `json:"items,omitempty"`
 }
 
 // Code sources and testData placements in the form.
 const (
-	sourceGit     = "git"
-	kindConfigMap = "configMap"
-	sourceInline  = "inline"
-	kindSecret    = "secret"
-	whereDir      = "dir"
-	whereFiles    = "files"
+	SourceGit     = "git"
+	KindConfigMap = "configMap"
+	SourceInline  = "inline"
+	KindSecret    = "secret"
+	WhereDir      = "dir"
+	WhereFiles    = "files"
 )
 
-// Form field names.
-const (
-	fNamespace = "namespace"
-	fName      = "name"
-	fTemplate  = "template"
-	fFilePath  = "file.path"
-	fFileBody  = "file.content"
-	// fParam prefixes a template parameter: param.<template>.<name>.
-	fParam = "param."
-)
-
-// otherNamespace is the namespace list's "Other namespace…" choice: the
-// name is then typed.
-const otherNamespace = "__other"
-
-// namespaceOf is the chosen namespace: from the list, else typed.
-func namespaceOf(v url.Values) string {
-	if c := v.Get("namespaceChoice"); c != "" && c != otherNamespace {
-		return c
+// Normalize tidies a submitted form, from the page or the UI's API, the
+// same way: spaces trimmed, the mode and the source's flags set, rows
+// with nothing in them dropped, line endings and schedules made regular.
+func (f *TestForm) Normalize() {
+	for _, p := range []*string{&f.Namespace, &f.Name, &f.Tool, &f.Image, &f.GitURI, &f.GitRevision, &f.GitSecret,
+		&f.GitSecretKey, &f.CPURequest, &f.MemoryRequest, &f.CPULimit, &f.MemoryLimit, &f.ServiceAccount, &f.Timeout} {
+		*p = strings.TrimSpace(*p)
 	}
-	return strings.TrimSpace(v.Get(fNamespace))
+	f.GitPath = strings.Trim(strings.TrimSpace(f.GitPath), "/")
+	f.Schedule = strings.Join(strings.Fields(f.Schedule), " ")
+	if f.Mode != ModeYAML {
+		f.Mode = ModeForm
+	}
+	f.UseGit, f.UseFiles = f.Source == SourceGit, f.Source == SourceInline
+	files := f.Files[:0:0]
+	for _, file := range f.Files {
+		file.Path = strings.TrimSpace(file.Path)
+		file.Content = strings.ReplaceAll(file.Content, "\r\n", "\n")
+		if file.Path != "" || strings.TrimSpace(file.Content) != "" {
+			files = append(files, file)
+		}
+	}
+	f.Files = files
+	data := f.TestData[:0:0]
+	for _, td := range f.TestData {
+		td.Kind, td.Name, td.Where = strings.TrimSpace(td.Kind), strings.TrimSpace(td.Name), strings.TrimSpace(td.Where)
+		td.MountPath, td.Items = strings.TrimSpace(td.MountPath), strings.TrimSpace(td.Items)
+		if td.Name != "" {
+			data = append(data, td)
+		}
+	}
+	f.TestData = data
+	if f.Params == nil {
+		f.Params = map[string]string{}
+	}
+	for k, v := range f.Params {
+		f.Params[k] = strings.TrimSpace(v)
+	}
 }
 
-// formFromValues reads a submitted form.
-func formFromValues(v url.Values) testForm {
-	f := testForm{
-		Namespace: namespaceOf(v), Name: strings.TrimSpace(v.Get(fName)),
-		Template: v.Get(fTemplate), Tool: strings.TrimSpace(v.Get("tool")),
-		Image: strings.TrimSpace(v.Get("image")), Command: v.Get("command"), Args: v.Get("args"),
-		Source: v.Get("source"), GitURI: strings.TrimSpace(v.Get("gitURI")),
-		GitRevision: strings.TrimSpace(v.Get("gitRevision")), GitPaths: v.Get("gitPaths"),
-		GitPath:   strings.Trim(strings.TrimSpace(v.Get("gitPath")), "/"),
-		GitSecret: strings.TrimSpace(v.Get("gitSecret")), GitSecretKey: strings.TrimSpace(v.Get("gitSecretKey")),
-		Env:        v.Get("env"),
-		CPURequest: strings.TrimSpace(v.Get("cpuRequest")), MemoryRequest: strings.TrimSpace(v.Get("memoryRequest")),
-		CPULimit: strings.TrimSpace(v.Get("cpuLimit")), MemoryLimit: strings.TrimSpace(v.Get("memoryLimit")),
-		ServiceAccount: strings.TrimSpace(v.Get("serviceAccount")),
-		PodAnnotations: v.Get("podAnnotations"), PodLabels: v.Get("podLabels"),
-		Timeout: strings.TrimSpace(v.Get("timeout")), Schedule: strings.Join(strings.Fields(v.Get("schedule")), " "),
-		Mode: v.Get("mode"), YAML: v.Get("yaml"), ResourceVersion: v.Get("resourceVersion"),
-	}
-	if f.Mode != modeYAML {
-		f.Mode = modeForm
-	}
-	f.UseGit, f.UseFiles = f.Source == sourceGit, f.Source == sourceInline
-	kinds, names, wheres, mounts, items := v["td.kind"], v["td.name"], v["td.where"], v["td.mountPath"], v["td.items"]
-	for i, name := range names {
-		at := func(xs []string) string {
-			if i < len(xs) {
-				return strings.TrimSpace(xs[i])
-			}
-			return ""
-		}
-		if name = strings.TrimSpace(name); name != "" {
-			f.TestData = append(f.TestData, testDataField{Kind: at(kinds), Name: name, Where: at(wheres),
-				MountPath: at(mounts), Items: at(items)})
-		}
-	}
-	paths, bodies := v[fFilePath], v[fFileBody]
-	for i, p := range paths {
-		body := ""
-		if i < len(bodies) {
-			body = strings.ReplaceAll(bodies[i], "\r\n", "\n")
-		}
-		if p = strings.TrimSpace(p); p != "" || strings.TrimSpace(body) != "" {
-			f.Files = append(f.Files, fileField{Path: p, Content: body})
-		}
-	}
-	prefix := fParam + f.Template + "."
-	f.Params = map[string]string{}
-	for k, vals := range v {
-		if name, ok := strings.CutPrefix(k, prefix); ok && f.Template != "" && len(vals) > 0 {
-			f.Params[name] = strings.TrimSpace(vals[0])
-		}
-	}
-	return f
-}
-
-// formUnsupported says why the form can't represent t (the editor then
+// FormUnsupported says why the form can't represent t (the editor then
 // opens in YAML mode), or "".
-func formUnsupported(t *testsv1alpha1.Test) string {
+func FormUnsupported(t *testsv1alpha1.Test) string {
 	switch {
 	case len(t.Spec.Steps) > 0:
 		return "A composite Test (spec.steps) is edited as YAML."
@@ -211,12 +192,12 @@ func formUnsupported(t *testsv1alpha1.Test) string {
 	return ""
 }
 
-// formFromTest fills the form from a Test and its template (nil: none or
+// FormFromTest fills the form from a Test and its template (nil: none or
 // not found).
-func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testForm {
+func FormFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) TestForm {
 	s := &t.Spec
-	f := testForm{
-		Namespace: t.Namespace, Name: t.Name, Tool: t.Labels[labelTool], Mode: modeForm,
+	f := TestForm{
+		Namespace: t.Namespace, Name: t.Name, Tool: t.Labels[LabelTool], Mode: ModeForm,
 		Image: s.Container.Image, Command: strings.Join(s.Container.Command, "\n"),
 		Args: strings.Join(s.Container.Args, "\n"), Schedule: s.Schedule,
 		ResourceVersion: t.ResourceVersion, Params: map[string]string{},
@@ -232,32 +213,32 @@ func formFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) testF
 	}
 	for _, file := range s.Content.Files {
 		if file.ContentFrom == nil {
-			f.Files = append(f.Files, fileField{Path: resolver.InlineFilePath(file.Path), Content: file.Content})
+			f.Files = append(f.Files, FileField{Path: resolver.InlineFilePath(file.Path), Content: file.Content})
 		}
 	}
 	f.UseFiles = len(f.Files) > 0
 	switch {
 	case s.Content.Git != nil:
-		f.Source = sourceGit
+		f.Source = SourceGit
 	case f.UseFiles:
-		f.Source = sourceInline
+		f.Source = SourceInline
 	}
 	f.UseGit = s.Content.Git != nil
 	for _, d := range s.Content.TestData {
-		row := testDataField{Kind: kindConfigMap, Name: d.ConfigMap, MountPath: d.MountPath}
+		row := TestDataField{Kind: KindConfigMap, Name: d.ConfigMap, MountPath: d.MountPath}
 		if d.Secret != "" {
-			row.Kind, row.Name = kindSecret, d.Secret
+			row.Kind, row.Name = KindSecret, d.Secret
 		}
 		switch {
 		case len(d.Items) > 0:
-			row.Where = whereFiles
+			row.Where = WhereFiles
 			ls := make([]string, 0, len(d.Items))
 			for _, it := range d.Items {
 				ls = append(ls, it.Key+"="+it.Path)
 			}
 			row.Items = strings.Join(ls, "\n")
 		case d.MountPath != "":
-			row.Where = whereDir
+			row.Where = WhereDir
 		}
 		f.TestData = append(f.TestData, row)
 	}
@@ -354,10 +335,10 @@ func kvLines(field, s string) (map[string]string, error) {
 // everything else — services, volumes, verdict, … — kept. tmpl is the
 // chosen template (nil for an own image). Returns every problem found,
 // and warnings that don't stop a save.
-func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) (*testsv1alpha1.Test, []string, []string) {
+func (f TestForm) Build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) (*testsv1alpha1.Test, []string, []string) {
 	b := &builder{form: f, t: base.DeepCopy()}
 	t := b.t
-	t.APIVersion, t.Kind = testsv1alpha1.GroupVersion.String(), kindTest
+	t.APIVersion, t.Kind = testsv1alpha1.GroupVersion.String(), KindTest
 	if t.Name == "" {
 		t.Name, t.Namespace = f.Name, f.Namespace
 		for _, msg := range validation.IsDNS1123Subdomain(f.Name) {
@@ -367,7 +348,7 @@ func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTempla
 			b.fail("Namespace: " + msg)
 		}
 	}
-	previous := firstOf(t.Spec.Use)
+	previous := FirstOf(t.Spec.Use)
 	b.template(tmpl)
 	b.container()
 	b.content(base.Spec.Content.Git)
@@ -384,7 +365,7 @@ func (f testForm) build(base *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTempla
 
 // builder collects the problems of one build.
 type builder struct {
-	form  testForm
+	form  TestForm
 	t     *testsv1alpha1.Test
 	errs  []string
 	warns []string
@@ -409,10 +390,10 @@ func (b *builder) template(tmpl *testsv1alpha1.TestTemplate) {
 		s.Use = []string{f.Template}
 	}
 	tool := f.Tool
-	if tmpl != nil && tmpl.Labels[labelTool] != "" {
-		tool = tmpl.Labels[labelTool]
+	if tmpl != nil && tmpl.Labels[LabelTool] != "" {
+		tool = tmpl.Labels[LabelTool]
 	}
-	setLabel(&b.t.ObjectMeta, labelTool, tool)
+	setLabel(&b.t.ObjectMeta, LabelTool, tool)
 }
 
 // container sets image, command, arguments, environment and resources.
@@ -495,16 +476,16 @@ func (b *builder) testData() {
 	c.TestData = nil
 	for _, row := range b.form.TestData {
 		d := testsv1alpha1.TestDataSource{ConfigMap: row.Name}
-		if row.Kind == kindSecret {
+		if row.Kind == KindSecret {
 			d = testsv1alpha1.TestDataSource{Secret: row.Name}
 		}
 		switch row.Where {
-		case whereDir:
+		case WhereDir:
 			if !strings.HasPrefix(row.MountPath, "/") {
 				b.fail(fmt.Sprintf("Test data %s: the directory must be an absolute path, e.g. /data/repo/e2e/data.", row.Name))
 			}
 			d.MountPath = row.MountPath
-		case whereFiles:
+		case WhereFiles:
 			for _, l := range lines(row.Items) {
 				k, p, ok := strings.Cut(l, "=")
 				if !ok || strings.TrimSpace(k) == "" || !strings.HasPrefix(strings.TrimSpace(p), "/") {
@@ -649,7 +630,7 @@ func (b *builder) timing() {
 	}
 	s.Schedule = f.Schedule
 	if f.Schedule != "" {
-		if _, err := uiapi.NextFires(f.Schedule, time.Now(), 1); err != nil {
+		if _, err := NextFires(f.Schedule, time.Now(), 1); err != nil {
 			b.fail("Schedule: " + err.Error())
 		}
 	}
@@ -703,12 +684,12 @@ type manifestMeta struct {
 }
 
 // serverAnnotations are set by the API server, not by the Test's author.
-var serverAnnotations = []string{tagCreatedBy, "kubectl.kubernetes.io/last-applied-configuration"}
+var serverAnnotations = []string{TagCreatedBy, "kubectl.kubernetes.io/last-applied-configuration"}
 
 func manifestOf(t *testsv1alpha1.Test) manifest {
-	m := manifest{APIVersion: testsv1alpha1.GroupVersion.String(), Kind: kindTest, Spec: t.Spec,
+	m := manifest{APIVersion: testsv1alpha1.GroupVersion.String(), Kind: KindTest, Spec: t.Spec,
 		Metadata: manifestMeta{Name: t.Name, Namespace: t.Namespace, Labels: maps.Clone(t.Labels), Annotations: maps.Clone(t.Annotations)}}
-	delete(m.Metadata.Labels, labelManagedBy)
+	delete(m.Metadata.Labels, LabelManagedBy)
 	for _, k := range serverAnnotations {
 		delete(m.Metadata.Annotations, k)
 	}
@@ -721,9 +702,9 @@ func manifestOf(t *testsv1alpha1.Test) manifest {
 	return m
 }
 
-// manifestYAML renders a Test for Git, for people: keys in reading order,
+// ManifestYAML renders a Test for Git, for people: keys in reading order,
 // scripts as | blocks, no empty objects (yamlview).
-func manifestYAML(t *testsv1alpha1.Test) string {
+func ManifestYAML(t *testsv1alpha1.Test) string {
 	out, err := yamlview.Format(manifestOf(t), yamlview.Manifest)
 	if err != nil {
 		return err.Error()
@@ -731,24 +712,24 @@ func manifestYAML(t *testsv1alpha1.Test) string {
 	return out
 }
 
-// parseManifest reads the YAML mode's text onto base: its labels,
+// ParseManifest reads the YAML mode's text onto base: its labels,
 // annotations and spec replace base's; name and namespace must match an
 // edited Test's. Unknown fields are errors (a typo would otherwise be
 // dropped silently).
-func parseManifest(text string, base *testsv1alpha1.Test) (*testsv1alpha1.Test, []string) {
+func ParseManifest(text string, base *testsv1alpha1.Test) (*testsv1alpha1.Test, []string) {
 	var m manifest
 	if err := yaml.UnmarshalStrict([]byte(text), &m); err != nil {
 		return nil, []string{"YAML: " + err.Error()}
 	}
 	var errs []string
-	if m.Kind != "" && m.Kind != kindTest {
+	if m.Kind != "" && m.Kind != KindTest {
 		errs = append(errs, fmt.Sprintf("YAML: kind is %q; this editor writes a Test.", m.Kind))
 	}
 	if m.APIVersion != "" && m.APIVersion != testsv1alpha1.GroupVersion.String() {
 		errs = append(errs, fmt.Sprintf("YAML: apiVersion is %q, not %s.", m.APIVersion, testsv1alpha1.GroupVersion))
 	}
 	t := base.DeepCopy()
-	t.APIVersion, t.Kind = testsv1alpha1.GroupVersion.String(), kindTest
+	t.APIVersion, t.Kind = testsv1alpha1.GroupVersion.String(), KindTest
 	if t.Name == "" {
 		t.Name, t.Namespace = m.Metadata.Name, m.Metadata.Namespace
 		for _, msg := range validation.IsDNS1123Subdomain(t.Name) {
@@ -760,13 +741,13 @@ func parseManifest(text string, base *testsv1alpha1.Test) (*testsv1alpha1.Test, 
 	} else if m.Metadata.Name != t.Name || (m.Metadata.Namespace != "" && m.Metadata.Namespace != t.Namespace) {
 		errs = append(errs, fmt.Sprintf("YAML: this editor saves %s/%s; to make a copy under another name, use Duplicate.", t.Namespace, t.Name))
 	}
-	if v, ok := m.Metadata.Labels[labelManagedBy]; ok && v != managedByUI {
-		errs = append(errs, "YAML: leave out the "+labelManagedBy+" label; the API server sets it.")
+	if v, ok := m.Metadata.Labels[LabelManagedBy]; ok && v != ManagedByUI {
+		errs = append(errs, "YAML: leave out the "+LabelManagedBy+" label; the API server sets it.")
 	}
-	managed := t.Labels[labelManagedBy]
+	managed := t.Labels[LabelManagedBy]
 	t.Labels, t.Spec = m.Metadata.Labels, m.Spec
 	if managed != "" {
-		setLabel(&t.ObjectMeta, labelManagedBy, managed)
+		setLabel(&t.ObjectMeta, LabelManagedBy, managed)
 	}
 	kept := map[string]string{}
 	for _, k := range serverAnnotations {
@@ -784,13 +765,13 @@ func parseManifest(text string, base *testsv1alpha1.Test) (*testsv1alpha1.Test, 
 	return t, errs
 }
 
-// editPatch is the JSON merge patch from old to updated: labels,
+// EditPatch is the JSON merge patch from old to updated: labels,
 // annotations and spec, conditional on old's resourceVersion (the API
 // answers 409 when the Test changed meanwhile).
-func editPatch(old, updated *testsv1alpha1.Test) (json.RawMessage, error) {
+func EditPatch(old, updated *testsv1alpha1.Test) (json.RawMessage, error) {
 	doc := func(t *testsv1alpha1.Test) ([]byte, error) {
 		labels := maps.Clone(t.Labels)
-		delete(labels, labelManagedBy) // the API refuses patches touching it
+		delete(labels, LabelManagedBy) // the API refuses patches touching it
 		return json.Marshal(map[string]any{
 			"metadata": map[string]any{"labels": labels, "annotations": t.Annotations},
 			"spec":     t.Spec,
@@ -819,4 +800,12 @@ func editPatch(old, updated *testsv1alpha1.Test) (json.RawMessage, error) {
 	meta["resourceVersion"] = old.ResourceVersion
 	p["metadata"] = meta
 	return json.Marshal(p)
+}
+
+// FirstOf is s[0], or "" for an empty slice.
+func FirstOf(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
 }

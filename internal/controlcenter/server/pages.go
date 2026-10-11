@@ -45,9 +45,6 @@ const (
 	labelTool      = uiapi.LabelTool
 	labelManagedBy = uiapi.LabelManagedBy
 	managedByUI    = uiapi.ManagedByUI
-	// tagCreatedBy names who started a run (a TestRun tag) or created a
-	// Test (an annotation).
-	tagCreatedBy = uiapi.TagCreatedBy
 )
 
 // HTML input types of parameter fields (inputNumber is also the

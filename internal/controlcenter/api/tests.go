@@ -86,6 +86,8 @@ type Param struct {
 	Pattern  string   `json:"pattern,omitempty"`
 	Enum     []string `json:"enum,omitempty"`
 	Required bool     `json:"required" required:"true"`
+	// Description says what the parameter is for.
+	Description string `json:"description,omitempty"`
 }
 
 // Schedule is a Test's recurring schedule (spec.schedule).

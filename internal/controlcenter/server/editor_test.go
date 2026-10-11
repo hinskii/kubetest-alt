@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
@@ -253,7 +255,7 @@ func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
 		Labels: map[string]string{"app.kubernetes.io/managed-by": "ui"}}}
 	test.Spec.Pod = &testsv1alpha1.PodConfig{Volumes: []corev1.Volume{
 		{Name: "shm", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}}
-	out := manifestYAML(test)
+	out := uiapi.ManifestYAML(test)
 	assert.Contains(t, out, "emptyDir: {}")
 	assert.NotContains(t, out, "resources")
 	assert.NotContains(t, out, "managed-by")

@@ -18,13 +18,13 @@ package server
 
 import (
 	"context"
-	"maps"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
@@ -66,7 +66,7 @@ type editorData struct {
 	Edit       bool
 	Action     string // the form's URL
 	Back       string
-	Form       testForm
+	Form       uiapi.TestForm
 	Namespaces []string
 	// NamespaceListed: the form's namespace is one of Namespaces (else
 	// "Other namespace…" with the typed name).
@@ -95,7 +95,7 @@ func newTestPath(c string) string { return clusterPath(c) + "/tests/new" }
 
 // templateOptions turns the catalog into wizard choices, with the form's
 // values for the chosen template's parameters.
-func templateOptions(list []testsv1alpha1.TestTemplate, f testForm) []templateOption {
+func templateOptions(list []testsv1alpha1.TestTemplate, f uiapi.TestForm) []templateOption {
 	out := make([]templateOption, 0, len(list))
 	for _, t := range list {
 		o := templateOption{Name: t.Name, Tool: t.Labels[labelTool], Image: t.Spec.Container.Image,
@@ -114,36 +114,6 @@ func templateOptions(list []testsv1alpha1.TestTemplate, f testForm) []templateOp
 	return out
 }
 
-func findTemplate(list []testsv1alpha1.TestTemplate, name string) *testsv1alpha1.TestTemplate {
-	for i := range list {
-		if list[i].Name == name {
-			return &list[i]
-		}
-	}
-	return nil
-}
-
-// namespacesOf lists the namespaces that have Tests, for the namespace
-// field's suggestions.
-func namespacesOf(ctx context.Context, client *apiclient.Client, extra string) []string {
-	set := map[string]bool{}
-	if extra != "" {
-		set[extra] = true
-	}
-	if tests, err := client.ListTests(ctx, ""); err == nil {
-		for _, t := range tests {
-			set[t.Namespace] = true
-		}
-	}
-	// Namespaces with a tool catalog: where a template-based Test works.
-	if templates, err := client.ListTemplates(ctx, ""); err == nil {
-		for _, t := range templates {
-			set[t.Namespace] = true
-		}
-	}
-	return slices.Sorted(maps.Keys(set))
-}
-
 // newTestPage: GET /tests/new — the wizard, empty, for a template
 // (?template=), or as a copy of a Test (?from=, Duplicate).
 func (s *Server) newTestPage(w http.ResponseWriter, r *http.Request) {
@@ -153,8 +123,8 @@ func (s *Server) newTestPage(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	client := api(r, c)
-	f := testForm{Namespace: strings.TrimSpace(q.Get(fNamespace)), Name: strings.TrimSpace(q.Get(fName)),
-		Template: q.Get(fTemplate), Mode: modeForm, Params: map[string]string{}}
+	f := uiapi.TestForm{Namespace: strings.TrimSpace(q.Get(fieldNamespace)), Name: strings.TrimSpace(q.Get(fieldName)),
+		Template: q.Get(fieldTemplate), Mode: uiapi.ModeForm, Params: map[string]string{}}
 	data := editorData{Cluster: c.Name, Action: newTestPath(c.Name), Back: clusterPath(c.Name), Step: stepBasics}
 	if from := q.Get("from"); from != "" && f.Namespace != "" {
 		src, err := client.GetTest(r.Context(), f.Namespace, from)
@@ -172,18 +142,18 @@ func (s *Server) newTestPage(w http.ResponseWriter, r *http.Request) {
 
 // formOf fills the editor from an existing Test; Tests the form can't
 // represent open in YAML mode.
-func (s *Server) formOf(ctx context.Context, client *apiclient.Client, t *testsv1alpha1.Test, data *editorData) testForm {
+func (s *Server) formOf(ctx context.Context, client *apiclient.Client, t *testsv1alpha1.Test, data *editorData) uiapi.TestForm {
 	var tmpl *testsv1alpha1.TestTemplate
 	if len(t.Spec.Use) == 1 {
 		if list, err := client.ListTemplates(ctx, t.Namespace); err == nil {
-			tmpl = findTemplate(list, t.Spec.Use[0])
+			tmpl = uiapi.FindTemplate(list, t.Spec.Use[0])
 		}
 	}
-	f := formFromTest(t, tmpl)
-	if reason := formUnsupported(t); reason != "" {
-		data.YAMLOnly, f.Mode = reason, modeYAML
+	f := uiapi.FormFromTest(t, tmpl)
+	if reason := uiapi.FormUnsupported(t); reason != "" {
+		data.YAMLOnly, f.Mode = reason, uiapi.ModeYAML
 	}
-	f.YAML = manifestYAML(t)
+	f.YAML = uiapi.ManifestYAML(t)
 	return f
 }
 
@@ -227,7 +197,7 @@ func (s *Server) submitEditTest(w http.ResponseWriter, r *http.Request) {
 type editorState struct {
 	c         *clusters.Cluster
 	client    *apiclient.Client
-	f         testForm
+	f         uiapi.TestForm
 	data      editorData
 	base      *testsv1alpha1.Test
 	templates []testsv1alpha1.TestTemplate
@@ -258,10 +228,10 @@ func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request, edit bool
 		st.base = current
 		st.f.Namespace, st.f.Name = ns, name
 		st.data.Action, st.data.Back = testPath(c.Name, ns, name)+"/edit", testPath(c.Name, ns, name)
-		st.data.YAMLOnly = formUnsupported(current)
+		st.data.YAMLOnly = uiapi.FormUnsupported(current)
 	}
-	if st.f.Mode == modeYAML {
-		if st.t, st.data.Errors = parseManifest(st.f.YAML, st.base); st.t != nil {
+	if st.f.Mode == uiapi.ModeYAML {
+		if st.t, st.data.Errors = uiapi.ParseManifest(st.f.YAML, st.base); st.t != nil {
 			st.f.Namespace = st.t.Namespace
 		}
 	}
@@ -272,8 +242,8 @@ func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request, edit bool
 		}
 		st.data.Templates = templateOptions(st.templates, st.f)
 	}
-	if st.f.Mode == modeForm {
-		st.t, st.data.Errors, st.data.Warnings = st.f.build(st.base, findTemplate(st.templates, st.f.Template))
+	if st.f.Mode == uiapi.ModeForm {
+		st.t, st.data.Errors, st.data.Warnings = st.f.Build(st.base, uiapi.FindTemplate(st.templates, st.f.Template))
 	}
 	return st, true
 }
@@ -298,7 +268,7 @@ func (s *Server) editorYAML(w http.ResponseWriter, r *http.Request, edit bool) {
 	if st.t == nil {
 		status = http.StatusUnprocessableEntity
 	} else {
-		panel.YAML = manifestYAML(st.t)
+		panel.YAML = uiapi.ManifestYAML(st.t)
 	}
 	if err := s.Views.RenderFragment(w, status, "editor", "yaml-panel", panel); err != nil {
 		s.Log.Error("render failed", "fragment", "yaml-panel", "err", err)
@@ -328,14 +298,14 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 		s.renderEditor(w, r, c, client, data)
 		return
 	case action == actToYAML && len(data.Errors) == 0:
-		f.Mode, f.YAML = modeYAML, manifestYAML(t)
+		f.Mode, f.YAML = uiapi.ModeYAML, uiapi.ManifestYAML(t)
 	case action == actToForm && len(data.Errors) == 0:
-		if reason := formUnsupported(t); reason != "" {
+		if reason := uiapi.FormUnsupported(t); reason != "" {
 			data.Errors = append(data.Errors, reason)
 			break
 		}
 		rv := f.ResourceVersion
-		f = formFromTest(t, findTemplate(templates, firstOf(t.Spec.Use)))
+		f = uiapi.FormFromTest(t, uiapi.FindTemplate(templates, uiapi.FirstOf(t.Spec.Use)))
 		f.ResourceVersion, data.Step = rv, stepBasics
 		data.Templates = templateOptions(templates, f)
 	case action == actDownload && len(data.Errors) == 0:
@@ -343,7 +313,7 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 		w.Header().Set("Content-Disposition", `attachment; filename="`+safeName(t.Name)+`.yaml"`)
 		// A download, not a page: application/yaml as an attachment, with
 		// nosniff (securityHeaders).
-		_, _ = w.Write([]byte(manifestYAML(t))) //nolint:gosec // see above
+		_, _ = w.Write([]byte(uiapi.ManifestYAML(t))) //nolint:gosec // see above
 		return
 	}
 	data.Form = f
@@ -351,13 +321,13 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 		s.renderEditor(w, r, c, client, data)
 		return
 	}
-	data.Preview = manifestYAML(t)
-	if f.Mode == modeForm {
+	data.Preview = uiapi.ManifestYAML(t)
+	if f.Mode == uiapi.ModeForm {
 		data.Form.YAML = data.Preview
 	}
 
 	save := action == actSave
-	written, err := s.writeTest(r.Context(), client, edit, base, t, f.ResourceVersion, !save)
+	written, err := uiapi.WriteTest(r.Context(), client, edit, base, t, f.ResourceVersion, !save)
 	switch {
 	case err != nil:
 		data.CheckErr, data.SaveFailed = messageOf(err), save
@@ -376,30 +346,6 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 	s.renderEditor(w, r, c, client, data)
 }
 
-func firstOf(s []string) string {
-	if len(s) == 0 {
-		return ""
-	}
-	return s[0]
-}
-
-// writeTest creates t, or patches base into t; dryRun only asks the API
-// whether it would.
-func (s *Server) writeTest(ctx context.Context, client *apiclient.Client, edit bool,
-	base, t *testsv1alpha1.Test, resourceVersion string, dryRun bool) (*testsv1alpha1.Test, error) {
-	opts := apiclient.WriteOptions{DryRun: dryRun}
-	if !edit {
-		return client.CreateTest(ctx, t, opts)
-	}
-	old := base.DeepCopy()
-	old.ResourceVersion = resourceVersion
-	patch, err := editPatch(old, t)
-	if err != nil {
-		return nil, err
-	}
-	return client.PatchTestWith(ctx, t.Namespace, t.Name, patch, opts)
-}
-
 func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *clusters.Cluster, client *apiclient.Client, data editorData) {
 	if data.Form.Namespace != "" && data.Templates == nil {
 		list, err := client.ListTemplates(r.Context(), data.Form.Namespace)
@@ -409,12 +355,12 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *cluster
 		data.Templates = templateOptions(list, data.Form)
 	}
 	if !data.Edit {
-		data.Namespaces = namespacesOf(r.Context(), client, "")
+		data.Namespaces = uiapi.NamespacesOf(r.Context(), client)
 		data.NamespaceListed = slices.Contains(data.Namespaces, data.Form.Namespace)
 	}
 	// One empty row to add a file to (without JavaScript, too).
-	data.Form.Files = append(slices.Clone(data.Form.Files), fileField{})
-	data.Form.TestData = append(slices.Clone(data.Form.TestData), testDataField{})
+	data.Form.Files = append(slices.Clone(data.Form.Files), uiapi.FileField{})
+	data.Form.TestData = append(slices.Clone(data.Form.TestData), uiapi.TestDataField{})
 	title, crumbs := "New test", clusterCrumbs(c)
 	if data.Edit {
 		title = "Edit " + data.Form.Name

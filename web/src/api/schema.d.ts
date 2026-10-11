@@ -21,6 +21,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/namespaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Namespaces that have Tests or a tool catalog. */
+        get: operations["listNamespaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/runs/{ns}/{id}": {
         parameters: {
             query?: never;
@@ -157,6 +174,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A namespace's tool catalog (TestTemplates), as the editor offers it. */
+        get: operations["listTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests": {
         parameters: {
             query?: never;
@@ -167,7 +201,28 @@ export interface paths {
         /** Every Test in the cluster, by namespace and name. */
         get: operations["listTests"];
         put?: never;
-        post?: never;
+        /**
+         * Create the form's Test (managed by the GUI), or with dry-run=true check it.
+         * @description Requires the developer role.
+         */
+        post: operations["createTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The Test a form describes, as YAML, with what is wrong — the same build as createTest. */
+        post: operations["previewTest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -183,7 +238,11 @@ export interface paths {
         };
         /** A Test with its templates merged: parameters, schedule, definition. */
         get: operations["getTest"];
-        put?: never;
+        /**
+         * Save the form over a GUI-managed Test (a merge patch, conditional on the form's resourceVersion), or with dry-run=true check it.
+         * @description Requires the developer role.
+         */
+        put: operations["updateTest"];
         post?: never;
         /**
          * Delete a GUI-managed Test; its run history stays.
@@ -281,6 +340,40 @@ export interface paths {
          * @description Requires the admin role.
          */
         post: operations["cleanup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A Test as the editor shows it (edit, duplicate). */
+        get: operations["getTestForm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** The edited Test a form describes, as YAML, with what is wrong. */
+        post: operations["previewTestEdit"];
         delete?: never;
         options?: never;
         head?: never;
@@ -507,6 +600,10 @@ export interface components {
             /** @enum {string} */
             type: "Normal" | "Warning";
         };
+        FileField: {
+            content: string;
+            path: string;
+        };
         GitInfo: {
             commit: components["schemas"]["Commit"];
             repository?: string;
@@ -528,14 +625,23 @@ export interface components {
             /** Format: double */
             value: number;
         };
+        NamespaceList: {
+            namespaces: string[];
+        };
         Param: {
             default?: string;
+            description?: string;
             enum?: string[];
             name: string;
             pattern?: string;
             required: boolean;
             /** @enum {string} */
             type: "string" | "integer" | "number" | "boolean";
+        };
+        Preview: {
+            errors: string[];
+            warnings: string[];
+            yaml?: string;
         };
         RecurringSchedule: {
             latestRun?: components["schemas"]["RunRef"];
@@ -643,6 +749,12 @@ export interface components {
             /** Format: date-time */
             startedAt?: null | string;
         };
+        SavedTest: {
+            dryRun: boolean;
+            name: string;
+            namespace: string;
+            yaml: string;
+        };
         Schedule: {
             error?: string;
             expr: string;
@@ -698,6 +810,10 @@ export interface components {
             passRate?: string;
             passed: number;
         };
+        TemplateList: {
+            error?: string;
+            templates: components["schemas"]["ToolTemplate"][];
+        };
         TestCase: {
             class?: string;
             details?: string;
@@ -715,6 +831,15 @@ export interface components {
             skipped: number;
             total: number;
         };
+        TestDataField: {
+            items?: string;
+            /** @enum {string} */
+            kind: "configMap" | "secret";
+            mountPath?: string;
+            name: string;
+            /** @enum {string} */
+            where?: "default" | "dir" | "files" | "";
+        };
         TestDetail: {
             definition: string;
             locked: boolean;
@@ -726,6 +851,47 @@ export interface components {
             templates: string[];
             tool: string;
         };
+        TestForm: {
+            args?: string;
+            command?: string;
+            cpuLimit?: string;
+            cpuRequest?: string;
+            env?: string;
+            files?: components["schemas"]["FileField"][];
+            gitPath?: string;
+            gitPaths?: string;
+            gitRevision?: string;
+            gitSecret?: string;
+            gitSecretKey?: string;
+            gitUri?: string;
+            image?: string;
+            memoryLimit?: string;
+            memoryRequest?: string;
+            /** @enum {string} */
+            mode?: "form" | "yaml";
+            name: string;
+            namespace: string;
+            params?: {
+                [key: string]: string;
+            };
+            podAnnotations?: string;
+            podLabels?: string;
+            resourceVersion?: string;
+            schedule?: string;
+            serviceAccount?: string;
+            /** @enum {string} */
+            source?: "git" | "inline" | "";
+            template?: string;
+            testData?: components["schemas"]["TestDataField"][];
+            timeout?: string;
+            tool?: string;
+            yaml?: string;
+        };
+        TestFormOf: {
+            form: components["schemas"]["TestForm"];
+            locked: boolean;
+            yamlOnly?: string;
+        };
         TestList: {
             tests: components["schemas"]["TestSummary"][];
         };
@@ -735,6 +901,17 @@ export interface components {
             name: string;
             namespace: string;
             problem?: string;
+            tool: string;
+        };
+        ToolTemplate: {
+            args?: string;
+            command?: string;
+            image: string;
+            /** @enum {string} */
+            mainKind?: "file" | "directory" | "";
+            mainParam?: string;
+            name: string;
+            params: components["schemas"]["Param"][];
             tool: string;
         };
         Trend: {
@@ -776,6 +953,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Cluster"][];
+                };
+            };
+        };
+    };
+    listNamespaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NamespaceList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -1276,6 +1484,48 @@ export interface operations {
             };
         };
     };
+    listTemplates: {
+        parameters: {
+            query: {
+                namespace: string;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateList"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listTests: {
         parameters: {
             query?: never;
@@ -1316,6 +1566,132 @@ export interface operations {
             };
         };
     };
+    createTest: {
+        parameters: {
+            query?: {
+                "dry-run"?: boolean;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TestForm"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedTest"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TestForm"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getTest: {
         parameters: {
             query?: never;
@@ -1340,6 +1716,81 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateTest: {
+        parameters: {
+            query?: {
+                "dry-run"?: boolean;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TestForm"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SavedTest"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1721,6 +2172,112 @@ export interface operations {
             };
             /** @description Not Found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTestForm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestFormOf"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewTestEdit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TestForm"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -593,6 +593,21 @@
         ],
         "type": "object"
       },
+      "FileField": {
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
       "GitInfo": {
         "properties": {
           "commit": {
@@ -669,9 +684,26 @@
         ],
         "type": "object"
       },
+      "NamespaceList": {
+        "properties": {
+          "namespaces": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "namespaces"
+        ],
+        "type": "object"
+      },
       "Param": {
         "properties": {
           "default": {
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "enum": {
@@ -703,6 +735,30 @@
           "name",
           "type",
           "required"
+        ],
+        "type": "object"
+      },
+      "Preview": {
+        "properties": {
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "yaml": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "errors",
+          "warnings"
         ],
         "type": "object"
       },
@@ -1108,6 +1164,29 @@
         ],
         "type": "object"
       },
+      "SavedTest": {
+        "properties": {
+          "dryRun": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "yaml": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "name",
+          "dryRun",
+          "yaml"
+        ],
+        "type": "object"
+      },
       "Schedule": {
         "properties": {
           "error": {
@@ -1307,6 +1386,23 @@
         ],
         "type": "object"
       },
+      "TemplateList": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "templates": {
+            "items": {
+              "$ref": "#/components/schemas/ToolTemplate"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates"
+        ],
+        "type": "object"
+      },
       "TestCase": {
         "properties": {
           "class": {
@@ -1365,6 +1461,40 @@
         ],
         "type": "object"
       },
+      "TestDataField": {
+        "properties": {
+          "items": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "configMap",
+              "secret"
+            ],
+            "type": "string"
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "where": {
+            "enum": [
+              "default",
+              "dir",
+              "files",
+              ""
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name"
+        ],
+        "type": "object"
+      },
       "TestDetail": {
         "properties": {
           "definition": {
@@ -1412,6 +1542,141 @@
         ],
         "type": "object"
       },
+      "TestForm": {
+        "properties": {
+          "args": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "cpuLimit": {
+            "type": "string"
+          },
+          "cpuRequest": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/FileField"
+            },
+            "type": "array"
+          },
+          "gitPath": {
+            "type": "string"
+          },
+          "gitPaths": {
+            "type": "string"
+          },
+          "gitRevision": {
+            "type": "string"
+          },
+          "gitSecret": {
+            "type": "string"
+          },
+          "gitSecretKey": {
+            "type": "string"
+          },
+          "gitUri": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "memoryLimit": {
+            "type": "string"
+          },
+          "memoryRequest": {
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "form",
+              "yaml"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "podAnnotations": {
+            "type": "string"
+          },
+          "podLabels": {
+            "type": "string"
+          },
+          "resourceVersion": {
+            "type": "string"
+          },
+          "schedule": {
+            "type": "string"
+          },
+          "serviceAccount": {
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "git",
+              "inline",
+              ""
+            ],
+            "type": "string"
+          },
+          "template": {
+            "type": "string"
+          },
+          "testData": {
+            "items": {
+              "$ref": "#/components/schemas/TestDataField"
+            },
+            "type": "array"
+          },
+          "timeout": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "yaml": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "namespace",
+          "name"
+        ],
+        "type": "object"
+      },
+      "TestFormOf": {
+        "properties": {
+          "form": {
+            "$ref": "#/components/schemas/TestForm"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "yamlOnly": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "form",
+          "locked"
+        ],
+        "type": "object"
+      },
       "TestList": {
         "properties": {
           "tests": {
@@ -1452,6 +1717,49 @@
           "namespace",
           "tool",
           "locked"
+        ],
+        "type": "object"
+      },
+      "ToolTemplate": {
+        "properties": {
+          "args": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "mainKind": {
+            "enum": [
+              "file",
+              "directory",
+              ""
+            ],
+            "type": "string"
+          },
+          "mainParam": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/Param"
+            },
+            "type": "array"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "tool",
+          "image",
+          "params"
         ],
         "type": "object"
       },
@@ -1529,6 +1837,44 @@
           }
         },
         "summary": "Configured clusters, each probed now, in config order."
+      }
+    },
+    "/api/v1/clusters/{cluster}/namespaces": {
+      "get": {
+        "operationId": "listNamespaces",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamespaceList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "Namespaces that have Tests or a tool catalog."
       }
     },
     "/api/v1/clusters/{cluster}/runs/{ns}/{id}": {
@@ -2251,6 +2597,62 @@
         "summary": "Every recurring schedule and every run waiting for its start time."
       }
     },
+    "/api/v1/clusters/{cluster}/templates": {
+      "get": {
+        "operationId": "listTemplates",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "namespace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "summary": "A namespace's tool catalog (TestTemplates), as the editor offers it."
+      }
+    },
     "/api/v1/clusters/{cluster}/tests": {
       "get": {
         "operationId": "listTests",
@@ -2297,6 +2699,166 @@
           }
         },
         "summary": "Every Test in the cluster, by namespace and name."
+      },
+      "post": {
+        "description": "Requires the developer role.",
+        "operationId": "createTest",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dry-run",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedTest"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Create the form's Test (managed by the GUI), or with dry-run=true check it."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/preview": {
+      "post": {
+        "operationId": "previewTest",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          }
+        },
+        "summary": "The Test a form describes, as YAML, with what is wrong — the same build as createTest."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}": {
@@ -2437,6 +2999,115 @@
           }
         },
         "summary": "A Test with its templates merged: parameters, schedule, definition."
+      },
+      "put": {
+        "description": "Requires the developer role.",
+        "operationId": "updateTest",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "dry-run",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedTest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Save the form over a GUI-managed Test (a merge patch, conditional on the form's resourceVersion), or with dry-run=true check it."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/analytics": {
@@ -2967,6 +3638,163 @@
           }
         },
         "summary": "Delete these finished runs of the Test (a preview's matches) with their logs and artifacts."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/form": {
+      "get": {
+        "operationId": "getTestForm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestFormOf"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "A Test as the editor shows it (edit, duplicate)."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/preview": {
+      "post": {
+        "operationId": "previewTestEdit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "The edited Test a form describes, as YAML, with what is wrong."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/runs": {
