@@ -53,12 +53,22 @@ export function downloadYAML(name: string, yaml: string) {
 }
 
 /** YamlPanel: the Test's YAML as it builds, with what is still missing. */
-export function YamlPanel({ name, built }: { name: string; built: Built }) {
+export function YamlPanel({
+  name,
+  built,
+  title = "builds as you type",
+  label = "YAML",
+}: {
+  name: string;
+  built: Built;
+  title?: string;
+  label?: string;
+}) {
   return (
-    <section aria-label="YAML" aria-live="polite" className="space-y-3">
+    <section aria-label={label} aria-live="polite" className="space-y-3">
       <div className="flex items-center gap-2">
         <h2 className="mr-auto font-semibold">
-          YAML <span className="text-muted-foreground text-sm font-normal">builds as you type</span>
+          YAML <span className="text-muted-foreground text-sm font-normal">{title}</span>
         </h2>
         <Button
           size="sm"

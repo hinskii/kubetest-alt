@@ -159,6 +159,14 @@ export const server = setupServer(
   http.get(T, () => HttpResponse.json(smoke)),
   http.get(`${T}/runs`, () => HttpResponse.json({ runs })),
   http.get(`${T}/form`, () => HttpResponse.json(smokeForm)),
+  http.post(`${T}/preview`, async ({ request }) => {
+    const f = (await request.json()) as TestFormOf["form"];
+    return HttpResponse.json({
+      yaml: f.mode === "yaml" ? f.yaml : `metadata:\n  name: smoke\nspec:\n  timeout: ${f.timeout ?? ""}\n`,
+      errors: [],
+      warnings: [],
+    });
+  }),
   http.get("*/api/v1/clusters/dev/templates", () => HttpResponse.json({ templates: [k6Template] })),
   http.get("*/api/v1/clusters/dev/schedules", () =>
     HttpResponse.json({

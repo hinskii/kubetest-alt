@@ -44,14 +44,14 @@ test("Settings: a section saves alone", async ({ page }) => {
   await field.fill("7m");
   await timeout.getByRole("button", { name: "Save timeout" }).click();
   await expect(page.getByText("Timeout saved.")).toBeVisible();
-  await expect(page.getByRole("region", { name: "YAML" }).locator(".cm-content")).toContainText(
+  await expect(page.getByRole("region", { name: "The Test now" }).locator(".cm-content")).toContainText(
     "timeout: 7m0s",
   );
 
   // Put it back, so the next run starts from the fixture.
   await field.fill("");
   await timeout.getByRole("button", { name: "Save timeout" }).click();
-  await expect(page.getByRole("region", { name: "YAML" }).locator(".cm-content")).not.toContainText(
+  await expect(page.getByRole("region", { name: "The Test now" }).locator(".cm-content")).not.toContainText(
     "timeout:",
   );
 });

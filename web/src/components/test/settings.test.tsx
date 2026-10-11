@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
 import type { TestForm } from "@/api/client";
-import { itemsToRows, rowsToItems, same } from "@/components/test/settings";
+import { itemsToRows, previewForm, rowsToItems, same } from "@/components/test/settings";
 import { renderRoute } from "@/test/render";
 import { admin, server, smokeForm, viewer } from "@/test/server";
 
@@ -62,9 +62,8 @@ describe("a Test's settings", () => {
     expect((await section("Parameters")).getByLabelText(/^vus/)).toHaveValue(20);
     expect((await section("Resources")).getByLabelText("Memory limit")).toHaveValue("1Gi");
     expect((await section("Timeout")).getByLabelText(/^Timeout/)).toHaveValue("15m");
-    expect(await (await section("YAML")).findByLabelText("The Test as YAML")).toHaveValue(
-      smokeForm.form.yaml,
-    );
+    expect(screen.queryByRole("region", { name: "YAML" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "The Test now" })).toBeInTheDocument();
   });
 
   it("saves one section alone, at the version shown, and keeps the others' drafts", async () => {
@@ -133,7 +132,10 @@ describe("a Test's settings", () => {
     await userEvent.click(source.getByRole("radio", { name: "Files written here" }));
     await userEvent.click(source.getByRole("button", { name: "Add a file" }));
     expect(source.getByLabelText("File 1 name")).toHaveValue("checkout.js");
-    await userEvent.type(source.getByLabelText("Content of checkout.js"), "export default function () {{}");
+    await userEvent.type(
+      await source.findByLabelText("Content of checkout.js"),
+      "export default function () {{}",
+    );
     await userEvent.click(source.getByRole("button", { name: "Save source" }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({
@@ -167,7 +169,7 @@ describe("a Test's settings", () => {
     );
     expect((await section("Timeout")).getByLabelText(/^Timeout/)).toBeDisabled();
     expect(screen.queryByRole("button", { name: /^Save / })).not.toBeInTheDocument();
-    expect((await section("YAML")).getByLabelText("The Test as YAML")).toHaveAttribute("readonly");
+    expect(screen.queryByRole("button", { name: "Edit YAML" })).not.toBeInTheDocument();
   });
 
   it("is read-only for viewers", async () => {
@@ -187,9 +189,10 @@ describe("a Test's settings", () => {
     renderRoute(page);
     expect(await screen.findByText("It has composite steps: edit it as YAML.")).toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Source" })).not.toBeInTheDocument();
-    const yaml = await section("YAML");
-    await userEvent.type(yaml.getByLabelText("The Test as YAML"), "spec: {{}");
-    await userEvent.click(yaml.getByRole("button", { name: "Save yaml" }));
+    const yaml = await section("Edit YAML");
+    await userEvent.type(await yaml.findByLabelText("The Test as YAML"), "spec: {{}");
+    expect(yaml.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+    await userEvent.click(yaml.getByRole("button", { name: "Save YAML" }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ mode: "yaml", yaml: `${smokeForm.form.yaml}spec: {}` });
   });
@@ -216,5 +219,61 @@ describe("settings helpers", () => {
         { key: "", path: "" },
       ]),
     ).toBe("env=/x");
+  });
+});
+
+describe("the YAML beside the settings", () => {
+  it("shows the Test with the unsaved changes", async () => {
+    renderRoute(page);
+    const timeout = await section("Timeout");
+    await userEvent.clear(timeout.getByLabelText(/^Timeout/));
+    await userEvent.type(timeout.getByLabelText(/^Timeout/), "45m");
+    const panel = within(screen.getByRole("region", { name: "The Test now", hidden: true }));
+    await waitFor(() => expect(panel.getByLabelText("The Test's YAML")).toHaveTextContent("timeout: 45m"));
+  });
+
+  it("edits the whole Test as YAML, the sections locked meanwhile", async () => {
+    const sent = saves();
+    renderRoute(page);
+    const timeout = await section("Timeout");
+    await userEvent.type(timeout.getByLabelText(/^Timeout/), "0");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit YAML" })).toBeDisabled());
+    expect(screen.getByText("Save or discard the sections' changes first.")).toBeInTheDocument();
+    await userEvent.click(timeout.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit YAML" })).toBeEnabled());
+
+    await userEvent.click(screen.getByRole("button", { name: "Edit YAML" }));
+    expect(timeout.getByLabelText(/^Timeout/)).toBeDisabled();
+    expect(timeout.queryByRole("button", { name: "Save timeout" })).not.toBeInTheDocument();
+    const yaml = await section("Edit YAML");
+    await userEvent.type(await yaml.findByLabelText("The Test as YAML"), "spec: {{}");
+    await userEvent.click(yaml.getByRole("button", { name: "Save YAML" }));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      mode: "yaml",
+      yaml: `${smokeForm.form.yaml}spec: {}`,
+      resourceVersion: "41",
+    });
+    // sonner keeps toasts in a module-wide store: an earlier test's may still show.
+    expect(await screen.findAllByText("YAML saved.")).not.toHaveLength(0);
+    expect(sent).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit YAML" })).toBeEnabled());
+    expect(timeout.getByLabelText(/^Timeout/)).toBeEnabled();
+  });
+
+  it("merges every section's draft; a YAML being edited wins", () => {
+    expect(
+      previewForm(smokeForm, { timeout: { timeout: "1m" }, pod: { serviceAccount: "sa" } }),
+    ).toMatchObject({
+      mode: "form",
+      timeout: "1m",
+      serviceAccount: "sa",
+      gitUri: "https://github.com/acme/perf",
+    });
+    expect(previewForm(smokeForm, { timeout: { timeout: "1m" } }, "kind: Test\n")).toMatchObject({
+      mode: "yaml",
+      yaml: "kind: Test\n",
+      timeout: "15m",
+    });
   });
 });

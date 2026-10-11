@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Plus, Trash2 } from "lucide-react";
-import { lazy, Suspense, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { ApiError, type Schedule, type TestForm, type TestFormOf } from "@/api/client";
@@ -14,6 +14,7 @@ import {
   type TestKey,
 } from "@/api/queries";
 import { Field, GitFields, ParamFields, TextField } from "@/components/editor/fields";
+import { usePreview, YamlPanel, type Built } from "@/components/editor/live-yaml";
 import { fileNameFor, sourcesFor } from "@/components/editor/wizard";
 import { ErrorView } from "@/components/error-view";
 import { SchedulePanel } from "@/components/test/schedule-panel";
@@ -69,7 +70,7 @@ function Section({
   title,
   fields,
   editable,
-  yaml,
+  onDraft,
   children,
 }: {
   k: TestKey;
@@ -78,7 +79,8 @@ function Section({
   title: string;
   fields: Key[];
   editable: boolean;
-  yaml?: boolean;
+  /** onDraft gets the section's unsaved fields (undefined: none). */
+  onDraft: (id: string, picked?: Partial<TestForm>) => void;
   children: (draft: TestForm, set: (patch: Partial<TestForm>) => void, errors: string[]) => ReactNode;
 }) {
   const qc = useQueryClient();
@@ -90,12 +92,16 @@ function Section({
     setShown(base.form);
     if (!fields.some((f) => !same(draft[f], shown[f]))) setDraft(base.form);
   }
+  const picked = JSON.stringify(Object.fromEntries(fields.map((f) => [f, draft[f]])));
+  useEffect(() => {
+    onDraft(id, dirty ? (JSON.parse(picked) as Partial<TestForm>) : undefined);
+  }, [onDraft, id, dirty, picked]);
   const [errors, setErrors] = useState<string[]>([]);
   const [conflict, setConflict] = useState(false);
   const save = useMutation({
     mutationFn: () => {
       const picked = Object.fromEntries(fields.map((f) => [f, draft[f]]));
-      return updateTest(k, { ...base.form, ...picked, mode: yaml ? "yaml" : "form" });
+      return updateTest(k, { ...base.form, ...picked, mode: "form" });
     },
     onMutate: () => {
       setErrors([]);
@@ -307,369 +313,525 @@ export function TestSettings({
   schedule?: Schedule;
 }) {
   const q = useQuery(testFormQuery(k));
-  const templates = useQuery(templatesQuery(k.cluster, k.ns));
   if (q.isError) return <ErrorView error={q.error} />;
   if (!q.data) return <Skeleton className="h-64 w-full" />;
-  const base = q.data;
+  return <SettingsForm k={k} base={q.data} canEdit={canEdit} schedule={schedule} />;
+}
+
+/**
+ * previewForm is what the YAML beside the sections shows: the Test as
+ * saved with every section's unsaved changes — or, while the YAML is being
+ * edited, that YAML.
+ */
+export function previewForm(
+  base: TestFormOf,
+  drafts: Record<string, Partial<TestForm>>,
+  yaml?: string,
+): TestForm {
+  if (yaml !== undefined) return { ...base.form, mode: "yaml", yaml };
+  if (base.yamlOnly) return { ...base.form, mode: "yaml" };
+  return Object.values(drafts).reduce<TestForm>((f, d) => ({ ...f, ...d }), { ...base.form, mode: "form" });
+}
+
+/**
+ * YamlSide is the Test's YAML beside the sections: read-only, following
+ * the unsaved changes; "Edit YAML" turns it into the editor for the whole
+ * Test (what the sections don't cover), saved on its own.
+ */
+function YamlSide({
+  k,
+  base,
+  built,
+  editing,
+  yaml,
+  onEdit,
+  onYaml,
+  canEdit,
+  blocked,
+}: {
+  k: TestKey;
+  base: TestFormOf;
+  built: Built;
+  editing: boolean;
+  yaml: string;
+  onEdit: (on: boolean) => void;
+  onYaml: (yaml: string) => void;
+  canEdit: boolean;
+  blocked: boolean;
+}) {
+  const qc = useQueryClient();
+  const [errors, setErrors] = useState<string[]>([]);
+  const save = useMutation({
+    mutationFn: () => updateTest(k, { ...base.form, mode: "yaml", yaml }),
+    onMutate: () => setErrors([]),
+    onSuccess: async () => {
+      toast.success("YAML saved.");
+      await qc.invalidateQueries({ queryKey: testQuery(k).queryKey });
+      const fresh = qc.getQueryData(testFormQuery(k).queryKey);
+      if (base.yamlOnly) onYaml(fresh?.form.yaml ?? yaml);
+      else onEdit(false);
+    },
+    onError: (e) => setErrors(e instanceof FormRefused && e.errors.length ? e.errors : [e.message]),
+  });
+  if (!editing) {
+    return (
+      <div className="space-y-3">
+        <YamlPanel
+          name={k.name}
+          built={built}
+          title="as saved, with your unsaved changes"
+          label="The Test now"
+        />
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" disabled={blocked} onClick={() => onEdit(true)}>
+              Edit YAML
+            </Button>
+            {blocked && (
+              <span className="text-muted-foreground text-sm">
+                Save or discard the sections' changes first.
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+  const dirty = yaml !== (base.form.yaml ?? "");
+  return (
+    <section aria-label="Edit YAML" className="space-y-3">
+      <h2 className="font-semibold">
+        YAML{" "}
+        <span className="text-muted-foreground text-sm font-normal">
+          the whole Test — also what the sections don't cover; name and namespace stay
+        </span>
+      </h2>
+      <Suspense fallback={<Skeleton className="h-96" />}>
+        <CodeEditor
+          value={yaml}
+          onChange={onYaml}
+          fileName="test.yaml"
+          label="The Test as YAML"
+          errors={[...errors, ...built.errors]}
+          minHeight="28rem"
+        />
+      </Suspense>
+      {(errors.length > 0 || built.errors.length > 0) && (
+        <div role="alert" className="text-destructive text-sm">
+          {errors.length > 0 && <strong>Not saved:</strong>}
+          <ul className="list-disc pl-5">
+            {[...new Set([...errors, ...built.errors])].map((e) => (
+              <li key={e}>{e}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <Button disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+          Save YAML
+        </Button>
+        {!base.yamlOnly && (
+          <Button variant="outline" onClick={() => onEdit(false)}>
+            {dirty ? "Discard" : "Close"}
+          </Button>
+        )}
+        {dirty && base.yamlOnly && (
+          <Button variant="outline" onClick={() => onYaml(base.form.yaml ?? "")}>
+            Discard
+          </Button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SettingsForm({
+  k,
+  base,
+  canEdit,
+  schedule,
+}: {
+  k: TestKey;
+  base: TestFormOf;
+  canEdit: boolean;
+  schedule?: Schedule;
+}) {
+  const templates = useQuery(templatesQuery(k.cluster, k.ns));
+  const [drafts, setDrafts] = useState<Record<string, Partial<TestForm>>>({});
+  const onDraft = useCallback((id: string, picked?: Partial<TestForm>) => {
+    const key = id.replace(/^settings-/, "");
+    setDrafts((d) => {
+      if (!picked && !(key in d)) return d;
+      const next = { ...d };
+      if (picked) next[key] = picked;
+      else delete next[key];
+      return next;
+    });
+  }, []);
   const editable = canEdit && !base.locked;
-  const s = { k, base, editable };
+  // The YAML editor: always for a Test only YAML can show.
+  const [yamlDraft, setYamlDraft] = useState<string | undefined>(
+    editable && base.yamlOnly ? (base.form.yaml ?? "") : undefined,
+  );
+  const editingYaml = yamlDraft !== undefined;
+  const built = usePreview(k.cluster, previewForm(base, drafts, yamlDraft), k);
+  const s = { k, base, editable: editable && !editingYaml, onDraft };
   const tools = templates.data?.templates ?? [];
   const tmplOf = (f: TestForm) => tools.find((t) => t.name === f.template);
 
   return (
-    <div className="max-w-3xl space-y-6">
-      {base.locked && (
-        <p role="status" className="text-muted-foreground text-sm">
-          Managed in Git: read-only here. Change it in its repository, or{" "}
-          <Link
-            to="/clusters/$cluster/tests/new"
-            params={{ cluster: k.cluster }}
-            search={{ namespace: k.ns, from: k.name }}
-            className="underline"
-          >
-            duplicate it
-          </Link>{" "}
-          to make a copy managed in the GUI.
-        </p>
-      )}
-      {base.yamlOnly ? (
-        <p className="text-muted-foreground text-sm">{base.yamlOnly}</p>
-      ) : (
-        <>
-          <Section {...s} id="settings-general" title="General" fields={["template", "tool"]}>
-            {(f, set) => (
-              <>
-                <Field id="test-name" label="Name">
-                  <p id="test-name" className="font-mono text-sm">
-                    {base.form.namespace}/{base.form.name}
-                  </p>
-                </Field>
-                <Field id="settings-tool" label="Tool">
-                  <Select
-                    value={f.template || "__own"}
-                    onValueChange={(v) => set({ template: v === "__own" ? "" : v })}
-                  >
-                    <SelectTrigger id="settings-tool" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {tools.map((t) => (
-                        <SelectItem key={t.name} value={t.name}>
-                          {t.name}
-                        </SelectItem>
-                      ))}
-                      {f.template && !tools.some((t) => t.name === f.template) && (
-                        <SelectItem value={f.template}>{f.template}</SelectItem>
-                      )}
-                      <SelectItem value="__own">Own image — any container</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <TextField
-                  id="tool-label"
-                  label="Tool label"
-                  hint="kubetest.io/tool — groups the Test in the list; a template sets it"
-                  value={f.tool}
-                  placeholder="pytest"
-                  onChange={(tool) => set({ tool })}
-                />
-              </>
-            )}
-          </Section>
-
-          <Section
-            {...s}
-            id="settings-source"
-            title="Source"
-            fields={[
-              "source",
-              "gitUri",
-              "gitPath",
-              "gitRevision",
-              "gitPaths",
-              "gitSecret",
-              "gitSecretKey",
-              "files",
-            ]}
-          >
-            {(f, set, errors) => {
-              const tmpl = tmplOf(f);
-              const sources = sourcesFor(f.template ? tmpl : undefined);
-              const files = f.files ?? [];
-              const errs = (_: string, ...labels: string[]) =>
-                errors.filter((e) => labels.some((l) => e.startsWith(l + ":")));
-              return (
+    <div className="grid gap-8 lg:grid-cols-[34rem_minmax(0,1fr)]">
+      <div className="min-w-0 space-y-6">
+        {base.locked && (
+          <p role="status" className="text-muted-foreground text-sm">
+            Managed in Git: read-only here. Change it in its repository, or{" "}
+            <Link
+              to="/clusters/$cluster/tests/new"
+              params={{ cluster: k.cluster }}
+              search={{ namespace: k.ns, from: k.name }}
+              className="underline"
+            >
+              duplicate it
+            </Link>{" "}
+            to make a copy managed in the GUI.
+          </p>
+        )}
+        {base.yamlOnly ? (
+          <p className="text-muted-foreground text-sm">{base.yamlOnly}</p>
+        ) : (
+          <>
+            <Section {...s} id="settings-general" title="General" fields={["template", "tool"]}>
+              {(f, set) => (
                 <>
-                  <RadioGroup
-                    aria-label="Where the code comes from"
-                    value={f.source ?? ""}
-                    onValueChange={(v) => set({ source: v as TestForm["source"] })}
-                    className="flex flex-wrap gap-4"
-                  >
-                    {[...new Set([...sources, f.source ?? ""])].map((src) => (
-                      <div key={src || "none"} className="flex items-center gap-2">
-                        <RadioGroupItem value={src} id={`settings-source-${src || "none"}`} />
-                        <Label htmlFor={`settings-source-${src || "none"}`} className="font-normal">
-                          {src === "git"
-                            ? "Git repository"
-                            : src === "inline"
-                              ? "Files written here"
-                              : "None"}
-                        </Label>
-                      </div>
-                    ))}
-                  </RadioGroup>
-                  {f.source === "git" && <GitFields form={f} set={set} tmpl={tmpl} errors={errs} advanced />}
-                  {f.source === "inline" && (
-                    <div className="space-y-4">
-                      {files.map((file, i) => (
-                        <div key={i} className="space-y-2" data-testid="file-row">
-                          <div className="flex gap-2">
-                            <Input
-                              aria-label={`File ${i + 1} name`}
-                              className="font-mono"
-                              value={file.path}
-                              onChange={(e) =>
-                                set({
-                                  files: files.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)),
-                                })
-                              }
-                            />
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`Remove ${file.path || `file ${i + 1}`}`}
-                              onClick={() => set({ files: files.filter((_, j) => j !== i) })}
-                            >
-                              <Trash2 />
-                            </Button>
-                          </div>
-                          <Suspense fallback={<Skeleton className="h-40" />}>
-                            <CodeEditor
-                              value={file.content}
-                              onChange={(content) =>
-                                set({ files: files.map((x, j) => (j === i ? { ...x, content } : x)) })
-                              }
-                              fileName={file.path}
-                              label={`Content of ${file.path || `file ${i + 1}`}`}
-                              readOnly={!editable}
-                              minHeight="10rem"
-                            />
-                          </Suspense>
+                  <Field id="test-name" label="Name">
+                    <p id="test-name" className="font-mono text-sm">
+                      {base.form.namespace}/{base.form.name}
+                    </p>
+                  </Field>
+                  <Field id="settings-tool" label="Tool">
+                    <Select
+                      value={f.template || "__own"}
+                      onValueChange={(v) => set({ template: v === "__own" ? "" : v })}
+                    >
+                      <SelectTrigger id="settings-tool" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {tools.map((t) => (
+                          <SelectItem key={t.name} value={t.name}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                        {f.template && !tools.some((t) => t.name === f.template) && (
+                          <SelectItem value={f.template}>{f.template}</SelectItem>
+                        )}
+                        <SelectItem value="__own">Own image — any container</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <TextField
+                    id="tool-label"
+                    label="Tool label"
+                    hint="kubetest.io/tool — groups the Test in the list; a template sets it"
+                    value={f.tool}
+                    placeholder="pytest"
+                    onChange={(tool) => set({ tool })}
+                  />
+                </>
+              )}
+            </Section>
+
+            <Section
+              {...s}
+              id="settings-source"
+              title="Source"
+              fields={[
+                "source",
+                "gitUri",
+                "gitPath",
+                "gitRevision",
+                "gitPaths",
+                "gitSecret",
+                "gitSecretKey",
+                "files",
+              ]}
+            >
+              {(f, set, errors) => {
+                const tmpl = tmplOf(f);
+                const sources = sourcesFor(f.template ? tmpl : undefined);
+                const files = f.files ?? [];
+                const errs = (_: string, ...labels: string[]) =>
+                  errors.filter((e) => labels.some((l) => e.startsWith(l + ":")));
+                return (
+                  <>
+                    <RadioGroup
+                      aria-label="Where the code comes from"
+                      value={f.source ?? ""}
+                      onValueChange={(v) => set({ source: v as TestForm["source"] })}
+                      className="flex flex-wrap gap-4"
+                    >
+                      {[...new Set([...sources, f.source ?? ""])].map((src) => (
+                        <div key={src || "none"} className="flex items-center gap-2">
+                          <RadioGroupItem value={src} id={`settings-source-${src || "none"}`} />
+                          <Label htmlFor={`settings-source-${src || "none"}`} className="font-normal">
+                            {src === "git"
+                              ? "Git repository"
+                              : src === "inline"
+                                ? "Files written here"
+                                : "None"}
+                          </Label>
                         </div>
                       ))}
-                      <p className="text-muted-foreground text-sm">
-                        The first file is the test unless a parameter names another. Up to 512 KB in all.
-                      </p>
-                      <Button
-                        variant="outline"
-                        onClick={() =>
-                          set({
-                            files: [...files, { path: files.length ? "" : fileNameFor(tmpl), content: "" }],
-                          })
-                        }
-                      >
-                        <Plus /> Add a file
-                      </Button>
-                    </div>
-                  )}
+                    </RadioGroup>
+                    {f.source === "git" && (
+                      <GitFields form={f} set={set} tmpl={tmpl} errors={errs} advanced />
+                    )}
+                    {f.source === "inline" && (
+                      <div className="space-y-4">
+                        {files.map((file, i) => (
+                          <div key={i} className="space-y-2" data-testid="file-row">
+                            <div className="flex gap-2">
+                              <Input
+                                aria-label={`File ${i + 1} name`}
+                                className="font-mono"
+                                value={file.path}
+                                onChange={(e) =>
+                                  set({
+                                    files: files.map((x, j) =>
+                                      j === i ? { ...x, path: e.target.value } : x,
+                                    ),
+                                  })
+                                }
+                              />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                aria-label={`Remove ${file.path || `file ${i + 1}`}`}
+                                onClick={() => set({ files: files.filter((_, j) => j !== i) })}
+                              >
+                                <Trash2 />
+                              </Button>
+                            </div>
+                            <Suspense fallback={<Skeleton className="h-40" />}>
+                              <CodeEditor
+                                value={file.content}
+                                onChange={(content) =>
+                                  set({ files: files.map((x, j) => (j === i ? { ...x, content } : x)) })
+                                }
+                                fileName={file.path}
+                                label={`Content of ${file.path || `file ${i + 1}`}`}
+                                readOnly={!editable}
+                                minHeight="10rem"
+                              />
+                            </Suspense>
+                          </div>
+                        ))}
+                        <p className="text-muted-foreground text-sm">
+                          The first file is the test unless a parameter names another. Up to 512 KB in all.
+                        </p>
+                        <Button
+                          variant="outline"
+                          onClick={() =>
+                            set({
+                              files: [...files, { path: files.length ? "" : fileNameFor(tmpl), content: "" }],
+                            })
+                          }
+                        >
+                          <Plus /> Add a file
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                );
+              }}
+            </Section>
+
+            <Section {...s} id="settings-test-data" title="Test data" fields={["testData"]}>
+              {(f, set) => (
+                <TestDataRows rows={f.testData ?? []} onChange={(testData) => set({ testData })} />
+              )}
+            </Section>
+
+            <Section {...s} id="settings-parameters" title="Parameters" fields={["params"]}>
+              {(f, set, errors) => {
+                const tmpl = tmplOf(f);
+                return tmpl ? (
+                  <ParamFields
+                    tmpl={tmpl}
+                    params={f.params}
+                    onChange={(params) => set({ params })}
+                    errors={(p) => errors.filter((e) => e.startsWith(p.name + ":"))}
+                  />
+                ) : (
+                  <p className="text-muted-foreground text-sm">
+                    {f.template
+                      ? "The tool catalog doesn't list this Test's template."
+                      : "An own image has no parameters."}{" "}
+                    Its arguments can use <code className="font-mono">{"{{ config.name }}"}</code> — edit them
+                    in YAML.
+                  </p>
+                );
+              }}
+            </Section>
+
+            <Section
+              {...s}
+              id="settings-container"
+              title="Container"
+              fields={["image", "command", "args", "env"]}
+            >
+              {(f, set) => (
+                <>
+                  <TextField
+                    id="image"
+                    label="Image"
+                    hint={f.template ? "empty: the template's" : "required"}
+                    mono
+                    value={f.image}
+                    onChange={(image) => set({ image })}
+                  />
+                  <TextField
+                    id="command"
+                    label="Command"
+                    hint={f.template ? "one item per line; empty: the template's" : "one item per line"}
+                    rows={2}
+                    value={f.command}
+                    onChange={(command) => set({ command })}
+                  />
+                  <TextField
+                    id="args"
+                    label="Arguments"
+                    hint="one per line; {{ config.name }} works"
+                    rows={3}
+                    value={f.args}
+                    onChange={(args) => set({ args })}
+                  />
+                  <TextField
+                    id="env"
+                    label="Environment"
+                    hint="NAME=value per line"
+                    rows={3}
+                    value={f.env}
+                    onChange={(env) => set({ env })}
+                  />
                 </>
-              );
-            }}
-          </Section>
+              )}
+            </Section>
 
-          <Section {...s} id="settings-test-data" title="Test data" fields={["testData"]}>
-            {(f, set) => <TestDataRows rows={f.testData ?? []} onChange={(testData) => set({ testData })} />}
-          </Section>
+            <Section
+              {...s}
+              id="settings-resources"
+              title="Resources"
+              fields={["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"]}
+            >
+              {(f, set) => (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <TextField
+                    id="cpu-request"
+                    label="CPU request"
+                    value={f.cpuRequest}
+                    placeholder="500m"
+                    onChange={(cpuRequest) => set({ cpuRequest })}
+                  />
+                  <TextField
+                    id="memory-request"
+                    label="Memory request"
+                    value={f.memoryRequest}
+                    placeholder="512Mi"
+                    onChange={(memoryRequest) => set({ memoryRequest })}
+                  />
+                  <TextField
+                    id="cpu-limit"
+                    label="CPU limit"
+                    value={f.cpuLimit}
+                    placeholder="2"
+                    onChange={(cpuLimit) => set({ cpuLimit })}
+                  />
+                  <TextField
+                    id="memory-limit"
+                    label="Memory limit"
+                    value={f.memoryLimit}
+                    placeholder="2Gi"
+                    onChange={(memoryLimit) => set({ memoryLimit })}
+                  />
+                </div>
+              )}
+            </Section>
 
-          <Section {...s} id="settings-parameters" title="Parameters" fields={["params"]}>
-            {(f, set, errors) => {
-              const tmpl = tmplOf(f);
-              return tmpl ? (
-                <ParamFields
-                  tmpl={tmpl}
-                  params={f.params}
-                  onChange={(params) => set({ params })}
-                  errors={(p) => errors.filter((e) => e.startsWith(p.name + ":"))}
-                />
-              ) : (
-                <p className="text-muted-foreground text-sm">
-                  {f.template
-                    ? "The tool catalog doesn't list this Test's template."
-                    : "An own image has no parameters."}{" "}
-                  Its arguments can use <code className="font-mono">{"{{ config.name }}"}</code> — edit them
-                  in YAML.
-                </p>
-              );
-            }}
-          </Section>
+            <Section
+              {...s}
+              id="settings-pod"
+              title="Pod"
+              fields={["podAnnotations", "podLabels", "serviceAccount"]}
+            >
+              {(f, set) => (
+                <>
+                  <TextField
+                    id="pod-annotations"
+                    label="Pod annotations"
+                    hint="key=value per line, e.g. sidecar.istio.io/inject=false"
+                    rows={3}
+                    value={f.podAnnotations}
+                    onChange={(podAnnotations) => set({ podAnnotations })}
+                  />
+                  <TextField
+                    id="pod-labels"
+                    label="Pod labels"
+                    hint="key=value per line"
+                    rows={3}
+                    value={f.podLabels}
+                    onChange={(podLabels) => set({ podLabels })}
+                  />
+                  <TextField
+                    id="service-account"
+                    label="Service account"
+                    hint="empty: default"
+                    value={f.serviceAccount}
+                    onChange={(serviceAccount) => set({ serviceAccount })}
+                  />
+                </>
+              )}
+            </Section>
 
-          <Section
-            {...s}
-            id="settings-container"
-            title="Container"
-            fields={["image", "command", "args", "env"]}
-          >
-            {(f, set) => (
-              <>
-                <TextField
-                  id="image"
-                  label="Image"
-                  hint={f.template ? "empty: the template's" : "required"}
-                  mono
-                  value={f.image}
-                  onChange={(image) => set({ image })}
-                />
-                <TextField
-                  id="command"
-                  label="Command"
-                  hint={f.template ? "one item per line; empty: the template's" : "one item per line"}
-                  rows={2}
-                  value={f.command}
-                  onChange={(command) => set({ command })}
-                />
-                <TextField
-                  id="args"
-                  label="Arguments"
-                  hint="one per line; {{ config.name }} works"
-                  rows={3}
-                  value={f.args}
-                  onChange={(args) => set({ args })}
-                />
-                <TextField
-                  id="env"
-                  label="Environment"
-                  hint="NAME=value per line"
-                  rows={3}
-                  value={f.env}
-                  onChange={(env) => set({ env })}
-                />
-              </>
-            )}
-          </Section>
+            <section
+              className="bg-card space-y-4 rounded-xl border p-5"
+              aria-labelledby="settings-schedule-title"
+              id="settings-schedule"
+            >
+              <h2 id="settings-schedule-title" className="text-lg font-semibold">
+                Schedule
+              </h2>
+              <SchedulePanel key={schedule?.expr ?? ""} k={k} schedule={schedule} editable={editable} />
+            </section>
 
-          <Section
-            {...s}
-            id="settings-resources"
-            title="Resources"
-            fields={["cpuRequest", "memoryRequest", "cpuLimit", "memoryLimit"]}
-          >
-            {(f, set) => (
-              <div className="grid gap-4 sm:grid-cols-2">
+            <Section {...s} id="settings-timeout" title="Timeout" fields={["timeout"]}>
+              {(f, set) => (
                 <TextField
-                  id="cpu-request"
-                  label="CPU request"
-                  value={f.cpuRequest}
-                  placeholder="500m"
-                  onChange={(cpuRequest) => set({ cpuRequest })}
+                  id="timeout"
+                  label="Timeout"
+                  hint="e.g. 15m, 1h30m; empty: the template's or none"
+                  value={f.timeout}
+                  placeholder="30m"
+                  onChange={(timeout) => set({ timeout })}
                 />
-                <TextField
-                  id="memory-request"
-                  label="Memory request"
-                  value={f.memoryRequest}
-                  placeholder="512Mi"
-                  onChange={(memoryRequest) => set({ memoryRequest })}
-                />
-                <TextField
-                  id="cpu-limit"
-                  label="CPU limit"
-                  value={f.cpuLimit}
-                  placeholder="2"
-                  onChange={(cpuLimit) => set({ cpuLimit })}
-                />
-                <TextField
-                  id="memory-limit"
-                  label="Memory limit"
-                  value={f.memoryLimit}
-                  placeholder="2Gi"
-                  onChange={(memoryLimit) => set({ memoryLimit })}
-                />
-              </div>
-            )}
-          </Section>
-
-          <Section
-            {...s}
-            id="settings-pod"
-            title="Pod"
-            fields={["podAnnotations", "podLabels", "serviceAccount"]}
-          >
-            {(f, set) => (
-              <>
-                <TextField
-                  id="pod-annotations"
-                  label="Pod annotations"
-                  hint="key=value per line, e.g. sidecar.istio.io/inject=false"
-                  rows={3}
-                  value={f.podAnnotations}
-                  onChange={(podAnnotations) => set({ podAnnotations })}
-                />
-                <TextField
-                  id="pod-labels"
-                  label="Pod labels"
-                  hint="key=value per line"
-                  rows={3}
-                  value={f.podLabels}
-                  onChange={(podLabels) => set({ podLabels })}
-                />
-                <TextField
-                  id="service-account"
-                  label="Service account"
-                  hint="empty: default"
-                  value={f.serviceAccount}
-                  onChange={(serviceAccount) => set({ serviceAccount })}
-                />
-              </>
-            )}
-          </Section>
-
-          <section
-            className="bg-card space-y-4 rounded-xl border p-5"
-            aria-labelledby="settings-schedule-title"
-            id="settings-schedule"
-          >
-            <h2 id="settings-schedule-title" className="text-lg font-semibold">
-              Schedule
-            </h2>
-            <SchedulePanel key={schedule?.expr ?? ""} k={k} schedule={schedule} editable={editable} />
-          </section>
-
-          <Section {...s} id="settings-timeout" title="Timeout" fields={["timeout"]}>
-            {(f, set) => (
-              <TextField
-                id="timeout"
-                label="Timeout"
-                hint="e.g. 15m, 1h30m; empty: the template's or none"
-                value={f.timeout}
-                placeholder="30m"
-                onChange={(timeout) => set({ timeout })}
-              />
-            )}
-          </Section>
-        </>
-      )}
-
-      <Section {...s} id="settings-yaml" title="YAML" fields={["yaml"]} yaml>
-        {(f, set, errors) => (
-          <>
-            <p className="text-muted-foreground text-sm">
-              The whole Test: what the sections don't cover (composite steps, services, parallel workers,
-              volumes, verdict) is written here. Name and namespace stay.
-            </p>
-            <Suspense fallback={<Skeleton className="h-96" />}>
-              <CodeEditor
-                value={f.yaml ?? ""}
-                onChange={(yaml) => set({ yaml })}
-                fileName="test.yaml"
-                label="The Test as YAML"
-                errors={errors}
-                readOnly={!editable}
-                minHeight="24rem"
-              />
-            </Suspense>
+              )}
+            </Section>
           </>
         )}
-      </Section>
+      </div>
+      <aside className="lg:sticky lg:top-4 lg:self-start">
+        <YamlSide
+          k={k}
+          base={base}
+          built={built}
+          editing={editingYaml}
+          yaml={yamlDraft ?? ""}
+          onEdit={(on) => setYamlDraft(on ? (base.form.yaml ?? "") : undefined)}
+          onYaml={setYamlDraft}
+          canEdit={editable}
+          blocked={Object.keys(drafts).length > 0}
+        />
+      </aside>
     </div>
   );
 }
