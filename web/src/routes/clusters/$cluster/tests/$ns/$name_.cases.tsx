@@ -184,7 +184,12 @@ function CasesPage() {
               </Select>
             </div>
           </div>
-          {cases.data.cases.length === 0 ? (
+          {cases.data.unavailable ? (
+            <p className="text-muted-foreground" role="status">
+              Test cases come from run history, which this cluster doesn&apos;t keep ({cases.data.unavailable}
+              ).
+            </p>
+          ) : cases.data.cases.length === 0 ? (
             <p className="text-muted-foreground">
               No test cases yet. They appear once a run of this Test that writes JUnit reports has finished.
             </p>

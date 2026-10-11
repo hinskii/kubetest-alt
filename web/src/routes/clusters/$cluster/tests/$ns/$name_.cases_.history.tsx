@@ -52,7 +52,12 @@ function CaseHistoryPage() {
             {k.name} · {history.data.runs.length} runs · {history.data.passed} passed · {history.data.failed}{" "}
             failed · {history.data.skipped} skipped
           </p>
-          {history.data.runs.length === 0 ? (
+          {history.data.unavailable ? (
+            <p className="text-muted-foreground" role="status">
+              A case&apos;s history comes from run history, which this cluster doesn&apos;t keep (
+              {history.data.unavailable}).
+            </p>
+          ) : history.data.runs.length === 0 ? (
             <p className="text-muted-foreground">No runs recorded this test case.</p>
           ) : (
             <Panel id="history" title="Latest first">

@@ -104,6 +104,10 @@ func IsNotFound(err error) bool { return statusIs(err, http.StatusNotFound) }
 // IsConflict reports a 409 (finished run, GitOps-locked Test, …).
 func IsConflict(err error) bool { return statusIs(err, http.StatusConflict) }
 
+// IsUnavailable reports a 503: the API server lacks what the call needs
+// (e.g. no run history store), not a failure of the call itself.
+func IsUnavailable(err error) bool { return statusIs(err, http.StatusServiceUnavailable) }
+
 func statusIs(err error, status int) bool {
 	var e *APIError
 	return errors.As(err, &e) && e.Status == status

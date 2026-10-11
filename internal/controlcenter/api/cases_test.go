@@ -141,3 +141,17 @@ func TestDiffCases(t *testing.T) {
 	assert.Equal(t, []string{"gone"}, keys(d.Removed))
 	assert.Equal(t, 1, d.Unchanged)
 }
+
+func TestCases_WithoutRunHistory(t *testing.T) {
+	// No run history store (and so no test cases): said, not an error.
+	w := newWorld(t, smokeTest())
+	list := w.do(t, http.MethodGet, smokePath+"/cases", viewer, nil)
+	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+	got := decodeAs[CaseList](t, list)
+	assert.Equal(t, []CaseStat{}, got.Cases)
+	assert.Contains(t, got.Unavailable, "run history store is not configured")
+
+	hist := w.do(t, http.MethodGet, smokePath+"/cases/history?case=x", viewer, nil)
+	require.Equal(t, http.StatusOK, hist.Code)
+	assert.Contains(t, decodeAs[CaseHistory](t, hist).Unavailable, "run history store is not configured")
+}

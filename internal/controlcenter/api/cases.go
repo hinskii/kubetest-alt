@@ -58,6 +58,9 @@ type CaseList struct {
 	// the latest run.
 	Flaky      int `json:"flaky" required:"true"`
 	FailingNow int `json:"failingNow" required:"true"`
+	// Unavailable says why there are no cases to show when the cluster
+	// keeps no run history (test cases live there).
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 // CaseStat is one case over a window of runs.
@@ -87,6 +90,8 @@ type CaseHistory struct {
 	Passed  int          `json:"passed" required:"true"`
 	Failed  int          `json:"failed" required:"true"`
 	Skipped int          `json:"skipped" required:"true"`
+	// Unavailable: see CaseList.
+	Unavailable string `json:"unavailable,omitempty"`
 }
 
 // CaseResult is one run's result for a case.
@@ -161,11 +166,16 @@ func (s *Server) listCases(w http.ResponseWriter, r *http.Request) {
 	}
 	n := window(r)
 	stats, err := client.TestCaseStats(r.Context(), r.PathValue("ns"), r.PathValue("name"), n)
+	out := CaseList{Window: n, Windows: Windows, Cases: make([]CaseStat, 0, len(stats))}
 	if err != nil {
+		if apiclient.IsUnavailable(err) {
+			out.Unavailable = messageOf(err)
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		s.apiError(w, c, err)
 		return
 	}
-	out := CaseList{Window: n, Windows: Windows, Cases: make([]CaseStat, 0, len(stats))}
 	for _, st := range stats {
 		out.Cases = append(out.Cases, CaseStat{Key: st.Key, Name: st.Name, Suite: st.Suite, Class: st.Class,
 			Runs: st.Runs, Passed: st.Passed, Failed: st.Failed, Skipped: st.Skipped, AvgMs: st.AvgMs, MaxMs: st.MaxMs,
@@ -194,11 +204,16 @@ func (s *Server) caseHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runs, err := client.TestCaseHistory(r.Context(), r.PathValue("ns"), r.PathValue("name"), key, caseHistoryRuns)
+	out := CaseHistory{Key: key, Runs: make([]CaseResult, 0, len(runs))}
 	if err != nil {
+		if apiclient.IsUnavailable(err) {
+			out.Unavailable = messageOf(err)
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
 		s.apiError(w, c, err)
 		return
 	}
-	out := CaseHistory{Key: key, Runs: make([]CaseResult, 0, len(runs))}
 	for _, run := range runs {
 		out.Runs = append(out.Runs, CaseResult{RunID: run.RunUID, RunName: run.RunName, FinishedAt: run.FinishedAt.UTC(),
 			Status: run.Status, DurationMs: run.DurationMs, Message: run.Message})

@@ -107,6 +107,24 @@ describe("test cases", () => {
     expect(asked).toEqual(["10"]);
   });
 
+  it("says when the cluster keeps no run history", async () => {
+    server.use(
+      http.get(C, () =>
+        HttpResponse.json({
+          ...list,
+          cases: [],
+          flaky: 0,
+          failingNow: 0,
+          unavailable: "run history store is not configured",
+        }),
+      ),
+    );
+    renderRoute(page);
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Test cases come from run history, which this cluster doesn't keep (run history store is not configured).",
+    );
+  });
+
   it("explains an empty list", async () => {
     server.use(http.get(C, () => HttpResponse.json({ ...list, cases: [], flaky: 0, failingNow: 0 })));
     renderRoute(page);

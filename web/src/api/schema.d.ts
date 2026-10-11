@@ -389,11 +389,13 @@ export interface components {
             passed: number;
             runs: components["schemas"]["CaseResult"][];
             skipped: number;
+            unavailable?: string;
         };
         CaseList: {
             cases: components["schemas"]["CaseStat"][];
             failingNow: number;
             flaky: number;
+            unavailable?: string;
             window: number;
             windows: number[];
         };
