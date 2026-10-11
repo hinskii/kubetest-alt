@@ -28,7 +28,34 @@ jobs:
           persist-credentials: false
 
       - name: Set up Buildx
+        id: buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # The Dockerfiles' cache mounts (Go modules, Go's build cache, pnpm's
+      # store) live in the builder and start empty on every runner; the
+      # first Go image then compiled every dependency (~2 min). They're
+      # kept in GitHub Actions' cache and injected into the builder. The
+      # key follows the dependencies: a hit restores them and skips saving
+      # (no upload); a new go.sum, lockfile or Dockerfile saves anew.
+      - name: Cache mounts
+        id: mounts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: cache-mount
+          key: buildkit-mounts-${{ hashFiles('go.sum', 'web/pnpm-lock.yaml', 'Dockerfile', 'executors/content-fetcher/Dockerfile') }}
+          restore-keys: buildkit-mounts-
+
+      - name: Inject the cache mounts into the builder
+        uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          cache-map: |
+            {
+              "cache-mount/gomod": { "target": "/go/pkg/mod", "id": "gomod" },
+              "cache-mount/gobuild": { "target": "/root/.cache/go-build", "id": "gobuild" },
+              "cache-mount/pnpm-store": { "target": "/root/.local/share/pnpm/store", "id": "pnpm-store" }
+            }
+          skip-extraction: ${{ steps.mounts.outputs.cache-hit }}
 
       - name: operator
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
