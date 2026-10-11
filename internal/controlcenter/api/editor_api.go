@@ -216,8 +216,10 @@ type editorBuild struct {
 	base             *testsv1alpha1.Test
 	t                *testsv1alpha1.Test
 	errors, warnings []string
-	// resourceVersion is the version the edit started from (the form's).
+	// resourceVersion is the version a save is conditional on.
 	resourceVersion string
+	// changed: the definition changed since the form was opened.
+	changed bool
 }
 
 // build reads a form and builds its Test — what the preview shows is what
@@ -244,6 +246,13 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request, edit bool) (*edit
 		}
 		b.base = current
 		f.Namespace, f.Name = ns, name
+		// With the form's generation, what counts is the definition: an
+		// unchanged one saves on the current version (still conditional,
+		// so a concurrent edit is refused); without it, the form's version.
+		if f.Generation > 0 && current.Generation > 0 {
+			b.changed = f.Generation != current.Generation
+			b.resourceVersion = current.ResourceVersion
+		}
 	}
 	if f.Mode == ModeYAML {
 		var errs []string
@@ -303,6 +312,10 @@ func (s *Server) write(edit bool) http.HandlerFunc {
 			writeJSON(w, http.StatusBadRequest, FormError{Error: strings.Join(b.errors, " "), Errors: b.errors})
 			return
 		}
+		if b.changed {
+			writeError(w, http.StatusConflict, testChanged)
+			return
+		}
 		dryRun := r.URL.Query().Get("dry-run") == "true"
 		written, err := WriteTest(r.Context(), client, edit, b.base, b.t, b.resourceVersion, dryRun)
 		if err != nil {
@@ -318,14 +331,16 @@ func (s *Server) write(edit bool) http.HandlerFunc {
 	}
 }
 
+// testChanged: an edit's Test was changed by someone else meanwhile.
+const testChanged = "The Test changed since you opened it. Reload it to start from the current version."
+
 // writeError answers a refused write: a conflict on an edit is the Test
 // having changed since it was opened.
 func (s *Server) writeError(w http.ResponseWriter, err error, edit bool) {
 	var apiErr *apiclient.APIError
 	if errors.As(err, &apiErr) && apiErr.Status == http.StatusConflict && edit &&
 		strings.Contains(apiErr.Message, "modified") {
-		writeError(w, http.StatusConflict,
-			"The Test changed since you opened it. Reload it to start from the current version.")
+		writeError(w, http.StatusConflict, testChanged)
 		return
 	}
 	if errors.As(err, &apiErr) {

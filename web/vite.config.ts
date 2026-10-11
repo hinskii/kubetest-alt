@@ -46,6 +46,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // Component tests type and click through whole pages; CI's runners,
+    // with coverage on, need more than the 5 s default.
+    testTimeout: 15_000,
     include: ["src/**/*.test.{ts,tsx}"],
     coverage: {
       provider: "v8",

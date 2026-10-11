@@ -469,11 +469,12 @@ function SettingsForm({
     });
   }, []);
   const editable = canEdit && !base.locked;
-  // The YAML editor: always for a Test only YAML can show.
-  const [yamlDraft, setYamlDraft] = useState<string | undefined>(
-    editable && base.yamlOnly ? (base.form.yaml ?? "") : undefined,
-  );
-  const editingYaml = yamlDraft !== undefined;
+  // The YAML editor: open while editing, and always for a Test only YAML
+  // can show (derived, not initial state: who may edit can arrive after
+  // the Test does).
+  const [yamlEdit, setYamlDraft] = useState<string | undefined>();
+  const editingYaml = yamlEdit !== undefined || (editable && !!base.yamlOnly);
+  const yamlDraft = editingYaml ? (yamlEdit ?? base.form.yaml ?? "") : undefined;
   const built = usePreview(k.cluster, previewForm(base, drafts, yamlDraft), k);
   const s = { k, base, editable: editable && !editingYaml, onDraft };
   const tools = templates.data?.templates ?? [];

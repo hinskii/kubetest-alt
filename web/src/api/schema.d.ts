@@ -862,6 +862,8 @@ export interface components {
             cpuRequest?: string;
             env?: string;
             files?: components["schemas"]["FileField"][];
+            /** Format: int64 */
+            generation?: number;
             gitPath?: string;
             gitPaths?: string;
             gitRevision?: string;

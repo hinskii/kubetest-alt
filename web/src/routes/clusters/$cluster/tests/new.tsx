@@ -48,6 +48,7 @@ function NewTestPage() {
         ...f,
         name,
         resourceVersion: "",
+        generation: undefined,
         yaml: f.yaml && renamed(f.yaml, from, name),
       };
       body = <TestWizard key={from} cluster={cluster} initial={initial} yamlOnly={source.data.yamlOnly} />;

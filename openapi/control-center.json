@@ -1583,6 +1583,10 @@
             },
             "type": "array"
           },
+          "generation": {
+            "format": "int64",
+            "type": "integer"
+          },
           "gitPath": {
             "type": "string"
           },

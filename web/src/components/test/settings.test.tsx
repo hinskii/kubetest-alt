@@ -1,11 +1,11 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { http, HttpResponse } from "msw";
+import { delay, http, HttpResponse } from "msw";
 
 import type { TestForm } from "@/api/client";
 import { itemsToRows, previewForm, rowsToItems, same } from "@/components/test/settings";
 import { renderRoute } from "@/test/render";
-import { admin, server, smokeForm, viewer } from "@/test/server";
+import { admin, me, server, smokeForm, viewer } from "@/test/server";
 
 // CodeMirror needs a real browser (Playwright covers it); here a textarea.
 vi.mock("@/components/editor/code-editor", () => ({
@@ -195,6 +195,23 @@ describe("a Test's settings", () => {
     await userEvent.click(yaml.getByRole("button", { name: "Save YAML" }));
     await waitFor(() => expect(sent).toHaveLength(1));
     expect(sent[0]).toMatchObject({ mode: "yaml", yaml: `${smokeForm.form.yaml}spec: {}` });
+  });
+});
+
+describe("a YAML-only Test", () => {
+  it("opens in the editor even when who may edit arrives after the Test", async () => {
+    server.use(
+      http.get("*/api/v1/me", async () => {
+        await delay(150);
+        return HttpResponse.json(me);
+      }),
+      http.get(`${T}/form`, () => HttpResponse.json({ ...smokeForm, yamlOnly: "It has composite steps." })),
+    );
+    renderRoute(page);
+    expect(await screen.findByText("It has composite steps.")).toBeInTheDocument();
+    expect(await (await section("Edit YAML")).findByLabelText("The Test as YAML")).toHaveValue(
+      smokeForm.form.yaml,
+    );
   });
 });
 

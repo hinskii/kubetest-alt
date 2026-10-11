@@ -107,6 +107,11 @@ type TestForm struct {
 	// ResourceVersion: the Test's version the edit started from; saving
 	// is refused if it changed since.
 	ResourceVersion string `json:"resourceVersion,omitempty"`
+	// Generation: the Test's definition (metadata.generation) the edit
+	// started from. When set, only a changed definition refuses a save —
+	// the operator's status updates (every run's) change resourceVersion
+	// but not the definition.
+	Generation int64 `json:"generation,omitempty"`
 }
 
 // FileField is one inline file: a path in the repository's place and its text.
@@ -200,7 +205,7 @@ func FormFromTest(t *testsv1alpha1.Test, tmpl *testsv1alpha1.TestTemplate) TestF
 		Namespace: t.Namespace, Name: t.Name, Tool: t.Labels[LabelTool], Mode: ModeForm,
 		Image: s.Container.Image, Command: strings.Join(s.Container.Command, "\n"),
 		Args: strings.Join(s.Container.Args, "\n"), Schedule: s.Schedule,
-		ResourceVersion: t.ResourceVersion, Params: map[string]string{},
+		ResourceVersion: t.ResourceVersion, Generation: t.Generation, Params: map[string]string{},
 	}
 	if len(s.Use) > 0 {
 		f.Template = s.Use[0]

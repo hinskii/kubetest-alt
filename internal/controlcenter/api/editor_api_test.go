@@ -349,3 +349,34 @@ func TestEditor_YAMLRefusals(t *testing.T) {
 		assert.Contains(t, strings.Join(p.Errors, "\n"), c.want, name)
 	}
 }
+
+func TestEditor_OnlyAChangedDefinitionRefusesASave(t *testing.T) {
+	existing := smokeTest()
+	existing.Generation, existing.Spec.Use = 1, []string{"k6"}
+	existing.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string", Default: "a.js"}}
+	w := newWorld(t, existing, k6Template())
+	f := decodeAs[TestFormOf](t, w.do(t, http.MethodGet, smokePath+"/form", viewer, nil)).Form
+	assert.Equal(t, int64(1), f.Generation)
+
+	// A run finishes: the operator writes the Test's status — a new
+	// resourceVersion, the same definition. The save goes through.
+	got := w.test(t, "smoke")
+	got.Status.LatestRun = &testsv1alpha1.RunReference{Name: "smoke-next", Phase: "passed"}
+	require.NoError(t, w.k8s.Update(context.Background(), got))
+	require.NotEqual(t, f.ResourceVersion, w.test(t, "smoke").ResourceVersion)
+	f.Timeout = "20m"
+	rec := w.do(t, http.MethodPut, smokeEdit, developer, f)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, 20*time.Minute, w.test(t, "smoke").Spec.Timeout.Duration)
+
+	// Someone else changes the definition: refused, nothing overwritten.
+	got = w.test(t, "smoke")
+	got.Generation = 2
+	got.Spec.Timeout = &metav1.Duration{Duration: time.Hour}
+	require.NoError(t, w.k8s.Update(context.Background(), got))
+	f.Timeout = "5m"
+	stale := w.do(t, http.MethodPut, smokeEdit, developer, f)
+	assert.Equal(t, http.StatusConflict, stale.Code)
+	assert.Equal(t, testChanged, errorOf(t, stale))
+	assert.Equal(t, time.Hour, w.test(t, "smoke").Spec.Timeout.Duration)
+}
