@@ -503,6 +503,18 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 		}
 		return ctrl.Result{}, err
 	}
+	// So must the Secrets and ConfigMaps the pod's volumes mount (the
+	// TestRun's volumes replace the Test's, as the compiler merges them).
+	vols := podVolumes(resolvedSpec.Pod)
+	if run.Spec.Pod != nil && run.Spec.Pod.Volumes != nil {
+		vols = run.Spec.Pod.Volumes
+	}
+	if err := r.checkPodVolumes(ctx, run.Namespace, vols); err != nil {
+		if errors.Is(err, errVolumeSource) {
+			return r.transitionTerminal(ctx, run, testsv1alpha1.PhaseError, ReasonVolumeSourceMissing, err.Error())
+		}
+		return ctrl.Result{}, err
+	}
 
 	// Step 17: composite cycle detection at setup — resolves the whole
 	// execute graph ONCE using live Test specs, then fails fast if a

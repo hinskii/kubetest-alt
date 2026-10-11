@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -184,4 +185,42 @@ func TestReconcile_TestDataMissingFailsFast(t *testing.T) {
 	require.NoError(t, k8sClient.Create(ctx, run2))
 	got = waitForPhase(t, ctx, client.ObjectKeyFromObject(run2), testsv1alpha1.PhaseError, 10*time.Second)
 	assert.Contains(t, got.Status.Message, `Secret account has no key "env"`)
+}
+
+func TestReconcile_PodVolumeSourceMissingFailsFast(t *testing.T) {
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	optional := true
+	test := newTestFixture(ns, "with-volumes")
+	test.Spec.Pod = &testsv1alpha1.PodConfig{Volumes: []corev1.Volume{
+		{Name: "certs", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+			SecretName: "ca", Items: []corev1.KeyToPath{{Key: "ca.crt", Path: "ca.crt"}}}}},
+		{Name: "extra", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "maybe"}, Optional: &optional}}},
+	}}
+	require.NoError(t, k8sClient.Create(ctx, test))
+
+	run := newRunFixture(ns, "with-volumes-1", "with-volumes")
+	require.NoError(t, k8sClient.Create(ctx, run))
+	got := waitForPhase(t, ctx, client.ObjectKeyFromObject(run), testsv1alpha1.PhaseError, 10*time.Second)
+	assert.Contains(t, got.Status.Message, "pod volume certs: no Secret ca in namespace "+ns)
+	assert.Contains(t, got.Status.Message, ReasonVolumeSourceMissing)
+
+	require.NoError(t, k8sClient.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "ca", Namespace: ns},
+		Data: map[string][]byte{"tls.crt": []byte("x")}}))
+	run2 := newRunFixture(ns, "with-volumes-2", "with-volumes")
+	require.NoError(t, k8sClient.Create(ctx, run2))
+	got = waitForPhase(t, ctx, client.ObjectKeyFromObject(run2), testsv1alpha1.PhaseError, 10*time.Second)
+	assert.Contains(t, got.Status.Message, `pod volume certs: Secret ca has no key "ca.crt"`)
+
+	// The TestRun's volumes replace the Test's: nothing missing, the run
+	// goes on (the optional ConfigMap never counted).
+	run3 := newRunFixture(ns, "with-volumes-3", "with-volumes")
+	run3.Spec.Pod = &testsv1alpha1.PodConfig{Volumes: []corev1.Volume{
+		{Name: "scratch", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}}}}
+	require.NoError(t, k8sClient.Create(ctx, run3))
+	require.Eventually(t, func() bool {
+		var j batchv1.JobList
+		return k8sClient.List(ctx, &j, client.InNamespace(ns)) == nil && len(j.Items) == 1
+	}, 10*time.Second, 100*time.Millisecond, "a Job for the run whose volumes exist")
 }

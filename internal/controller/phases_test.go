@@ -113,6 +113,40 @@ func TestAnalyzePod(t *testing.T) {
 			ReasonImagePull, "myrepo/fetcher:v1",
 		},
 		{
+			"a Secret the env names doesn't exist (CreateContainerConfigError)",
+			&corev1.Pod{Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name: "wrapper",
+					State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+						Reason: "CreateContainerConfigError", Message: `secret "s3-creds" not found`,
+					}},
+				}},
+			}},
+			ReasonContainerConfig, `infra: container wrapper can't start: secret "s3-creds" not found`,
+		},
+		{
+			"the git token's Secret lacks the key (init container)",
+			&corev1.Pod{Status: corev1.PodStatus{
+				InitContainerStatuses: []corev1.ContainerStatus{{
+					Name: "content-fetcher",
+					State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{
+						Reason: "CreateContainerConfigError", Message: `couldn't find key token in Secret team-a/git-token`,
+					}},
+				}},
+			}},
+			ReasonContainerConfig, "content-fetcher can't start: couldn't find key token",
+		},
+		{
+			"still being created: not a failure",
+			&corev1.Pod{Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{
+					Name:  "wrapper",
+					State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ContainerCreating"}},
+				}},
+			}},
+			"", "",
+		},
+		{
 			"OOMKilled on terminated state",
 			&corev1.Pod{Status: corev1.PodStatus{
 				ContainerStatuses: []corev1.ContainerStatus{{

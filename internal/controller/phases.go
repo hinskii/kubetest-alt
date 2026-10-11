@@ -31,12 +31,17 @@ import (
 // Reasons surfaced in TestRunStatus.Message. Kept as constants so tests can
 // assert on exact substrings without duplicating literals.
 const (
-	ReasonTestNotFound       = "TestNotFound"
-	ReasonInvalidConfig      = "InvalidConfig"
-	ReasonCompileError       = "CompileError"
-	ReasonOrphanJobMissing   = "OrphanJobMissing"
-	ReasonOOMKilled          = "OOMKilled"
-	ReasonImagePull          = "ImagePullBackOff"
+	ReasonTestNotFound     = "TestNotFound"
+	ReasonInvalidConfig    = "InvalidConfig"
+	ReasonCompileError     = "CompileError"
+	ReasonOrphanJobMissing = "OrphanJobMissing"
+	ReasonOOMKilled        = "OOMKilled"
+	ReasonImagePull        = "ImagePullBackOff"
+	// ReasonContainerConfig: the kubelet can't build a container's
+	// configuration — a Secret or ConfigMap its env/envFrom names (the
+	// storage credentials, a git token, the user's own) doesn't exist, or
+	// lacks the key. k8s's own reason string.
+	ReasonContainerConfig    = "CreateContainerConfigError"
 	ReasonJobDeadline        = "JobActiveDeadlineExceeded"
 	ReasonContentFetchFailed = "ContentFetchFailed"
 
@@ -52,6 +57,9 @@ const (
 	// ReasonTestDataMissing: a ConfigMap/Secret (or a key of it) in
 	// content.testData doesn't exist — the pod would hang on FailedMount.
 	ReasonTestDataMissing = "TestDataMissing"
+	// ReasonVolumeSourceMissing: a pod volume (spec.pod.volumes, or the
+	// TestRun's override) mounts a Secret/ConfigMap that doesn't exist.
+	ReasonVolumeSourceMissing = "VolumeSourceMissing"
 
 	// k8sReasonDeadlineExceeded is the string batch/v1 sets on JobCondition
 	// when activeDeadlineSeconds fires. Kept as an unexported const so goconst
@@ -131,6 +139,9 @@ const DefaultUnschedulableTimeout = 5 * time.Minute
 //     → ReasonUnschedulable (message from the scheduler: which resources
 //     or taints rule every node out)
 //   - ImagePullBackOff / ErrImagePull on any container → ReasonImagePull
+//   - CreateContainerConfigError on any container → ReasonContainerConfig,
+//     with the kubelet's message (e.g. secret "s3-creds" not found). The
+//     kubelet retries it forever, so the pod would wait for the deadline.
 //   - OOMKilled on any container → ReasonOOMKilled
 //   - Init container Terminated with ExitCode>0 → ReasonContentFetchFailed,
 //     message from Terminated.Message (which k8s populates from
@@ -171,6 +182,12 @@ func AnalyzePod(pod *corev1.Pod, now time.Time, unschedulableFor time.Duration) 
 			return InfraFailure{
 				Reason:  ReasonImagePull,
 				Message: fmt.Sprintf("infra: %s %s", r, cs.Image),
+			}
+		}
+		if r == ReasonContainerConfig {
+			return InfraFailure{
+				Reason:  ReasonContainerConfig,
+				Message: fmt.Sprintf("infra: container %s can't start: %s", cs.Name, cs.State.Waiting.Message),
 			}
 		}
 	}

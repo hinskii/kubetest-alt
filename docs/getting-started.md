@@ -140,8 +140,13 @@ Chart changes: `helm upgrade kt charts/kubetest-alt -n kubetest-alt -f hack/dev-
 - **A run ends in `error` with `PolicyDenied`:** the test pod asked for a
   service account, volume or privilege the platform doesn't allow
   (docs/security.md, chart `testPods`).
-- **Tests in another namespace never upload logs:** that namespace needs
-  the storage credentials — `make dev-namespace NS=<ns>`.
+- **A run in another namespace ends in `error` with
+  `CreateContainerConfigError: … secret "s3-creds" not found`:** that
+  namespace needs the storage credentials — `make dev-namespace NS=<ns>`.
+  The same reason names any Secret or ConfigMap a container's env needs
+  (a git token, the Test's own `envFrom`); `VolumeSourceMissing` one that
+  `spec.pod.volumes` mounts. Both end the run at once instead of leaving
+  it waiting for its deadline.
 - **`ImagePullBackOff` / `ErrImagePull`:** the kind node couldn't pull a
   tool image (network, Docker Hub limits); the run ends in `error`.
 - **Finished TestRuns disappear from `kubectl get testruns`:** after an
