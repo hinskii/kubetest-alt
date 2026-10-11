@@ -90,10 +90,15 @@ test: manifests generate fmt vet openapi-check setup-envtest ## Run tests with -
 	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
 		go test -race $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+# INTEGRATION_PKGS are the packages with integration-tagged tests (found by
+# their build tag, so a new one is picked up by itself). Only these run:
+# every other package's tests already ran in `make test`.
+INTEGRATION_PKGS = $(shell git grep -l -E '^//go:build .*integration' -- '*.go' | xargs -n1 dirname | sort -u | sed 's|^|./|')
+
 .PHONY: test-integration
-test-integration: manifests generate fmt vet setup-envtest ## Run integration tests (requires Docker: testcontainers-go).
-	KUBEBUILDER_ASSETS="$$("$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" \
-		go test -tags integration -race -timeout 5m $$(go list ./... | grep -v /e2e) -coverprofile cover.integration.out
+test-integration: ## Run integration tests (requires Docker: testcontainers-go).
+	@if [ -z "$(INTEGRATION_PKGS)" ]; then echo "test-integration: no integration-tagged tests found"; exit 1; fi
+	go test -tags integration -race -timeout 5m $(INTEGRATION_PKGS) -coverprofile cover.integration.out
 
 # COVERAGE_PKGS_INTEGRATION covers packages whose non-trivial code paths
 # only exercise under the `integration` build tag (real Postgres for
