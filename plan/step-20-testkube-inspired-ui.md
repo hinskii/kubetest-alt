@@ -9,75 +9,77 @@ comments, Kubernetes events, multi-cluster, sign-in).
 
 Not taken: their 2-field "Create a test" modal (our wizard), the in-browser
 "API endpoint" prompt (we proxy server-side), telemetry/cookie and Pro
-banners, a SPA. Control Center stays server-rendered html/template with
-small same-origin scripts (CSP: no inline script), stateless (no database),
-and every page keeps working without JavaScript.
+banners.
 
-Order: 20h, 20i (done); 20j parts 1–2 (done, in Go) → **step 20R
-(plan/step-20r-react-control-center.md): Control Center moves to React
-first** → the rest of 20j as R4 of 20R → 20a … 20g, built in React. One
-commit each, gates green before the next
-(`make lint test test-coverage openapi-check`; e2e in CI).
+**How it's built (since step 20R).** Control Center is the React app in
+`web/` (TypeScript, TanStack Router/Query/Table, shadcn/ui, Recharts,
+CodeMirror), embedded in the Go binary. Its data is Control Center's own
+JSON API (`internal/controlcenter/api`, spec reflected from the Go types
+into `openapi/control-center.json`, TS types generated). Control Center
+stays stateless (no database): what a page shows comes from the cluster's
+kubetest API and run history. CSP: scripts same-origin only. Every UI
+state worth sharing lives in the address (search params validated with
+zod), so links and Back work.
+
+**Gates for every part:** Go (`make lint test test-coverage openapi-check`),
+web (`make web-gen-api-check web-typecheck web-lint web-test web-build
+web-size web-audit web-licenses`; web-test fails under 80% of lines),
+Vitest + MSW for pages, a Playwright spec for each new flow (runs in the
+e2e job on kind; fails on any console error, which catches CSP
+violations), a size budget for any new on-demand chunk.
+
+Order: 20h, 20i (done); 20j (done: wizard and Settings, as R4 of step
+20R); **step 20R done** → 20a … 20g below, one commit each, gates green
+before the next.
 
 ---
 
 ## 20a — Run drawer
 
 Opening a run from a list slides it in from the right over the list,
-instead of leaving the page. The full run page stays at the same URL.
+instead of leaving the page. The full run page stays at its own URL.
 
 **Behaviour**
-- Links marked `data-run-link` open the drawer: plain left click only.
-  Ctrl/Cmd/Shift/middle click, "open in new tab", direct links, viewports
-  under 900 px and no-JS keep today's full page.
-- The drawer is ~85 % wide (`role="dialog"`, `aria-modal`, focus moved in
-  and returned on close). Header: run name, status, "Open full page", ✕.
-- The address bar shows the run's URL (`history.pushState`), so a copied
-  link opens the full page. Back, Esc, ✕ or a click on the backdrop close
-  it and restore the list's scroll position. Forward reopens it.
-- ↑ / ↓ go to the previous / next run of the list it was opened from
-  (e.g. stepping through failures), without closing.
-- Content = the run page's own `#run-root` (title, Now:, facts, live
-  view, report, failed cases, log, events, child runs, comment, actions),
-  fetched as the full page and extracted with `DOMParser` — no partial
-  templates, no second rendering path on the server.
+- A plain left click on a run link opens the drawer. Ctrl/Cmd/Shift/
+  middle click, "open in new tab", direct links and viewports under
+  900 px keep the full page (the link is a normal `<a href>` to it).
+- The drawer is shadcn's Sheet (Radix Dialog: focus moved in and back,
+  `aria-modal`), ~85 % wide. Header: run name, phase, "Open full page", ✕.
+- The address bar shows the run's URL (TanStack Router route masking:
+  the list with `?run=<ns>/<id>` underneath, the run's URL shown), so a
+  copied link opens the full page and a reload does too. Back, Esc, ✕
+  or a click on the backdrop close it; the list keeps its scroll and
+  filters. Forward reopens it.
+- ↑ / ↓ step to the previous / next run of the list it was opened from
+  (e.g. through failures) without closing.
+- Content: the run page's own component (`RunView`, moved out of the
+  route file), same queries — no second rendering path. Log polling and
+  the queued refresh are TanStack Query intervals tied to the component:
+  closing the drawer stops them.
 
-**Run page script (`run.js`)**
-- Becomes `KT.mountRun(root) → unmount()`: log polling, the 15 s queued
-  refresh, the frame-colors observer all hang off `root` and stop on
-  unmount. The full page mounts it on `#run-root` at load.
-- A phase change re-fetches the run into the drawer instead of
-  `location.reload()` (full page: unchanged behaviour).
+**Actions inside the drawer** (Run again, Abort, Comment, Delete) are
+the run page's mutations: run again / abort / comment stay in the drawer
+(run again opens the new run there), Delete closes it and invalidates
+the list's query.
 
-**Actions inside the drawer** (Run again, Abort, Comment, Delete) post
-with `fetch` (same origin, so `CrossOriginProtection` passes) and follow
-the 303:
-- to a run page (abort, comment, rerun → the new run): render it in the
-  drawer, update the URL, show the notice from the redirect;
-- anywhere else (delete → the Test page): close the drawer and refresh
-  the list (refresh.js).
-
-**Links to mark:** a Test's run history, a run's child runs, schedules,
-test-case history (`case.html`), analytics, cleanup preview, the tests
-list's "last run".
-
-**refresh.js:** skips `[data-refresh]` parts while their content is
-behind an open drawer only if they contain focus (unchanged rule); the
-drawer itself is not a refresh part.
+**Run links that open the drawer:** a Test's run history, a run's child
+runs, schedules, test-case history, analytics, run compare, cleanup
+preview, the tests list's last run (and later 20b's recent marks, 20c's
+bars). One `RunLink` component does it, so every list behaves alike.
 
 **Acceptance**
-- Go tests: every listed template renders `data-run-link` on run links;
-  the run page has `#run-root`; the full page is unchanged otherwise.
-- Manual browser check (headless Chrome over CDP, as for refresh.js):
-  open / ↑↓ / back / Esc / Cmd-click / Run again / Delete; log polling
-  stops after close (no requests in the network log).
-- `node --check` on the scripts.
+- Vitest: opening from a list (the address is the run's), ↑/↓, Esc and
+  Back restore the list, modifier clicks aren't intercepted, Run again
+  and Delete, polling stops on close (no further requests in MSW).
+- Playwright: open, step with ↑/↓, Back closes, reload shows the full
+  page, Cmd-click opens a tab.
+- No new chunk: the drawer reuses the run page's.
 
 ---
 
 ## 20b — Tests list: statistics, search, status filter
 
-**API — `GET /tests/stats?namespace=&since=<duration>&recent=<n>`**
+**kubetest API — `GET /tests/stats?namespace=&since=<duration>&recent=<n>`**
 (new): per Test over finished runs since `since` (default 7d, max 90d):
 `total, passed, failed, errored, aborted, passRatio, p50Ms, p95Ms`, and
 the `recent` (default 10, max 30) newest runs as
@@ -86,55 +88,68 @@ the `recent` (default 10, max 30) newest runs as
 `percentile_cont` for p50/p95. Store interface `TestStats(ctx,
 StatsFilter)`; Postgres integration test; fake for unit tests; apiclient
 `TestStats`; OpenAPI. Without a store (no history) → 200 with empty
-stats, the page shows "—".
+stats.
 
-**Page** — the table grouped by tool stays (denser than tiles); new
-columns: *Pass rate (7d)*, *P50*, *Recent* — one coloured mark per recent
-run, oldest → newest, each a run link (drawer). Plus:
-- *Search*: by name; server-side `?q=` (works without JS), filtered as
-  you type by the script;
+**Control Center API:** `GET /clusters/{c}/tests` gains the stats per
+Test (`?since=`), or "unavailable" with the reason when the cluster
+keeps no history (as test cases do).
+
+**Page** — the table grouped by tool stays (denser than tiles), built
+with TanStack Table; new columns: *Pass rate (7d)*, *P50*, *Recent* —
+one coloured mark per recent run, oldest → newest, each a `RunLink`
+(drawer). Plus, all in the address (`?q=&status=`):
+- *Search* by name, filtered as you type (the list is already loaded);
 - *Status*: last run passed / failed (failed, error, aborted) / never run;
-- the count line says what the filters left.
+- the count line says what the filters left; sorting by any column.
 
 **Acceptance:** store integration test (window and percentiles against a
-seeded history), API handler tests, page tests for the columns and
-filters, coverage gates.
+seeded history), API handler tests, Vitest for the columns, filters and
+sorting, Playwright: filter the e2e list.
 
 ---
 
 ## 20c — Test page header: tiles, timeframe, duration chart
 
-Above the run history, for a timeframe `?range=24h|7d|30d` (default 7d):
-- tiles: pass rate, P50, P95, failed, total (from `/tests/stats` for this
-  Test);
-- a bar chart of run durations (server-rendered SVG like the analytics
-  sparklines): one bar per run, coloured by phase, dashed P50/P95 lines,
-  each bar a run link (drawer); at most the last 100 runs of the range
-  (`ListRuns` with `FinishedAfter`).
+On the Test page's Overview, above the run history, for a timeframe
+`?range=24h|7d|30d` (default 7d):
+- tiles (shadcn Card): pass rate, P50, P95, failed, total (20b's stats
+  for this Test);
+- a bar chart of run durations (Recharts, in the analytics chunk's
+  budget or its own): one bar per run, coloured by phase, dashed P50/P95
+  lines, each bar opens the run in the drawer; at most the last 100 runs
+  of the range (`ListRuns` with `FinishedAfter`). Bars have accessible
+  names (run, phase, duration).
 
 The Analytics page stays as the deep view (metrics trends, comparison);
 the header links to it.
 
-**Run history:** status filter (server-side, `phase=` — the API already
-filters) and a search over run name, creator and comment on the shown
-page.
+**Run history:** a status filter (`?phase=`, server-side — the API
+already filters) and a search over run name, creator and comment on the
+shown page; both keep paging.
 
-**Acceptance:** page tests (tiles, range switch, bars link to runs,
-filters keep paging), SVG has `<title>` per bar for accessibility.
+**Acceptance:** Vitest (tiles, range switch, bars open runs, filters
+keep paging), Playwright: switch the range on the e2e Test.
 
 ---
 
 ## 20d — Log viewer
 
-On the run page / drawer log:
-- *Search*: highlights matches in the loaded text, n of m, Enter / ⇧Enter
-  to step; works while the log is still growing;
-- *Wrap lines* toggle, *Full screen* (the log fills the viewport, Esc
-  leaves), *Copy* (whole log as loaded), *Download* stays.
+The run log (page and drawer) moves into CodeMirror, read-only — already
+loaded for YAML, and built for large text:
+- *Search* (CodeMirror's search: highlights, n of m, Enter / ⇧Enter),
+  working while the log still grows: new chunks are appended with a
+  transaction, not by replacing the document, so the search, selection
+  and scroll stay; it follows the end only while you are at the end;
+- *Wrap lines* toggle (remembered per browser), *Full screen* (the log
+  fills the viewport, Esc leaves), *Copy* (the whole log as loaded),
+  *Download* stays;
+- line numbers; ANSI colour codes stripped (shown as text today).
 
-Client-side only; the server already sends plain text.
+Client-side only; the log endpoint and its polling stay.
 
-**Acceptance:** manual browser check; no change to the log endpoint.
+**Acceptance:** Vitest for appending (search and scroll kept) and the
+toggles; Playwright: search a finished run's log, full screen and back;
+the CodeMirror budget holds.
 
 ---
 
@@ -142,13 +157,15 @@ Client-side only; the server already sends plain text.
 
 A collapsible *CLI* panel on the Test page and the run page with ready
 commands and copy buttons, filled with the namespace, Test and run:
-`kubectl kubetest run <test> -n <ns> --follow`, `… --config k=v`,
-`runs --test`, `logs <run> -f`, `artifacts <run> --download ./out`,
-`abort <run>`. A note line: the kube context is the user's
+`kubectl kubetest run <test> -n <ns> --follow`, `… --config k=v` (the
+run form's current values), `runs --test`, `logs <run> -f`,
+`artifacts <run> --download ./out`, `abort <run>`. Names are
+shell-quoted. A note line: the kube context is the user's
 (`--context`), the token comes from `$KUBETEST_API_TOKEN` or the chart
 Secret (docs/cli.md).
 
-**Acceptance:** page tests for the commands (escaped names).
+**Acceptance:** Vitest for the commands (quoting, the run form's values),
+copy goes to the clipboard.
 
 ---
 
@@ -156,24 +173,30 @@ Secret (docs/cli.md).
 
 A Test's labels as chips on the tests list and the Test page — without
 the platform's own (`app.kubernetes.io/managed-by`, `kubetest.io/*`;
-the tool already has its chip). Clicking one filters the list
-(`?label=k=v`, repeatable, AND); the filter shows as a removable chip.
+the tool already has its chip). The Control Center API returns them on
+`TestSummary` and `TestDetail`, the platform's left out there. Clicking
+one filters the list (`?label=k=v`, repeatable, AND); the filter shows
+as a removable chip. Settings → General edits them for GUI-managed
+Tests.
 
-**Acceptance:** page tests (system labels hidden, filter, escaping).
+**Acceptance:** API tests (system labels left out), Vitest (filter,
+removing a chip, odd characters in keys and values), Playwright: filter
+by a label.
 
 ---
 
 ## 20g — About / versions
 
-- API server: `GET /version` → `{version, commit, namespace}` (build info
-  via `-ldflags`, as the CLI); OpenAPI.
-- Chart passes its version to every component (`KUBETEST_CHART_VERSION`);
-  the API reports it too.
-- Control Center: an *About* page listing per cluster the API server,
-  chart and namespace, plus its own version; the home page's cluster
-  cards show the API version.
+- kubetest API: `GET /version` → `{version, commit, namespace,
+  chartVersion}` (build info via `-ldflags`, as the CLI; the chart passes
+  its version as `KUBETEST_CHART_VERSION` to every component); OpenAPI.
+- Control Center API: `GET /api/v1/version` (its own) and each cluster's
+  in `GET /clusters` (from the probe it already makes).
+- UI: an *About* page (`/about`, linked from the header) listing Control
+  Center's version and, per cluster, the API server's, the chart's and
+  the namespace; the home page's cluster cards show the API version.
 
-**Acceptance:** API test, helm test (env present), page test.
+**Acceptance:** API tests, helm test (env present), Vitest for the page.
 
 ---
 
@@ -438,6 +461,16 @@ only explicitly (`items`), and hiding repository files is an error.
 
 ## 20j — A wizard people can follow; details in the Test's Settings
 
+> **Done in React (step 20R, R4).** What shipped differs from the notes
+> below, which were written for the Go pages: the YAML everywhere is
+> CodeMirror from the npm packages, code-split and size-budgeted (no
+> server-side highlighter, no vendored bundle, no `<textarea>` fallback —
+> the UI needs JavaScript); the live YAML is the Control Center API's
+> preview; Settings has a YAML panel beside the sections (unsaved changes
+> shown, "Edit YAML" for the whole Test) instead of a YAML section; saves
+> are conditional on the definition (`metadata.generation`), so status
+> writes don't refuse them.
+
 20i's wizard put a dozen fields on one step (git, token, sparse paths,
 test data with mountPath / key=path) and its jargon (`/data/repo`,
 sparse, mountPath) up front. Testkube's dashboard creates a Test from two
@@ -556,5 +589,4 @@ attribute; test-data rows showed every field.
 - Live view for Locust (stays a backlog item; logs + the report after
   the run cover it).
 - WebSockets for logs (polling is enough at this scale).
-- Editing labels from the UI (the wizard's YAML mode does it).
 - Timeframes beyond 30 days on the Test page (Analytics covers history).

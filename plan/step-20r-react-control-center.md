@@ -1,4 +1,4 @@
-# Step 20R — Control Center in React
+# Step 20R — Control Center in React ✅
 
 Control Center (CC) today is Go html/template pages plus small same-origin
 scripts (≈ 6.2k lines of Go in `internal/controlcenter/server`, 13 page

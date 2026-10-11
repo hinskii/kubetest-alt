@@ -50,6 +50,6 @@ make test-coverage        # core logic packages (compiler, executor, scraper, ex
 | 17 | step-17-composition.md | Composite Tests (steps execute other Tests) |
 | 18 | step-18-control-center.md | Control Center (web UI, multi-cluster, sign-in) |
 | 19 | step-19-retry-services-parallel.md | Retry, services, parallel workers |
-| 20R | step-20r-react-control-center.md | Control Center in React (Vite, shadcn/ui, TanStack) — before the rest of 20 |
-| 20 | step-20-testkube-inspired-ui.md | What Testkube's dashboard does better; test paths; content/testData |
+| 20R | step-20r-react-control-center.md | ✅ Control Center in React (Vite, shadcn/ui, TanStack): every page, no Go templates left |
+| 20 | step-20-testkube-inspired-ui.md | What Testkube's dashboard does better (20h–20j done; 20a–20g next, in React) |
 | 21 | step-21-faster-ci.md | ✅ Faster CI: images built once, no duplicate test runs, caches, parallel e2e — push to green ~5 min (was ~13) |
