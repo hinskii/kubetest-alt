@@ -302,6 +302,36 @@
         ],
         "type": "object"
       },
+      "RecurringSchedule": {
+        "properties": {
+          "latestRun": {
+            "$ref": "#/components/schemas/RunRef"
+          },
+          "locked": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "namespace",
+          "tool",
+          "locked",
+          "schedule"
+        ],
+        "type": "object"
+      },
       "RunComment": {
         "properties": {
           "at": {
@@ -614,6 +644,30 @@
         ],
         "type": "object"
       },
+      "ScheduleList": {
+        "properties": {
+          "oneTime": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduledRun"
+            },
+            "type": "array"
+          },
+          "oneTimeError": {
+            "type": "string"
+          },
+          "recurring": {
+            "items": {
+              "$ref": "#/components/schemas/RecurringSchedule"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "recurring",
+          "oneTime"
+        ],
+        "type": "object"
+      },
       "ScheduleResult": {
         "properties": {
           "schedule": {
@@ -630,6 +684,37 @@
         },
         "required": [
           "schedule"
+        ],
+        "type": "object"
+      },
+      "ScheduledRun": {
+        "properties": {
+          "createdBy": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "notBefore": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "testRef": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "namespace",
+          "testRef",
+          "notBefore"
         ],
         "type": "object"
       },
@@ -1472,6 +1557,54 @@
           }
         },
         "summary": "Start the run's Test again with the parameters this run used."
+      }
+    },
+    "/api/v1/clusters/{cluster}/schedules": {
+      "get": {
+        "operationId": "listSchedules",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Every recurring schedule and every run waiting for its start time."
       }
     },
     "/api/v1/clusters/{cluster}/tests": {

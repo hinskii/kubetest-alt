@@ -16,7 +16,6 @@ export const goPage = {
   compare: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/compare`,
   caseHistory: (c: string, ns: string, test: string, key: string) =>
     `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(test)}/cases/history?case=${seg(key)}`,
-  schedules: (c: string) => `/clusters/${seg(c)}/schedules`,
   newTest: (c: string, ns?: string) => `/clusters/${seg(c)}/tests/new` + (ns ? `?namespace=${seg(ns)}` : ""),
   duplicate: (c: string, ns: string, name: string) =>
     `/clusters/${seg(c)}/tests/new?namespace=${seg(ns)}&from=${seg(name)}`,

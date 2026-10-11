@@ -54,7 +54,9 @@ function TestsPage() {
     <>
       <PageHeader crumbs={[{ label: "Clusters", to: "/" }, { label: title }]} title={title}>
         <Button variant="outline" asChild>
-          <a href={goPage.schedules(cluster)}>Schedules</a>
+          <Link to="/clusters/$cluster/schedules" params={{ cluster }}>
+            Schedules
+          </Link>
         </Button>
         {me.data?.can.run && (
           <Button asChild>

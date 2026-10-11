@@ -14,13 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package api
 
 import (
-	"context"
 	"net/http"
-	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/cctest"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
@@ -52,9 +50,9 @@ func TestScheduledRuns_FutureQueuedOnly(t *testing.T) {
 }
 
 func scheduledTest(name, ns, schedule string, managedByUI bool) *testsv1alpha1.Test {
-	labels := map[string]string{"kubetest.io/tool": "k6"}
+	labels := map[string]string{LabelTool: "k6"}
 	if managedByUI {
-		labels["app.kubernetes.io/managed-by"] = "ui"
+		labels[LabelManagedBy] = ManagedByUI
 	}
 	return &testsv1alpha1.Test{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
@@ -66,45 +64,36 @@ func scheduledTest(name, ns, schedule string, managedByUI bool) *testsv1alpha1.T
 func waitingRun(name string, in time.Duration) *testsv1alpha1.TestRun {
 	at := metav1.NewTime(time.Now().Add(in).Truncate(time.Second))
 	return &testsv1alpha1.TestRun{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a", UID: types.UID("00000000-0000-0000-0000-00000000000" + name[len(name)-1:])},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a", UID: types.UID("uid-" + name)},
 		Spec: testsv1alpha1.TestRunSpec{TestRef: "smoke", Source: "ui", NotBefore: &at,
-			Tags: map[string]string{"kubetest.io/created-by": developer}},
+			Tags: map[string]string{TagCreatedBy: cctest.Developer}},
 		Status: testsv1alpha1.TestRunStatus{Phase: testsv1alpha1.PhaseQueued},
 	}
 }
 
-func TestSchedulesPage(t *testing.T) {
+func TestListSchedules(t *testing.T) {
 	w := newWorld(t, smokeTest(),
 		scheduledTest("nightly", "team-a", "0 2 * * *", true),
 		scheduledTest("weekly", "team-b", "CRON_TZ=Europe/Warsaw 0 6 * * 1", false),
 		scheduledTest("broken", "team-b", "61 * * * *", false),
 		waitingRun("later-2", 2*time.Hour), waitingRun("sooner-1", time.Hour))
 
-	rec := w.get(t, "/clusters/dev/schedules", developer)
+	rec := w.do(t, http.MethodGet, "/api/v1/clusters/dev/schedules", viewer, nil)
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body := rec.Body.String()
-	assert.Contains(t, body, "Recurring <span class=\"muted\">3</span>")
-	assert.Contains(t, body, `>0 2 * * *</td>`)
-	assert.Contains(t, body, "CRON_TZ=Europe/Warsaw 0 6 * * 1")
-	assert.Contains(t, body, "invalid", "a schedule that can't fire is flagged")
-	assert.Less(t, strings.Index(body, ">nightly<"), strings.Index(body, ">broken<"), "broken schedules go last")
-	assert.Contains(t, body, "One-time <span class=\"muted\">2</span>")
-	assert.Less(t, strings.Index(body, ">sooner-1<"), strings.Index(body, ">later-2<"), "soonest first")
-	assert.Contains(t, body, `action="/clusters/dev/runs/team-a/sooner-1/abort"`)
-	assert.Contains(t, body, `name="back" value="schedules"`)
+	got := decodeAs[ScheduleList](t, rec)
 
-	viewer := w.get(t, "/clusters/dev/schedules", "").Body.String()
-	assert.NotContains(t, viewer, ">Cancel</button>", "viewers can't cancel")
+	require.Len(t, got.Recurring, 3)
+	assert.Equal(t, "nightly", got.Recurring[0].Name, "soonest next fire first")
+	assert.False(t, got.Recurring[0].Locked)
+	assert.Len(t, got.Recurring[0].Schedule.Next, NextFiresShown)
+	assert.Equal(t, "CRON_TZ=Europe/Warsaw 0 6 * * 1", got.Recurring[1].Schedule.Expr)
+	assert.True(t, got.Recurring[1].Locked)
+	assert.Equal(t, "broken", got.Recurring[2].Name, "a schedule that never fires goes last")
+	assert.NotEmpty(t, got.Recurring[2].Schedule.Error)
 
-	// Cancelling returns to the schedules page, nowhere else.
-	rec = w.post(t, "/clusters/dev/runs/team-a/sooner-1/abort", developer,
-		url.Values{"back": {"schedules"}, "message": {"cancelled before its start time"}})
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/clusters/dev/schedules?notice="), rec.Header().Get("Location"))
-	var got testsv1alpha1.TestRun
-	require.NoError(t, w.k8s.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "sooner-1"}, &got))
-	require.NotNil(t, got.Spec.Abort)
-	assert.Equal(t, "cancelled before its start time", got.Spec.Abort.Message)
-	rec = w.post(t, "/clusters/dev/runs/team-a/later-2/abort", developer, url.Values{"back": {"https://evil.example"}})
-	assert.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/clusters/dev/runs/team-a/later-2?"), "unknown back → the run")
+	require.Len(t, got.OneTime, 2)
+	assert.Equal(t, "sooner-1", got.OneTime[0].Name, "soonest first")
+	assert.Equal(t, "smoke", got.OneTime[0].TestRef)
+	assert.Equal(t, cctest.Developer, got.OneTime[0].CreatedBy)
+	assert.Empty(t, got.OneTimeError)
 }

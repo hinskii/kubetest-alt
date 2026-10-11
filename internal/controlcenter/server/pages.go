@@ -78,7 +78,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
-	mux.HandleFunc("GET /clusters/{cluster}/schedules", s.schedulesPage)
+	mux.Handle("GET /clusters/{cluster}/schedules", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.cleanupPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.cleanupRuns)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
@@ -87,7 +87,6 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/compare", s.compareRuns)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/logs.txt", s.runLogDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/artifacts/{path...}", s.runArtifact)
-	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/abort", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.abortRun)))
 }
 
 // --- paths -------------------------------------------------------------------
@@ -276,23 +275,4 @@ func safeName(s string) string {
 		}
 		return r
 	}, s)
-}
-
-// --- run actions -------------------------------------------------------------------
-
-func (s *Server) abortRun(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	back := runPath(c.Name, ns, id)
-	if r.PostFormValue("back") == backToSchedules {
-		back = schedulesPath(c.Name)
-	}
-	if _, err := api(r, c).AbortRun(r.Context(), ns, id, strings.TrimSpace(r.PostFormValue("message"))); err != nil {
-		redirect(w, r, back, "Could not abort: "+messageOf(err))
-		return
-	}
-	redirect(w, r, back, "Abort requested.")
 }

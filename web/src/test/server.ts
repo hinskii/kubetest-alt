@@ -116,6 +116,37 @@ export const server = setupServer(
   http.get("*/api/v1/clusters/dev/tests", () => HttpResponse.json({ tests })),
   http.get(T, () => HttpResponse.json(smoke)),
   http.get(`${T}/runs`, () => HttpResponse.json({ runs })),
+  http.get("*/api/v1/clusters/dev/schedules", () =>
+    HttpResponse.json({
+      recurring: [
+        {
+          name: "nightly",
+          namespace: "team-a",
+          tool: "k6",
+          locked: false,
+          schedule: { expr: "0 2 * * *", next: ["2026-10-08T02:00:00Z", "2026-10-09T02:00:00Z"] },
+          latestRun: { name: "nightly-x", phase: "passed", finishedAt: "2026-10-07T02:00:05Z" },
+        },
+        {
+          name: "broken",
+          namespace: "team-b",
+          tool: "",
+          locked: true,
+          schedule: { expr: "61 * * * *", next: [], error: "end of range (61) above maximum (59): 61" },
+        },
+      ],
+      oneTime: [
+        {
+          id: "smoke-later",
+          name: "smoke-later",
+          namespace: "team-a",
+          testRef: "smoke",
+          notBefore: "2030-01-02T03:04:00Z",
+          createdBy: "dev@example.com",
+        },
+      ],
+    }),
+  ),
   http.get(R, ({ params }) => HttpResponse.json({ ...finishedRun, id: params.id, name: params.id })),
   http.get(`${R}/log`, () =>
     HttpResponse.text("hello\nworld\n", { headers: { "X-Run-Phase": "failed", "X-Next-Offset": "12" } }),

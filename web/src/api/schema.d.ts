@@ -123,6 +123,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every recurring schedule and every run waiting for its start time. */
+        get: operations["listSchedules"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests": {
         parameters: {
             query?: never;
@@ -308,6 +325,14 @@ export interface components {
             /** @enum {string} */
             type: "string" | "integer" | "number" | "boolean";
         };
+        RecurringSchedule: {
+            latestRun?: components["schemas"]["RunRef"];
+            locked: boolean;
+            name: string;
+            namespace: string;
+            schedule: components["schemas"]["Schedule"];
+            tool: string;
+        };
         RunComment: {
             /** Format: date-time */
             at: string;
@@ -394,11 +419,25 @@ export interface components {
             expr: string;
             next: string[];
         };
+        ScheduleList: {
+            oneTime: components["schemas"]["ScheduledRun"][];
+            oneTimeError?: string;
+            recurring: components["schemas"]["RecurringSchedule"][];
+        };
         ScheduleResult: {
             schedule?: components["schemas"]["Schedule"];
         };
         ScheduleUpdate: {
             schedule: string;
+        };
+        ScheduledRun: {
+            createdBy?: string;
+            id: string;
+            name: string;
+            namespace: string;
+            /** Format: date-time */
+            notBefore: string;
+            testRef: string;
         };
         StartedRun: {
             name: string;
@@ -879,6 +918,46 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSchedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

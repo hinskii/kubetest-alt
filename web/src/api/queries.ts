@@ -17,6 +17,14 @@ export const clustersQuery = queryOptions({
   refetchInterval: 30_000,
 });
 
+export const schedulesQuery = (cluster: string) =>
+  queryOptions({
+    queryKey: ["clusters", cluster, "schedules"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/clusters/{cluster}/schedules", { params: { path: { cluster } } })),
+    refetchInterval: REFRESH_MS,
+  });
+
 export const testsQuery = (cluster: string) =>
   queryOptions({
     queryKey: ["clusters", cluster, "tests"],

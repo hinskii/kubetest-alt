@@ -186,10 +186,9 @@ func TestClusterUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	w.h = (&Server{Clusters: reg, Auth: res, Views: v, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler()
 
-	rec := w.get(t, clusterURL+"/schedules", "")
+	rec := w.get(t, "/clusters/dev/runs/a/b/logs.txt", "")
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Cannot reach the kubetest API of dev")
-	assert.Equal(t, http.StatusBadGateway, w.get(t, "/clusters/dev/runs/a/b/logs.txt", "").Code)
 	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/nope/runs/a/b/logs.txt", "").Code)
 }
 
