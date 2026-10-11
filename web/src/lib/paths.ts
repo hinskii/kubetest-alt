@@ -13,14 +13,10 @@ export function artifactUrl(c: string, ns: string, id: string, path: string, dow
 
 export const goPage = {
   logs: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/logs.txt`,
-  compare: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/compare`,
-  caseHistory: (c: string, ns: string, test: string, key: string) =>
-    `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(test)}/cases/history?case=${seg(key)}`,
   newTest: (c: string, ns?: string) => `/clusters/${seg(c)}/tests/new` + (ns ? `?namespace=${seg(ns)}` : ""),
   duplicate: (c: string, ns: string, name: string) =>
     `/clusters/${seg(c)}/tests/new?namespace=${seg(ns)}&from=${seg(name)}`,
   test: (c: string, ns: string, name: string) => `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(name)}`,
   edit: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/edit`,
-  cases: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/cases`,
   analytics: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/analytics`,
 };

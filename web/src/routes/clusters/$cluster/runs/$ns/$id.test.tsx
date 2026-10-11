@@ -54,7 +54,7 @@ describe("run page", () => {
     expect(steps[1]).toContain("worker-2");
     expect(region(/Failed tests/).getByRole("link", { name: "checkout" })).toHaveAttribute(
       "href",
-      "/clusters/dev/tests/team-a/smoke/cases/history?case=shop%20%E2%80%BA%20checkout",
+      "/clusters/dev/tests/team-a/smoke/cases/history?case=shop+%E2%80%BA+checkout",
     );
     expect(region(/Screenshots/).getByRole("img")).toHaveAttribute(
       "src",

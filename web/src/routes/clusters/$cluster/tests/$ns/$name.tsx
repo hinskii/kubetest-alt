@@ -161,7 +161,9 @@ function TestPage() {
         actions={
           <>
             <Button variant="outline" size="sm" asChild>
-              <a href={goPage.cases(k.cluster, k.ns, k.name)}>Test cases &amp; flaky tests</a>
+              <Link to="/clusters/$cluster/tests/$ns/$name/cases" params={k}>
+                Test cases &amp; flaky tests
+              </Link>
             </Button>
             <Button variant="outline" size="sm" asChild>
               <a href={goPage.analytics(k.cluster, k.ns, k.name)}>Analytics &amp; comparison</a>

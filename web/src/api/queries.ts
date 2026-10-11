@@ -159,3 +159,40 @@ export const cleanup = async (k: TestKey, runs: string[]) =>
       body: { runs },
     }),
   );
+
+/** The run windows the case list and analytics offer. */
+export type Window = 10 | 30 | 100;
+export const toWindow = (n?: number): Window => (n === 10 || n === 100 ? n : 30);
+
+export const casesQuery = (k: TestKey, runs: Window) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "cases", runs],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases", {
+          params: { ...testParams(k), query: { runs } },
+        }),
+      ),
+  });
+
+export const caseHistoryQuery = (k: TestKey, key: string) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "cases", "history", key],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases/history", {
+          params: { ...testParams(k), query: { case: key } },
+        }),
+      ),
+  });
+
+export const compareRunQuery = (k: RunKey, withRun?: string) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "runs", k.ns, k.id, "compare", withRun ?? ""],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/runs/{ns}/{id}/compare", {
+          params: { ...runParams(k), query: withRun ? { with: withRun } : {} },
+        }),
+      ),
+  });

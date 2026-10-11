@@ -60,6 +60,187 @@
         ],
         "type": "object"
       },
+      "CaseDiff": {
+        "properties": {
+          "before": {
+            "type": "string"
+          },
+          "durationDiffMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "now": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "CaseHistory": {
+        "properties": {
+          "failed": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/CaseResult"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "runs",
+          "passed",
+          "failed",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "CaseList": {
+        "properties": {
+          "cases": {
+            "items": {
+              "$ref": "#/components/schemas/CaseStat"
+            },
+            "type": "array"
+          },
+          "failingNow": {
+            "type": "integer"
+          },
+          "flaky": {
+            "type": "integer"
+          },
+          "window": {
+            "type": "integer"
+          },
+          "windows": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "window",
+          "windows",
+          "cases",
+          "flaky",
+          "failingNow"
+        ],
+        "type": "object"
+      },
+      "CaseResult": {
+        "properties": {
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "runName": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "finishedAt",
+          "status"
+        ],
+        "type": "object"
+      },
+      "CaseStat": {
+        "properties": {
+          "avgMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "class": {
+            "type": "string"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "flaky": {
+            "type": "boolean"
+          },
+          "flips": {
+            "type": "integer"
+          },
+          "key": {
+            "type": "string"
+          },
+          "lastAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lastStatus": {
+            "type": "string"
+          },
+          "maxMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "runs": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "suite": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "runs",
+          "passed",
+          "failed",
+          "skipped",
+          "avgMs",
+          "maxMs",
+          "lastStatus",
+          "lastAt",
+          "flips",
+          "flaky"
+        ],
+        "type": "object"
+      },
       "ChildRun": {
         "properties": {
           "durationMs": {
@@ -414,6 +595,81 @@
           "tool",
           "locked",
           "schedule"
+        ],
+        "type": "object"
+      },
+      "RunCaseDiff": {
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            },
+            "type": "array"
+          },
+          "base": {
+            "$ref": "#/components/schemas/RunRow"
+          },
+          "baseCases": {
+            "type": "integer"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/RunRow"
+            },
+            "type": "array"
+          },
+          "casesError": {
+            "type": "string"
+          },
+          "fixed": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            },
+            "type": "array"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            },
+            "type": "array"
+          },
+          "run": {
+            "$ref": "#/components/schemas/RunRow"
+          },
+          "runCases": {
+            "type": "integer"
+          },
+          "startedFailing": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            },
+            "type": "array"
+          },
+          "stillFailing": {
+            "items": {
+              "$ref": "#/components/schemas/CaseDiff"
+            },
+            "type": "array"
+          },
+          "testRef": {
+            "type": "string"
+          },
+          "unchanged": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run",
+          "testRef",
+          "candidates",
+          "runCases",
+          "baseCases",
+          "startedFailing",
+          "stillFailing",
+          "fixed",
+          "added",
+          "removed",
+          "unchanged"
         ],
         "type": "object"
       },
@@ -1467,6 +1723,77 @@
         "summary": "Set a finished run's comment."
       }
     },
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/compare": {
+      "get": {
+        "operationId": "compareRun",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "with",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunCaseDiff"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "A run's test cases against another run of the same Test (with=); without it, the runs to pick from."
+      }
+    },
     "/api/v1/clusters/{cluster}/runs/{ns}/{id}/log": {
       "get": {
         "operationId": "getRunLog",
@@ -1885,6 +2212,165 @@
           }
         },
         "summary": "A Test with its templates merged: parameters, schedule, definition."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases": {
+      "get": {
+        "operationId": "listCases",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "runs",
+            "schema": {
+              "default": 30,
+              "enum": [
+                10,
+                30,
+                100
+              ],
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "A Test's JUnit cases over its last runs, most failures first, with flakiness."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases/history": {
+      "get": {
+        "operationId": "caseHistory",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "case",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CaseHistory"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "One case's result in each of the Test's runs, newest first."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cleanup": {

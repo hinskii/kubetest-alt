@@ -21,6 +21,8 @@ export type RunRow = components["schemas"]["RunRow"];
 export type Schedule = components["schemas"]["Schedule"];
 export type RunDetail = components["schemas"]["RunDetail"];
 export type RunEvent = components["schemas"]["Event"];
+export type CaseStat = components["schemas"]["CaseStat"];
+export type CaseDiff = components["schemas"]["CaseDiff"];
 
 /** ApiError carries the API's `{error}` message and the HTTP status. */
 export class ApiError extends Error {

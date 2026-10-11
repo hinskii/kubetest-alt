@@ -86,6 +86,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/compare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A run's test cases against another run of the same Test (with=); without it, the runs to pick from. */
+        get: operations["compareRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/runs/{ns}/{id}/log": {
         parameters: {
             query?: never;
@@ -173,6 +190,40 @@ export interface paths {
          * @description Requires the admin role.
          */
         delete: operations["deleteTest"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A Test's JUnit cases over its last runs, most failures first, with flakiness. */
+        get: operations["listCases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cases/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One case's result in each of the Test's runs, newest first. */
+        get: operations["caseHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -282,6 +333,57 @@ export interface components {
             delete: boolean;
             run: boolean;
         };
+        CaseDiff: {
+            before?: string;
+            /** Format: int64 */
+            durationDiffMs?: number;
+            key: string;
+            message?: string;
+            now?: string;
+        };
+        CaseHistory: {
+            failed: number;
+            key: string;
+            passed: number;
+            runs: components["schemas"]["CaseResult"][];
+            skipped: number;
+        };
+        CaseList: {
+            cases: components["schemas"]["CaseStat"][];
+            failingNow: number;
+            flaky: number;
+            window: number;
+            windows: number[];
+        };
+        CaseResult: {
+            /** Format: int64 */
+            durationMs?: number;
+            /** Format: date-time */
+            finishedAt: string;
+            message?: string;
+            runId: string;
+            runName?: string;
+            status: string;
+        };
+        CaseStat: {
+            /** Format: int64 */
+            avgMs: number;
+            class?: string;
+            failed: number;
+            flaky: boolean;
+            flips: number;
+            key: string;
+            /** Format: date-time */
+            lastAt: string;
+            lastStatus: string;
+            /** Format: int64 */
+            maxMs: number;
+            name: string;
+            passed: number;
+            runs: number;
+            skipped: number;
+            suite?: string;
+        };
         ChildRun: {
             /** Format: int64 */
             durationMs?: number;
@@ -377,6 +479,21 @@ export interface components {
             namespace: string;
             schedule: components["schemas"]["Schedule"];
             tool: string;
+        };
+        RunCaseDiff: {
+            added: components["schemas"]["CaseDiff"][];
+            base?: components["schemas"]["RunRow"];
+            baseCases: number;
+            candidates: components["schemas"]["RunRow"][];
+            casesError?: string;
+            fixed: components["schemas"]["CaseDiff"][];
+            removed: components["schemas"]["CaseDiff"][];
+            run: components["schemas"]["RunRow"];
+            runCases: number;
+            startedFailing: components["schemas"]["CaseDiff"][];
+            stillFailing: components["schemas"]["CaseDiff"][];
+            testRef: string;
+            unchanged: number;
         };
         RunComment: {
             /** Format: date-time */
@@ -873,6 +990,50 @@ export interface operations {
             };
         };
     };
+    compareRun: {
+        parameters: {
+            query?: {
+                with?: string;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunCaseDiff"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getRunLog: {
         parameters: {
             query?: {
@@ -1145,6 +1306,103 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listCases: {
+        parameters: {
+            query?: {
+                runs?: 10 | 30 | 100;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    caseHistory: {
+        parameters: {
+            query: {
+                case: string;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CaseHistory"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

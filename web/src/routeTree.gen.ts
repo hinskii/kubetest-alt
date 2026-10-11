@@ -14,7 +14,10 @@ import { Route as ClustersClusterIndexRouteImport } from './routes/clusters/$clu
 import { Route as ClustersClusterSchedulesRouteImport } from './routes/clusters/$cluster/schedules'
 import { Route as ClustersClusterRunsNsIdRouteImport } from './routes/clusters/$cluster/runs/$ns/$id'
 import { Route as ClustersClusterTestsNsNameRouteImport } from './routes/clusters/$cluster/tests/$ns/$name'
+import { Route as ClustersClusterRunsNsIdCompareRouteImport } from './routes/clusters/$cluster/runs/$ns/$id_.compare'
+import { Route as ClustersClusterTestsNsNameCasesRouteImport } from './routes/clusters/$cluster/tests/$ns/$name_.cases'
 import { Route as ClustersClusterTestsNsNameCleanupRouteImport } from './routes/clusters/$cluster/tests/$ns/$name_.cleanup'
+import { Route as ClustersClusterTestsNsNameCasesHistoryRouteImport } from './routes/clusters/$cluster/tests/$ns/$name_.cases_.history'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -43,10 +46,28 @@ const ClustersClusterTestsNsNameRoute =
     path: '/clusters/$cluster/tests/$ns/$name',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ClustersClusterRunsNsIdCompareRoute =
+  ClustersClusterRunsNsIdCompareRouteImport.update({
+    id: '/clusters/$cluster/runs/$ns/$id_/compare',
+    path: '/clusters/$cluster/runs/$ns/$id/compare',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ClustersClusterTestsNsNameCasesRoute =
+  ClustersClusterTestsNsNameCasesRouteImport.update({
+    id: '/clusters/$cluster/tests/$ns/$name_/cases',
+    path: '/clusters/$cluster/tests/$ns/$name/cases',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ClustersClusterTestsNsNameCleanupRoute =
   ClustersClusterTestsNsNameCleanupRouteImport.update({
     id: '/clusters/$cluster/tests/$ns/$name_/cleanup',
     path: '/clusters/$cluster/tests/$ns/$name/cleanup',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ClustersClusterTestsNsNameCasesHistoryRoute =
+  ClustersClusterTestsNsNameCasesHistoryRouteImport.update({
+    id: '/clusters/$cluster/tests/$ns/$name_/cases_/history',
+    path: '/clusters/$cluster/tests/$ns/$name/cases/history',
     getParentRoute: () => rootRouteImport,
   } as any)
 
@@ -56,7 +77,10 @@ export interface FileRoutesByFullPath {
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/runs/$ns/$id/compare': typeof ClustersClusterRunsNsIdCompareRoute
+  '/clusters/$cluster/tests/$ns/$name/cases': typeof ClustersClusterTestsNsNameCasesRoute
   '/clusters/$cluster/tests/$ns/$name/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
+  '/clusters/$cluster/tests/$ns/$name/cases/history': typeof ClustersClusterTestsNsNameCasesHistoryRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -64,7 +88,10 @@ export interface FileRoutesByTo {
   '/clusters/$cluster': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/runs/$ns/$id/compare': typeof ClustersClusterRunsNsIdCompareRoute
+  '/clusters/$cluster/tests/$ns/$name/cases': typeof ClustersClusterTestsNsNameCasesRoute
   '/clusters/$cluster/tests/$ns/$name/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
+  '/clusters/$cluster/tests/$ns/$name/cases/history': typeof ClustersClusterTestsNsNameCasesHistoryRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -73,7 +100,10 @@ export interface FileRoutesById {
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/runs/$ns/$id_/compare': typeof ClustersClusterRunsNsIdCompareRoute
+  '/clusters/$cluster/tests/$ns/$name_/cases': typeof ClustersClusterTestsNsNameCasesRoute
   '/clusters/$cluster/tests/$ns/$name_/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
+  '/clusters/$cluster/tests/$ns/$name_/cases_/history': typeof ClustersClusterTestsNsNameCasesHistoryRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -83,7 +113,10 @@ export interface FileRouteTypes {
     | '/clusters/$cluster/'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/runs/$ns/$id/compare'
+    | '/clusters/$cluster/tests/$ns/$name/cases'
     | '/clusters/$cluster/tests/$ns/$name/cleanup'
+    | '/clusters/$cluster/tests/$ns/$name/cases/history'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -91,7 +124,10 @@ export interface FileRouteTypes {
     | '/clusters/$cluster'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/runs/$ns/$id/compare'
+    | '/clusters/$cluster/tests/$ns/$name/cases'
     | '/clusters/$cluster/tests/$ns/$name/cleanup'
+    | '/clusters/$cluster/tests/$ns/$name/cases/history'
   id:
     | '__root__'
     | '/'
@@ -99,7 +135,10 @@ export interface FileRouteTypes {
     | '/clusters/$cluster/'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/runs/$ns/$id_/compare'
+    | '/clusters/$cluster/tests/$ns/$name_/cases'
     | '/clusters/$cluster/tests/$ns/$name_/cleanup'
+    | '/clusters/$cluster/tests/$ns/$name_/cases_/history'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -108,7 +147,10 @@ export interface RootRouteChildren {
   ClustersClusterIndexRoute: typeof ClustersClusterIndexRoute
   ClustersClusterRunsNsIdRoute: typeof ClustersClusterRunsNsIdRoute
   ClustersClusterTestsNsNameRoute: typeof ClustersClusterTestsNsNameRoute
+  ClustersClusterRunsNsIdCompareRoute: typeof ClustersClusterRunsNsIdCompareRoute
+  ClustersClusterTestsNsNameCasesRoute: typeof ClustersClusterTestsNsNameCasesRoute
   ClustersClusterTestsNsNameCleanupRoute: typeof ClustersClusterTestsNsNameCleanupRoute
+  ClustersClusterTestsNsNameCasesHistoryRoute: typeof ClustersClusterTestsNsNameCasesHistoryRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -148,11 +190,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersClusterTestsNsNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/clusters/$cluster/runs/$ns/$id_/compare': {
+      id: '/clusters/$cluster/runs/$ns/$id_/compare'
+      path: '/clusters/$cluster/runs/$ns/$id/compare'
+      fullPath: '/clusters/$cluster/runs/$ns/$id/compare'
+      preLoaderRoute: typeof ClustersClusterRunsNsIdCompareRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/clusters/$cluster/tests/$ns/$name_/cases': {
+      id: '/clusters/$cluster/tests/$ns/$name_/cases'
+      path: '/clusters/$cluster/tests/$ns/$name/cases'
+      fullPath: '/clusters/$cluster/tests/$ns/$name/cases'
+      preLoaderRoute: typeof ClustersClusterTestsNsNameCasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/clusters/$cluster/tests/$ns/$name_/cleanup': {
       id: '/clusters/$cluster/tests/$ns/$name_/cleanup'
       path: '/clusters/$cluster/tests/$ns/$name/cleanup'
       fullPath: '/clusters/$cluster/tests/$ns/$name/cleanup'
       preLoaderRoute: typeof ClustersClusterTestsNsNameCleanupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/clusters/$cluster/tests/$ns/$name_/cases_/history': {
+      id: '/clusters/$cluster/tests/$ns/$name_/cases_/history'
+      path: '/clusters/$cluster/tests/$ns/$name/cases/history'
+      fullPath: '/clusters/$cluster/tests/$ns/$name/cases/history'
+      preLoaderRoute: typeof ClustersClusterTestsNsNameCasesHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -164,8 +227,12 @@ const rootRouteChildren: RootRouteChildren = {
   ClustersClusterIndexRoute: ClustersClusterIndexRoute,
   ClustersClusterRunsNsIdRoute: ClustersClusterRunsNsIdRoute,
   ClustersClusterTestsNsNameRoute: ClustersClusterTestsNsNameRoute,
+  ClustersClusterRunsNsIdCompareRoute: ClustersClusterRunsNsIdCompareRoute,
+  ClustersClusterTestsNsNameCasesRoute: ClustersClusterTestsNsNameCasesRoute,
   ClustersClusterTestsNsNameCleanupRoute:
     ClustersClusterTestsNsNameCleanupRoute,
+  ClustersClusterTestsNsNameCasesHistoryRoute:
+    ClustersClusterTestsNsNameCasesHistoryRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

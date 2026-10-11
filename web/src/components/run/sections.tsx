@@ -5,7 +5,7 @@ import type { RunDetail, RunEvent } from "@/api/client";
 import { PhaseBadge } from "@/components/phase-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { duration, formatNumber, shortSha, when } from "@/lib/format";
-import { artifactUrl, goPage } from "@/lib/paths";
+import { artifactUrl } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 
 export function Panel({
@@ -246,13 +246,15 @@ export function FailedCases({ cluster, run }: { cluster: string; run: RunDetail 
         <li key={c.key} className="space-y-1 py-3 first:pt-0">
           <div className="flex flex-wrap items-center gap-2">
             <PhaseBadge phase={c.status} />
-            <a
-              href={goPage.caseHistory(cluster, run.namespace, run.testRef, c.key)}
+            <Link
+              to="/clusters/$cluster/tests/$ns/$name/cases/history"
+              params={{ cluster, ns: run.namespace, name: run.testRef }}
+              search={{ case: c.key }}
               className="text-primary font-medium hover:underline"
               title="History of this test case"
             >
               {c.name}
-            </a>
+            </Link>
             <span className="text-muted-foreground text-xs">
               {c.class || c.suite}
               {c.durationMs ? ` · ${duration(c.durationMs)}` : ""}

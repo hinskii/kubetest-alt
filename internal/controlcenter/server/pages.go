@@ -76,14 +76,14 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
 	mux.Handle("POST /clusters/{cluster}/tests/new/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestYAML)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
-	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
-	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
+	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases", webui.Index())
+	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/schedules", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cleanup", webui.Index())
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
 	mux.Handle("GET /clusters/{cluster}/runs/{ns}/{id}", webui.Index())
-	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/compare", s.compareRuns)
+	mux.Handle("GET /clusters/{cluster}/runs/{ns}/{id}/compare", webui.Index())
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/logs.txt", s.runLogDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/artifacts/{path...}", s.runArtifact)
 }
@@ -94,10 +94,6 @@ func clusterPath(c string) string { return "/clusters/" + url.PathEscape(c) }
 
 func testPath(c, ns, name string) string {
 	return clusterPath(c) + "/tests/" + url.PathEscape(ns) + "/" + url.PathEscape(name)
-}
-
-func runPath(c, ns, id string) string {
-	return clusterPath(c) + "/runs/" + url.PathEscape(ns) + "/" + url.PathEscape(id)
 }
 
 // --- plumbing ------------------------------------------------------------------

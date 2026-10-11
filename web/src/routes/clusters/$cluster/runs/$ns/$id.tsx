@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { clustersQuery, meQuery, runQuery } from "@/api/queries";
@@ -23,7 +23,7 @@ import {
 import { ToolFrame, useFrameColors } from "@/components/run/tool-frame";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { artifactUrl, goPage } from "@/lib/paths";
+import { artifactUrl } from "@/lib/paths";
 
 export const Route = createFileRoute("/clusters/$cluster/runs/$ns/$id")({ component: RunPage });
 
@@ -89,7 +89,9 @@ function RunPage() {
         )}
         {r.finished && (
           <Button variant="outline" asChild>
-            <a href={goPage.compare(k.cluster, k.ns, r.id)}>Compare with another run</a>
+            <Link to="/clusters/$cluster/runs/$ns/$id/compare" params={{ ...k, id: r.id }}>
+              Compare with another run
+            </Link>
           </Button>
         )}
         {canRun && <RunAgain k={k} name={r.name} testRef={r.testRef} />}
