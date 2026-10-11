@@ -1,0 +1,30 @@
+name: Go cache per job
+description: >
+  Restores and saves Go's module cache, build cache, golangci-lint's cache
+  and the Makefile's tools (bin/) under a key of the job's own. setup-go's
+  built-in cache is one key for every job: whichever job saves first wins,
+  so e.g. the Tests job's race-instrumented builds were missing from it.
+inputs:
+  key:
+    description: The job's name in the cache key (test, integration, lint, e2e, catalog).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Go version
+      id: go
+      shell: bash
+      run: echo "version=$(go env GOVERSION)" >> "$GITHUB_OUTPUT"
+    - name: Cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/.cache/go-build
+          ~/.cache/golangci-lint
+          bin
+        # A new go.sum or Makefile (tool versions) makes a new cache; until
+        # then each run starts from the last one saved for this job.
+        key: go-${{ runner.os }}-${{ inputs.key }}-${{ steps.go.outputs.version }}-${{ hashFiles('go.sum', 'Makefile') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ inputs.key }}-${{ steps.go.outputs.version }}-

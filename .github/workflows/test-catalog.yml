@@ -88,7 +88,13 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
+
+      - name: Go cache
+        if: steps.want.outputs.run == 'true'
+        uses: ./.github/actions/go-cache
+        with:
+          key: catalog
 
       - name: Install kind + helm
         if: steps.want.outputs.run == 'true'

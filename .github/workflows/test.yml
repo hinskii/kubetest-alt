@@ -22,6 +22,12 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
+          cache: false
+
+      - name: Go cache
+        uses: ./.github/actions/go-cache
+        with:
+          key: test
 
       - name: Running Tests
         # test-coverage runs `make test`, then enforces the per-package
@@ -92,6 +98,12 @@ jobs:
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
           go-version-file: go.mod
+          cache: false
+
+      - name: Go cache
+        uses: ./.github/actions/go-cache
+        with:
+          key: integration
 
       - name: Integration tests
         run: make test-coverage-integration
