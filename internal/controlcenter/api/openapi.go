@@ -89,6 +89,8 @@ type runsParams struct {
 	Name      string `path:"name"`
 	// After is the cursor of the page (RunPage.next of the previous one).
 	After string `query:"after"`
+	// Phase keeps the runs in that phase only.
+	Phase string `query:"phase" enum:"queued,running,passed,failed,error,aborted"`
 }
 
 const (
@@ -147,6 +149,9 @@ func (s *Server) routes() []route {
 			Summary: "Set (or, with \"\", remove) a GUI-managed Test's recurring schedule.",
 			In:      []any{testParams{}, ScheduleUpdate{}}, Out: ScheduleResult{},
 			Errors: []int{400, 403, 404, 409, 502}, handler: s.setSchedule},
+		{Method: http.MethodGet, Path: testPath + "/overview", ID: "getTestOverview",
+			Summary: "A Test's finished runs over 24h, 7d or 30d: counts, pass rate, times, per hour or day.",
+			In:      []any{overviewParams{}}, Out: TestOverview{}, Errors: []int{404, 502}, handler: s.overview},
 		{Method: http.MethodGet, Path: testPath + "/analytics", ID: "getAnalytics",
 			Summary: "A Test's last 10/30/100 finished runs: summary, trends, cases.", In: []any{casesParams{}},
 			Out: Analytics{}, Errors: []int{404, 502}, handler: s.analytics},

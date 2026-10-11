@@ -18,14 +18,17 @@
     "limit": "60 kB"
   },
   {
-    "name": "Analytics with Recharts, loaded on demand (brotli)",
-    "path": "../internal/controlcenter/webui/dist/assets/_name_.analytics-*.js",
+    "name": "Recharts with the analytics page, loaded on demand (brotli)",
+    "path": [
+      "../internal/controlcenter/webui/dist/assets/recharts-*.js",
+      "../internal/controlcenter/webui/dist/assets/_name_.analytics-*.js"
+    ],
     "limit": "100 kB"
   },
   {
     "name": "All JavaScript (brotli)",
     "path": "../internal/controlcenter/webui/dist/assets/*.js",
-    "limit": "500 kB"
+    "limit": "600 kB"
   },
   {
     "name": "CSS (brotli)",

@@ -114,7 +114,10 @@ export function RunFlow({
                 <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", l.box)}>
                   {l.icon}
                 </span>
-                <span className="min-w-0 flex-1 truncate font-medium" title={s.name}>
+                <span
+                  className="min-w-0 flex-1 leading-tight font-medium [overflow-wrap:anywhere]"
+                  title={s.name}
+                >
                   {s.name}
                 </span>
                 <span className="text-muted-foreground shrink-0 text-sm tabular-nums">

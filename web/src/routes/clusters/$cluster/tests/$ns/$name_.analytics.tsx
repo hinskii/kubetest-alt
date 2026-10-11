@@ -3,20 +3,20 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";
 
-import type { Analytics, Comparison, Trend } from "@/api/client";
+import type { Analytics, Comparison } from "@/api/client";
 import { analyticsQuery, clustersQuery, comparisonQuery, toWindow } from "@/api/queries";
 import { ErrorView } from "@/components/error-view";
 import { PageHeader } from "@/components/page-header";
 import { PhaseBadge } from "@/components/phase-badge";
 import { Panel } from "@/components/run/sections";
-import { Sparkline } from "@/components/sparkline";
+import { Trends } from "@/components/test/trends";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { duration, formatNumber, when } from "@/lib/format";
+import { duration, when } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /** MaxCompared is the API's limit of runs in one comparison. */
@@ -38,10 +38,6 @@ const tick: Record<string, string> = {
   error: "bg-destructive",
   aborted: "bg-unknown",
 };
-
-function value(t: Trend, v: number): string {
-  return t.unit === "ms" ? duration(Math.round(v)) : formatNumber(v);
-}
 
 function AnalyticsPage() {
   const k = Route.useParams();
@@ -198,53 +194,6 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
       <dt className="text-muted-foreground text-sm">{label}</dt>
       <dd className="text-lg font-semibold">{value}</dd>
     </div>
-  );
-}
-
-function Trends({ trends }: { trends: Trend[] }) {
-  return (
-    <Panel
-      id="trends"
-      title={
-        <>
-          Trends{" "}
-          <span className="text-muted-foreground text-sm font-normal">
-            passed and failed runs, oldest → newest
-          </span>
-        </>
-      }
-    >
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Value</TableHead>
-            <TableHead>Trend</TableHead>
-            <TableHead>Latest</TableHead>
-            <TableHead>vs earlier avg</TableHead>
-            <TableHead>Min</TableHead>
-            <TableHead>Avg</TableHead>
-            <TableHead>Max</TableHead>
-            <TableHead>Runs</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {trends.map((t) => (
-            <TableRow key={t.label} data-testid={`trend-${t.label}`}>
-              <TableCell className="font-mono">{t.label}</TableCell>
-              <TableCell>
-                <Sparkline values={t.values} label={t.label} />
-              </TableCell>
-              <TableCell className="font-semibold">{value(t, t.latest)}</TableCell>
-              <TableCell className="text-muted-foreground">{t.delta}</TableCell>
-              <TableCell className="text-muted-foreground">{value(t, t.min)}</TableCell>
-              <TableCell className="text-muted-foreground">{value(t, t.avg)}</TableCell>
-              <TableCell className="text-muted-foreground">{value(t, t.max)}</TableCell>
-              <TableCell className="text-muted-foreground">{t.values.length}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Panel>
   );
 }
 

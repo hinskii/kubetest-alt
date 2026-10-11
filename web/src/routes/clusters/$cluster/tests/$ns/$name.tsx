@@ -8,24 +8,32 @@ import { ErrorView } from "@/components/error-view";
 import { PageHeader } from "@/components/page-header";
 import { Chip } from "@/components/phase-badge";
 import { DeleteTest } from "@/components/test/delete-test";
+import { CliPanel } from "@/components/test/cli-panel";
 import { LatestRun } from "@/components/test/latest-run";
+import { OverviewTiles } from "@/components/test/overview-tiles";
 import { RunForm } from "@/components/test/run-form";
 import { RunsTable } from "@/components/test/runs-table";
 import { TestSettings } from "@/components/test/settings";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { when } from "@/lib/format";
 
-// CodeMirror only when the definition is opened.
+// CodeMirror only when the definition is opened; Recharts with Insights.
 const YamlView = lazy(() => import("@/components/yaml-view"));
+const InsightsTab = lazy(() => import("@/components/test/insights-tab"));
 
 export const Route = createFileRoute("/clusters/$cluster/tests/$ns/$name")({
   validateSearch: z.object({
     after: z.string().optional().catch(undefined),
-    tab: z.enum(["settings"]).optional().catch(undefined),
+    tab: z.enum(["runs", "insights", "cli", "settings"]).optional().catch(undefined),
+    range: z.enum(["24h", "7d", "30d"]).optional().catch(undefined),
+    phase: z.enum(["queued", "running", "passed", "failed", "error", "aborted"]).optional().catch(undefined),
+    q: z.string().optional().catch(undefined),
   }),
   component: TestPage,
 });
@@ -60,10 +68,11 @@ function Panel({
 
 function TestPage() {
   const k = Route.useParams();
-  const { after, tab } = Route.useSearch();
+  const { after, tab, range = "7d", phase, q = "" } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const test = useQuery(testQuery(k));
-  const runs = useQuery(testRunsQuery(k, after));
+  const latest = useQuery(testRunsQuery(k));
+  const runs = useQuery({ ...testRunsQuery(k, after, phase), enabled: tab === "runs" });
   const me = useQuery(meQuery);
   const clusters = useQuery(clustersQuery);
   const [showDefinition, setShowDefinition] = useState(false);
@@ -155,25 +164,49 @@ function TestPage() {
       <Tabs
         value={tab ?? "overview"}
         onValueChange={(v) =>
-          void navigate({ search: (prev) => ({ ...prev, tab: v === "settings" ? "settings" : undefined }) })
+          void navigate({
+            search: (prev) => ({ ...prev, tab: v === "overview" ? undefined : (v as typeof tab) }),
+            replace: true,
+          })
         }
       >
         <TabsList variant="line" className="h-auto w-full flex-wrap justify-start gap-2 border-b">
-          <TabsTrigger value="overview" className="flex-none px-3">
-            Overview
-          </TabsTrigger>
-          <TabsTrigger value="settings" className="flex-none px-3">
-            Settings
-          </TabsTrigger>
+          {(
+            [
+              ["overview", "Overview"],
+              ["runs", "Runs"],
+              ["insights", "Insights"],
+              ["cli", "CLI commands"],
+              ["settings", "Settings"],
+            ] as const
+          ).map(([id, label]) => (
+            <TabsTrigger key={id} value={id} className="flex-none px-3">
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
+
         <TabsContent value="overview" className="space-y-6 pt-4">
-          {runs.data?.runs[0] && !after && <LatestRun k={k} id={runs.data.runs[0].id} />}
+          <OverviewTiles
+            k={k}
+            range={range}
+            onRange={(r) =>
+              void navigate({
+                search: (prev) => ({ ...prev, range: r === "7d" ? undefined : r }),
+                replace: true,
+                resetScroll: false,
+              })
+            }
+          />
+          {latest.data?.runs[0] && <LatestRun k={k} id={latest.data.runs[0].id} />}
+          {latest.data && latest.data.runs.length === 0 && (
+            <p className="text-muted-foreground">No runs yet.</p>
+          )}
           {canRun && (
             <Panel title="Run" id="run">
               <RunForm k={k} params={t.params} />
             </Panel>
           )}
-
           {t.schedule && (
             <p className="text-sm" data-testid="schedule-line">
               Runs on a schedule: <code className="font-mono">{t.schedule.expr}</code>
@@ -189,60 +222,6 @@ function TestPage() {
               </Link>
             </p>
           )}
-
-          <Panel
-            title="Runs"
-            id="runs"
-            actions={
-              <>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/clusters/$cluster/tests/$ns/$name/cases" params={k}>
-                    Test cases &amp; flaky tests
-                  </Link>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link to="/clusters/$cluster/tests/$ns/$name/analytics" params={k}>
-                    Analytics &amp; comparison
-                  </Link>
-                </Button>
-                {canRun && (
-                  <Button variant="outline" size="sm" asChild>
-                    <Link to="/clusters/$cluster/tests/$ns/$name/cleanup" params={k}>
-                      Clean up runs
-                    </Link>
-                  </Button>
-                )}
-              </>
-            }
-          >
-            {runs.isError && <ErrorView error={runs.error} />}
-            {runs.isPending && <Skeleton className="h-24 w-full" />}
-            {runs.data &&
-              (runs.data.runs.length === 0 ? (
-                <p className="text-muted-foreground">No runs yet.</p>
-              ) : (
-                <>
-                  <RunsTable cluster={k.cluster} ns={k.ns} runs={runs.data.runs} />
-                  <nav className="flex gap-4 text-sm" aria-label="Run history pages">
-                    {after && (
-                      <Link from={Route.fullPath} search={{}} className="text-primary hover:underline">
-                        Newest
-                      </Link>
-                    )}
-                    {runs.data.next && (
-                      <Link
-                        from={Route.fullPath}
-                        search={{ after: runs.data.next }}
-                        className="text-primary hover:underline"
-                      >
-                        Older runs
-                      </Link>
-                    )}
-                  </nav>
-                </>
-              ))}
-          </Panel>
-
           <details
             className="bg-card rounded-xl border p-5"
             onToggle={(e) => setShowDefinition((e.target as HTMLDetailsElement).open)}
@@ -262,6 +241,123 @@ function TestPage() {
             )}
           </details>
         </TabsContent>
+
+        <TabsContent value="runs" className="space-y-6 pt-4">
+          <Panel
+            title="Runs"
+            id="runs"
+            actions={
+              canRun && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/clusters/$cluster/tests/$ns/$name/cleanup" params={k}>
+                    Clean up runs
+                  </Link>
+                </Button>
+              )
+            }
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                aria-label="Search runs"
+                placeholder="Search by run, who started it, comment"
+                className="max-w-sm"
+                value={q}
+                onChange={(e) =>
+                  void navigate({
+                    search: (prev) => ({ ...prev, q: e.target.value || undefined }),
+                    replace: true,
+                    resetScroll: false,
+                  })
+                }
+              />
+              <Select
+                value={phase ?? "all"}
+                onValueChange={(v) =>
+                  void navigate({
+                    search: (prev) => ({
+                      ...prev,
+                      phase: v === "all" ? undefined : (v as typeof phase),
+                      after: undefined,
+                    }),
+                    replace: true,
+                    resetScroll: false,
+                  })
+                }
+              >
+                <SelectTrigger aria-label="Status" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {(["passed", "failed", "error", "aborted", "running", "queued"] as const).map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {runs.isError && <ErrorView error={runs.error} />}
+            {runs.isPending && <Skeleton className="h-24 w-full" />}
+            {runs.data &&
+              (() => {
+                const needle = q.trim().toLowerCase();
+                const shown = needle
+                  ? runs.data.runs.filter((r) =>
+                      [r.name, r.createdBy, r.comment].some((v) => v?.toLowerCase().includes(needle)),
+                    )
+                  : runs.data.runs;
+                return shown.length === 0 ? (
+                  <p className="text-muted-foreground">
+                    {runs.data.runs.length === 0
+                      ? phase
+                        ? `No ${phase} runs.`
+                        : "No runs yet."
+                      : "No run on this page matches."}
+                  </p>
+                ) : (
+                  <RunsTable cluster={k.cluster} ns={k.ns} runs={shown} />
+                );
+              })()}
+            {runs.data && (after || runs.data.next) && (
+              <nav className="flex gap-4 text-sm" aria-label="Run history pages">
+                {after && (
+                  <Link
+                    from={Route.fullPath}
+                    search={(prev) => ({ ...prev, after: undefined })}
+                    className="text-primary hover:underline"
+                  >
+                    Newest
+                  </Link>
+                )}
+                {runs.data.next && (
+                  <Link
+                    from={Route.fullPath}
+                    search={(prev) => ({ ...prev, after: runs.data.next })}
+                    className="text-primary hover:underline"
+                  >
+                    Older runs
+                  </Link>
+                )}
+              </nav>
+            )}
+          </Panel>
+        </TabsContent>
+
+        <TabsContent value="insights" className="pt-4">
+          <Suspense fallback={<Skeleton className="h-64 w-full" />}>
+            <InsightsTab k={k} />
+          </Suspense>
+        </TabsContent>
+
+        <TabsContent value="cli" className="pt-4">
+          <CliPanel
+            ns={k.ns}
+            name={k.name}
+            config={Object.fromEntries(t.params.filter((p) => p.default).map((p) => [p.name, p.default!]))}
+          />
+        </TabsContent>
+
         <TabsContent value="settings" className="pt-4">
           <TestSettings k={k} canEdit={canRun} schedule={t.schedule} />
         </TabsContent>

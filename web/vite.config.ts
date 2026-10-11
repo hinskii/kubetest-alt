@@ -30,6 +30,12 @@ export default defineConfig({
           // editor's languages stay in the editor's chunk.
           groups: [
             {
+              // Recharts (and its d3 parts): the analytics page and the
+              // Test page's Insights tab, both on demand.
+              name: "recharts",
+              test: /[\\/]node_modules[\\/](recharts|d3-[a-z-]+|victory-vendor|internmap|decimal\.js-light|eventemitter3|lodash|react-smooth|recharts-scale|tiny-invariant|@reduxjs|reselect|immer|redux|use-sync-external-store|es-toolkit|react-is)[\\/]/,
+            },
+            {
               name: "codemirror",
               test: /[\\/]node_modules[\\/](@codemirror[\\/](state|view|language|commands|search|autocomplete|lint|lang-yaml)|@lezer[\\/](common|highlight|lr|yaml)|@uiw[\\/]|crelt|style-mod|w3c-keyname)[\\/]/,
             },

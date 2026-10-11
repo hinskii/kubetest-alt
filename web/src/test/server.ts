@@ -190,6 +190,27 @@ export const server = setupServer(
   http.get(T, () => HttpResponse.json(smoke)),
   http.get(`${T}/runs`, () => HttpResponse.json({ runs })),
   http.get(`${T}/form`, () => HttpResponse.json(smokeForm)),
+  http.get(`${T}/overview`, ({ request }) =>
+    HttpResponse.json({
+      range: new URL(request.url).searchParams.get("range") ?? "7d",
+      since: "2026-10-01T12:00:00Z",
+      summary: {
+        finished: 12,
+        passed: 9,
+        failed: 2,
+        errored: 1,
+        aborted: 0,
+        passRate: "75%",
+        avgMs: 5600,
+        p95Ms: 9000,
+      },
+      p50Ms: 5000,
+      buckets: [
+        { start: "2026-10-06T00:00:00Z", total: 4, passed: 4, failed: 0, avgMs: 5000 },
+        { start: "2026-10-07T00:00:00Z", total: 8, passed: 5, failed: 3, avgMs: 6000 },
+      ],
+    }),
+  ),
   http.post(`${T}/preview`, async ({ request }) => {
     const f = (await request.json()) as TestFormOf["form"];
     return HttpResponse.json({

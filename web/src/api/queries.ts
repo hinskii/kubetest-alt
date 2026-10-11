@@ -44,13 +44,15 @@ export const testQuery = (k: TestKey) =>
       unwrap(await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}", { params: testParams(k) })),
   });
 
-export const testRunsQuery = (k: TestKey, after?: string) =>
+export type RunPhase = "queued" | "running" | "passed" | "failed" | "error" | "aborted";
+
+export const testRunsQuery = (k: TestKey, after?: string, phase?: RunPhase) =>
   queryOptions({
-    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "runs", after ?? ""],
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "runs", after ?? "", phase ?? ""],
     queryFn: async () =>
       unwrap(
         await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/runs", {
-          params: { ...testParams(k), query: after ? { after } : {} },
+          params: { ...testParams(k), query: { ...(after ? { after } : {}), ...(phase ? { phase } : {}) } },
         }),
       ),
     refetchInterval: REFRESH_MS,
@@ -196,6 +198,19 @@ export const compareRunQuery = (k: RunKey, withRun?: string) =>
           params: { ...runParams(k), query: withRun ? { with: withRun } : {} },
         }),
       ),
+  });
+
+/** testOverviewQuery is a Test's finished runs over a range: the Overview tiles. */
+export const testOverviewQuery = (k: TestKey, range: "24h" | "7d" | "30d") =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "overview", range],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/overview", {
+          params: { ...testParams(k), query: { range } },
+        }),
+      ),
+    refetchInterval: 30_000,
   });
 
 export const analyticsQuery = (k: TestKey, runs: Window) =>

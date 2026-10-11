@@ -363,6 +363,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A Test's finished runs over 24h, 7d or 30d: counts, pass rate, times, per hour or day. */
+        get: operations["getTestOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/preview": {
         parameters: {
             query?: never;
@@ -631,6 +648,15 @@ export interface components {
         };
         NamespaceList: {
             namespaces: string[];
+        };
+        OverviewBucket: {
+            /** Format: int64 */
+            avgMs?: number;
+            failed: number;
+            passed: number;
+            /** Format: date-time */
+            start: string;
+            total: number;
         };
         Param: {
             default?: string;
@@ -912,6 +938,17 @@ export interface components {
         };
         TestList: {
             tests: components["schemas"]["TestSummary"][];
+        };
+        TestOverview: {
+            buckets: components["schemas"]["OverviewBucket"][];
+            capped?: boolean;
+            /** Format: int64 */
+            p50Ms?: number;
+            /** @enum {string} */
+            range: "24h" | "7d" | "30d";
+            /** Format: date-time */
+            since: string;
+            summary: components["schemas"]["Summary"];
         };
         TestSummary: {
             latestRun?: components["schemas"]["RunRef"];
@@ -2242,6 +2279,51 @@ export interface operations {
             };
         };
     };
+    getTestOverview: {
+        parameters: {
+            query?: {
+                /** @description Default 7d. */
+                range?: "24h" | "7d" | "30d";
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestOverview"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     previewTestEdit: {
         parameters: {
             query?: never;
@@ -2301,6 +2383,7 @@ export interface operations {
         parameters: {
             query?: {
                 after?: string;
+                phase?: "queued" | "running" | "passed" | "failed" | "error" | "aborted";
             };
             header?: never;
             path: {

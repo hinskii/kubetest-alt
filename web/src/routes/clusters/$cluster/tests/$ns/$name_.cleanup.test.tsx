@@ -82,8 +82,8 @@ describe("clean up runs", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("give a From or To date (or both)");
   });
 
-  it("is linked from the Test page", async () => {
-    renderRoute("/clusters/dev/tests/team-a/smoke");
+  it("is linked from the Test page's runs", async () => {
+    renderRoute("/clusters/dev/tests/team-a/smoke?tab=runs");
     expect(await screen.findByRole("link", { name: "Clean up runs" })).toHaveAttribute("href", page);
   });
 });

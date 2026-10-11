@@ -135,8 +135,8 @@ describe("analytics", () => {
     expect(await screen.findByText(/No finished runs yet/)).toBeInTheDocument();
   });
 
-  it("is linked from the Test page", async () => {
-    renderRoute("/clusters/dev/tests/team-a/smoke");
+  it("is linked from the Test page's insights", async () => {
+    renderRoute("/clusters/dev/tests/team-a/smoke?tab=insights");
     expect(await screen.findByRole("link", { name: "Analytics & comparison" })).toHaveAttribute("href", page);
   });
 });

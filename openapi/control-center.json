@@ -716,6 +716,34 @@
         ],
         "type": "object"
       },
+      "OverviewBucket": {
+        "properties": {
+          "avgMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "start": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "start",
+          "total",
+          "passed",
+          "failed"
+        ],
+        "type": "object"
+      },
       "Param": {
         "properties": {
           "default": {
@@ -1759,6 +1787,45 @@
         },
         "required": [
           "tests"
+        ],
+        "type": "object"
+      },
+      "TestOverview": {
+        "properties": {
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/OverviewBucket"
+            },
+            "type": "array"
+          },
+          "capped": {
+            "type": "boolean"
+          },
+          "p50Ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "range": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          },
+          "since": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/Summary"
+          }
+        },
+        "required": [
+          "range",
+          "since",
+          "summary",
+          "buckets"
         ],
         "type": "object"
       },
@@ -3775,6 +3842,84 @@
         "summary": "A Test as the editor shows it (edit, duplicate)."
       }
     },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/overview": {
+      "get": {
+        "operationId": "getTestOverview",
+        "parameters": [
+          {
+            "description": "Default 7d.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "description": "Default 7d.",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestOverview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "A Test's finished runs over 24h, 7d or 30d: counts, pass rate, times, per hour or day."
+      }
+    },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/preview": {
       "post": {
         "operationId": "previewTestEdit",
@@ -3866,6 +4011,21 @@
             "in": "query",
             "name": "after",
             "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "phase",
+            "schema": {
+              "enum": [
+                "queued",
+                "running",
+                "passed",
+                "failed",
+                "error",
+                "aborted"
+              ],
               "type": "string"
             }
           },

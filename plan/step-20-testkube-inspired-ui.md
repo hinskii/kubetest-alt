@@ -115,9 +115,26 @@ a `stages` JSONB column, migration) and Control Center's `RunDetail`
   written with the rest of a finished run and served for archived runs,
   so a run's course outlives its TestRun.
 
+- **the Test page in tabs** (`?tab=`), as in Testkube's dashboard:
+  - *Overview*: tiles for 24h / 7d / 30d (pass rate, failed, total,
+    average with P50/P95), each over a hand-drawn SVG chart; a chart
+    picks an hour or day for all four tiles at once (mouse or arrow
+    keys), and leaving them restores the range's totals. Under them, the
+    latest run with its stages, the run form, the schedule line and the
+    definition;
+  - *Runs*: history with a status filter (`?phase=`, server-side) and a
+    search over the shown page (`?q=`);
+  - *Insights*: the last 30 runs' summary and trends (Recharts, loaded
+    with the tab) and the test cases, linking to the full pages;
+  - *CLI commands*: copyable `kubectl kubetest` commands (20e);
+  - *Settings*.
+
+  The numbers come from `GET …/tests/{ns}/{name}/overview?range=` in
+  Control Center's API, computed from the range's newest 500 runs (it
+  says so when capped). 20b's SQL stats can replace that later.
+
 **Left:**
-- the flow of composite and parallel runs;
-- the Test page's tabs.
+- the flow of composite and parallel runs.
 
 ---
 

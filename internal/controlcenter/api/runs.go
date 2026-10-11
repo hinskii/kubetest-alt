@@ -93,6 +93,7 @@ func (s *Server) listTestRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	page, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{
 		Namespace: r.PathValue("ns"), Test: r.PathValue("name"), Limit: RunsPerPage, After: r.URL.Query().Get("after"),
+		Phase: r.URL.Query().Get("phase"),
 	})
 	if err != nil {
 		s.apiError(w, c, err)

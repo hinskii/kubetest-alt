@@ -29,6 +29,7 @@ export type Comparison = components["schemas"]["Comparison"];
 export type TestForm = components["schemas"]["TestForm"];
 export type ToolTemplate = components["schemas"]["ToolTemplate"];
 export type TestFormOf = components["schemas"]["TestFormOf"];
+export type TestOverview = components["schemas"]["TestOverview"];
 export type Preview = components["schemas"]["Preview"];
 
 /** ApiError carries the API's `{error}` message and the HTTP status. */
