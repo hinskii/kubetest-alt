@@ -163,10 +163,21 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// ?stage=fetch is the content fetcher's own log (step 20a); none is
+	// the run's (the tool's and the wrapper's).
+	stage := r.URL.Query().Get("stage")
+	if stage != "" && stage != string(testsv1alpha1.StageFetch) {
+		writeError(w, http.StatusBadRequest, ReasonBadRequest, "stage: only fetch has a log of its own")
+		return
+	}
 	ref, err := s.findRun(r.Context(), ns, r.PathValue("id"))
 	if err != nil {
 		writeLookupError(w, err)
 		return
+	}
+	prefix := ref.keys().Logs()
+	if stage != "" {
+		prefix = ref.keys().Stage(stage).Logs()
 	}
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")
@@ -178,7 +189,7 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 		Downloader: s.Downloader,
 		Lister:     s.Lister,
 		Bucket:     s.Bucket,
-		Prefix:     ref.keys().Logs(),
+		Prefix:     prefix,
 	}
 	wroteHeader := false
 	err = stream.stream(r.Context(), func(chunk []byte) error {

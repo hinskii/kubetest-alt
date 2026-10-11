@@ -296,7 +296,8 @@ func OpenAPISpec() map[string]any {
 					"summary": "The run's whole stored log as text/plain (live runs: what has been " +
 						"flushed so far, no follow). ?download=1 adds Content-Disposition: attachment. " +
 						"?offset=N skips the first N bytes, for clients following a live run.",
-					"parameters": []any{queryParam("offset", "Bytes to skip (default 0).")},
+					"parameters": []any{queryParam("offset", "Bytes to skip (default 0)."),
+						queryParam("stage", "fetch: the content fetcher's log instead of the run's.")},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Log text.", "content": map[string]any{
 							"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}},
@@ -455,6 +456,16 @@ func OpenAPISpec() map[string]any {
 						"metrics": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "number"}},
 						"steps": map[string]any{"type": "object", "additionalProperties": map[string]any{
 							"type": "object", "properties": map[string]any{
+								"phase":      map[string]any{"type": "string"},
+								"startedAt":  map[string]any{"type": "string", "format": "date-time"},
+								"finishedAt": map[string]any{"type": "string", "format": "date-time"},
+								"message":    map[string]any{"type": "string"},
+							},
+						}},
+						"stages": map[string]any{"type": "array", "items": map[string]any{
+							"type": "object", "required": []string{"kind", "name"}, "properties": map[string]any{
+								"kind":       map[string]any{"type": "string", "enum": []string{"queue", "fetch", "run", "collect"}},
+								"name":       map[string]any{"type": "string"},
 								"phase":      map[string]any{"type": "string"},
 								"startedAt":  map[string]any{"type": "string", "format": "date-time"},
 								"finishedAt": map[string]any{"type": "string", "format": "date-time"},

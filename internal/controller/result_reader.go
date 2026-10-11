@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"time"
+
 	"context"
 	"errors"
 
@@ -62,6 +64,10 @@ type RunResult struct {
 	// missing). The Phase verdict is still the tool's; UI can surface this
 	// as "run passed, artifacts not saved: ..." separately.
 	ScrapeError string
+
+	// ToolFinishedAt is when the tool exited (the wrapper's result): where
+	// the run's "collect results" stage starts.
+	ToolFinishedAt *time.Time
 }
 
 // ErrResultNotFound indicates the wrapper didn't produce a result.json (crash,

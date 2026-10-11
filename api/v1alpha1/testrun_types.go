@@ -129,6 +129,12 @@ type TestRunStatus struct {
 	// +optional
 	Steps map[string]StepResult `json:"steps,omitempty"`
 
+	// Stages are a leaf run's own course, in order: queued, fetching the
+	// content, running the tool, collecting results (step 20a). Kept by
+	// the reconciler from the pod, so they survive the pod.
+	// +optional
+	Stages []Stage `json:"stages,omitempty"`
+
 	// LogsRef is the object-storage key for streamed logs (step 08).
 	// +optional
 	LogsRef string `json:"logsRef,omitempty"`

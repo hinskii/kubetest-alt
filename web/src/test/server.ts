@@ -96,6 +96,37 @@ export const finishedRun: RunDetail = {
     { key: "worker-2", kind: "Worker", phase: "failed", message: "exit code 1" },
     { key: "worker-10", kind: "Worker", phase: "passed" },
   ],
+  stages: [
+    {
+      kind: "queue",
+      name: "Queued",
+      phase: "passed",
+      startedAt: "2026-10-07T11:59:58Z",
+      finishedAt: "2026-10-07T12:00:00Z",
+    },
+    {
+      kind: "fetch",
+      name: "Clone git repository",
+      phase: "passed",
+      startedAt: "2026-10-07T12:00:00Z",
+      finishedAt: "2026-10-07T12:00:01Z",
+    },
+    {
+      kind: "run",
+      name: "Run k6",
+      phase: "failed",
+      startedAt: "2026-10-07T12:00:01Z",
+      finishedAt: "2026-10-07T12:00:04Z",
+      message: "exit code 1",
+    },
+    {
+      kind: "collect",
+      name: "Collect results",
+      phase: "passed",
+      startedAt: "2026-10-07T12:00:04Z",
+      finishedAt: "2026-10-07T12:00:05Z",
+    },
+  ],
   children: [],
   report: "report/index.html",
   artifacts: [

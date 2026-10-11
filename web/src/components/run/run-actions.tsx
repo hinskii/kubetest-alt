@@ -44,40 +44,57 @@ export function RunAgain({ k, name, testRef }: { k: RunKey; name: string; testRe
   );
 }
 
-/** AbortRun asks a live run to stop, with an optional reason. */
+/** AbortRun asks a live run to stop, with an optional reason (a dialog). */
 export function AbortRun({ k }: { k: RunKey }) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const [message, setMessage] = useState("");
   const abort = useMutation({
     mutationFn: () => abortRun(k, message.trim()),
     onSuccess: () => {
       toast.success("Abort requested.");
       setMessage("");
+      setOpen(false);
       return qc.invalidateQueries({ queryKey: runQuery(k).queryKey });
     },
     onError: (e) => toast.error(`Could not abort: ${e.message}`),
   });
   return (
-    <form
-      className="flex flex-wrap items-center gap-2"
-      aria-label="Abort"
-      onSubmit={(e) => {
-        e.preventDefault();
-        abort.mutate();
-      }}
-    >
-      <Input
-        className="w-72"
-        aria-label="Reason"
-        placeholder="Reason (optional)"
-        maxLength={512}
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-      />
-      <Button type="submit" variant="destructive" disabled={abort.isPending}>
-        Abort run
-      </Button>
-    </form>
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button variant="destructive">Abort run</Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <form
+          aria-label="Abort"
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            abort.mutate();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>Abort this run?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The test pod is stopped; what it collected so far is kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            aria-label="Reason"
+            placeholder="Reason (optional)"
+            maxLength={512}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel type="button">Keep running</AlertDialogCancel>
+            <Button type="submit" variant="destructive" disabled={abort.isPending}>
+              Abort run
+            </Button>
+          </AlertDialogFooter>
+        </form>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

@@ -149,7 +149,14 @@ func (e *Entry) Execute(ctx context.Context) error {
 
 	// Exec the tool verbatim — again while it isn't passed and retries
 	// remain (Test.spec.retry).
+	toolStart := time.Now()
 	result := e.runWithRetry(ctx, req)
+	toolEnd := time.Now()
+	result.ToolFinishedAt = toolEnd.UTC().Format(time.RFC3339Nano)
+	// The run's log turns from the tool's output to the wrapper's own
+	// work here: the UI splits the "run" and "collect" stages at this line.
+	_, _ = fmt.Fprintf(e.Stdout, "\n%s\n", CollectMarker)
+	e.sayTool(ctx, req, result, toolEnd.Sub(toolStart))
 
 	// Reclassify by ctx state — timeout/signal win over any verdict.
 	switch {
@@ -170,6 +177,8 @@ func (e *Entry) Execute(ctx context.Context) error {
 		result.Attempts[n-1] = attemptOf(result) // the last try's final verdict
 	}
 
+	e.sayVerdict(req, result)
+
 	// Metrics from the tool's report (spec.metrics). After the verdict and
 	// before the scrape, so result.json carries them; never touches Phase.
 	e.parseMetrics(req, &result)
@@ -177,6 +186,7 @@ func (e *Entry) Execute(ctx context.Context) error {
 	// Scrape (§15.3) — runs even on failure/abort paths so partial output
 	// survives. Never changes Phase; puts errors in ScrapeError.
 	e.runScrape(ctx, req, &result)
+	e.sayArtifacts(req, result)
 	result.Content = readContentInfo(req.DataDir)
 
 	e.writeTermination(result)
@@ -186,14 +196,20 @@ func (e *Entry) Execute(ctx context.Context) error {
 	}
 
 	// Upload final result.json so the controller's ResultReader can fetch it.
-	if e.Scraper != nil && req.StoragePrefix != "" {
+	switch {
+	case e.Scraper == nil || req.StoragePrefix == "":
+		e.say("Result: written for the operator (no object storage: it reads the pod's termination message)")
+	default:
 		payload, merr := marshalResult(result)
 		if merr == nil {
 			if uerr := e.Scraper.UploadResult(ctx, req.StoragePrefix, payload); uerr != nil {
-				_, _ = fmt.Fprintf(e.Loader, "upload result.json: %v\n", uerr)
+				e.say("Result: uploading result.json failed: %v", uerr)
+			} else {
+				e.say("Result: result.json uploaded (%s)", result.Phase)
 			}
 		}
 	}
+	e.say("Collected in %s", sinceRound(toolEnd))
 	return nil
 }
 
@@ -608,14 +624,14 @@ func (e *Entry) parseMetrics(req ExecutionRequest, result *ExecutionResult) {
 	m, rel, err := report.ParseFile(req.Metrics.From, wd, req.Metrics.Path)
 	if err != nil {
 		result.MetricsError = fmt.Sprintf("metrics (%s, %s): %v", req.Metrics.From, req.Metrics.Path, err)
-		_, _ = fmt.Fprintln(e.Loader, result.MetricsError)
+		e.say("Metrics: %s", result.MetricsError)
 		return
 	}
 	if result.Metrics == nil {
 		result.Metrics = make(map[string]float64, len(m))
 	}
 	maps.Copy(result.Metrics, m)
-	_, _ = fmt.Fprintf(e.Loader, "metrics: %d values from %s\n", len(m), rel)
+	e.say("Metrics: %d values from %s", len(m), rel)
 }
 
 // prepareOutputDirs creates the static directory prefix of every declared

@@ -74,9 +74,10 @@ type Registry struct {
 // separate from LogSource (which is per-open) so the controller passes
 // pod coordinates once and lets the tailer reopen on its own.
 type PodLogSource interface {
-	// Open streams the pod's log with kubelet timestamps on every line,
-	// from since (nil = the first line).
-	Open(ctx context.Context, namespace, podName string, since *time.Time) (io.ReadCloser, error)
+	// Open streams a container's log (container "": the pod's only one)
+	// with kubelet timestamps on every line, from since (nil = the first
+	// line).
+	Open(ctx context.Context, namespace, podName, container string, since *time.Time) (io.ReadCloser, error)
 }
 
 // NewRegistry constructs an empty registry. cursors reads stored cursors
@@ -93,6 +94,10 @@ func NewRegistry(source PodLogSource, uploader storage.Uploader, remover storage
 		bucket:   bucket,
 	}
 }
+
+// StageFlushInterval is how often a container tailer (a stage's log)
+// flushes.
+const StageFlushInterval = time.Second
 
 // ErrRegistryClosed is returned by EnsureTailer after Shutdown.
 var ErrRegistryClosed = errors.New("logstream: registry closed")
@@ -111,6 +116,13 @@ var ErrRegistryClosed = errors.New("logstream: registry closed")
 // outlive the reconcile. We use context.Background() and rely on
 // StopTailer / Shutdown for the tailer's lifecycle.
 func (r *Registry) EnsureTailer(ctx context.Context, id string, keys storage.RunKeys, namespace, podName string) error {
+	return r.EnsureContainerTailer(ctx, id, keys, namespace, podName, "")
+}
+
+// EnsureContainerTailer is EnsureTailer for one container of the pod (an
+// init container: the content fetcher's log, step 20a).
+func (r *Registry) EnsureContainerTailer(ctx context.Context, id string, keys storage.RunKeys,
+	namespace, podName, container string) error {
 	if !keys.Valid() {
 		return errors.New("logstream: invalid storage keys")
 	}
@@ -138,6 +150,11 @@ func (r *Registry) EnsureTailer(ctx context.Context, id string, keys storage.Run
 	}
 
 	cfg := r.TailerConfig
+	if container != "" && (cfg.FlushInterval == 0 || cfg.FlushInterval > StageFlushInterval) {
+		// A stage's log (the content fetcher's) is short and watched while
+		// it happens: flushed every second, not every five.
+		cfg.FlushInterval = StageFlushInterval
+	}
 	cfg.Keys = keys
 	cfg.Resume = resume
 	cfg.Uploader = r.uploader
@@ -149,7 +166,7 @@ func (r *Registry) EnsureTailer(ctx context.Context, id string, keys storage.Run
 		if src == nil {
 			return nil, errors.New("logstream: no pod log source configured")
 		}
-		return src.Open(openCtx, namespace, podName, since)
+		return src.Open(openCtx, namespace, podName, container, since)
 	}
 	t := New(cfg)
 	t.Start(context.Background())

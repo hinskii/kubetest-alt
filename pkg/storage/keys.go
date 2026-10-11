@@ -113,6 +113,12 @@ func (k RunKeys) LogChunk(seq uint64) string {
 // that concatenate the log prefix never see it.
 func (k RunKeys) LogCursor() string { return string(k) + "logcursor.json" }
 
+// Stage is the subtree of a stage of the run that has its own log — the
+// content fetch (step 20a): stages/<name>/logs/…, beside the run's log.
+func (k RunKeys) Stage(name string) RunKeys {
+	return RunKeys(string(k) + "stages/" + name + "/")
+}
+
 // Service is the subtree of one spec.services replica (its logs). Inside
 // the run's artifacts, so the API serves it like any artifact
 // (services/<replica>/logs/...) and it goes with the run.

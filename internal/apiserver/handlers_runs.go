@@ -463,6 +463,18 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 			e.Steps[k] = out
 		}
 	}
+	for _, st := range cr.Status.Stages {
+		out := apiclient.Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
+		if st.StartedAt != nil {
+			t := st.StartedAt.UTC()
+			out.StartedAt = &t
+		}
+		if st.FinishedAt != nil {
+			t := st.FinishedAt.UTC()
+			out.FinishedAt = &t
+		}
+		e.Stages = append(e.Stages, out)
+	}
 	if cr.Status.QueuedAt != nil {
 		t := cr.Status.QueuedAt.UTC()
 		e.QueuedAt = &t

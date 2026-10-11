@@ -413,7 +413,16 @@ func (c *Client) OpenLogs(ctx context.Context, namespace, id string) (io.ReadClo
 // OpenLogsFrom streams the run's stored log from byte offset on — what a
 // client following a live run hasn't read yet. Caller closes it.
 func (c *Client) OpenLogsFrom(ctx context.Context, namespace, id string, offset int64) (io.ReadCloser, error) {
+	return c.OpenStageLogsFrom(ctx, namespace, id, "", offset)
+}
+
+// OpenStageLogsFrom is OpenLogsFrom for a stage with a log of its own
+// ("fetch": the content fetcher's; "": the run's).
+func (c *Client) OpenStageLogsFrom(ctx context.Context, namespace, id, stage string, offset int64) (io.ReadCloser, error) {
 	q := ns(namespace)
+	if stage != "" {
+		q.Set("stage", stage)
+	}
 	if offset > 0 {
 		q.Set("offset", strconv.FormatInt(offset, 10))
 	}

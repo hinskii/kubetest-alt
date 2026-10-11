@@ -435,3 +435,30 @@ type RunReference struct {
 	// +optional
 	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
 }
+
+// StageKind is what a stage of a run does.
+// +kubebuilder:validation:Enum=queue;fetch;run;collect
+type StageKind string
+
+const (
+	StageQueue   StageKind = "queue"
+	StageFetch   StageKind = "fetch"
+	StageRun     StageKind = "run"
+	StageCollect StageKind = "collect"
+)
+
+// Stage is one part of a leaf run's course (TestRunStatus.Stages).
+type Stage struct {
+	Kind StageKind `json:"kind"`
+	// Name is what the UI shows: "Clone git repository", "Run k6", …
+	Name string `json:"name"`
+	// +optional
+	Phase StepPhase `json:"phase,omitempty"`
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// +optional
+	FinishedAt *metav1.Time `json:"finishedAt,omitempty"`
+	// Message says why a stage failed.
+	// +optional
+	Message string `json:"message,omitempty"`
+}

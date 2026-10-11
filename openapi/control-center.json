@@ -1027,6 +1027,12 @@
           "source": {
             "type": "string"
           },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/Stage"
+            },
+            "type": "array"
+          },
           "startedAt": {
             "format": "date-time",
             "type": [
@@ -1061,6 +1067,7 @@
           "config",
           "metrics",
           "steps",
+          "stages",
           "children",
           "artifacts",
           "media",
@@ -1298,6 +1305,48 @@
           "namespace",
           "testRef",
           "notBefore"
+        ],
+        "type": "object"
+      },
+      "Stage": {
+        "properties": {
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "queue",
+              "fetch",
+              "run",
+              "collect"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "phase"
         ],
         "type": "object"
       },
@@ -2397,6 +2446,16 @@
             "schema": {
               "format": "int64",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "stage",
+            "schema": {
+              "enum": [
+                "fetch"
+              ],
+              "type": "string"
             }
           },
           {

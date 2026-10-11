@@ -15,20 +15,31 @@ test("start a run, follow it to the end, run it again", async ({ page }) => {
   await expect(page).toHaveURL(new RegExp(`/clusters/${cluster}/runs/${ns}/ui-smoke-`));
   await expect(page.getByText("Run started.")).toBeVisible();
   const first = page.url();
-  const facts = page.getByRole("region", { name: "Facts", exact: true });
-  await expect(facts.getByRole("link", { name: "ui-smoke" })).toBeVisible();
 
-  // The page follows the run by itself: no reloads.
+  // The page follows the run by itself: no reloads. Its stages move on and
+  // the log (the first tab) fills.
   await expect(page.getByRole("heading", { level: 1 }).locator("[data-phase=passed]")).toBeVisible({
     timeout: 180_000,
   });
+  const stages = page.getByRole("list", { name: "Run stages" }).getByTestId("stage");
+  await expect(stages.first()).toHaveAttribute("data-phase", "passed");
   await expect(page.getByTestId("run-log")).toContainText("hello from playwright", { timeout: 30_000 });
-  await expect(facts).toContainText("hello from playwright"); // the run's parameters
   await expect(page.getByRole("link", { name: "Compare with another run" })).toBeVisible();
-  await expect(page.getByRole("form", { name: "Abort" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Abort run" })).toHaveCount(0);
+
+  // Collecting results has its own log.
+  await page.getByRole("button", { name: "Show the log of Collect results" }).click();
+  await expect(page.getByTestId("run-log")).toContainText("Verdict: passed");
+
+  // The rest is in tabs: the run's parameters under Details.
+  await page.getByRole("tab", { name: "Details" }).click();
+  const facts = page.getByRole("region", { name: "Facts", exact: true });
+  await expect(facts.getByRole("link", { name: "ui-smoke" })).toBeVisible();
+  await expect(facts).toContainText("hello from playwright");
 
   await page.getByRole("button", { name: "Run again" }).click();
   await expect(page.getByText(/Run started again with the parameters of ui-smoke-/)).toBeVisible();
   await expect(page).not.toHaveURL(first);
+  await page.getByRole("tab", { name: "Details" }).click();
   await expect(facts).toContainText("hello from playwright");
 });

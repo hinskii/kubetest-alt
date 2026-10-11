@@ -944,7 +944,7 @@ type fakePodSource struct {
 	sinces []*time.Time // since argument of every Open
 }
 
-func (s *fakePodSource) Open(_ context.Context, _ns, _pod string, since *time.Time) (io.ReadCloser, error) {
+func (s *fakePodSource) Open(_ context.Context, _ns, _pod, _container string, since *time.Time) (io.ReadCloser, error) {
 	s.mu.Lock()
 	s.sinces = append(s.sinces, since)
 	s.mu.Unlock()

@@ -8,6 +8,7 @@ import { ErrorView } from "@/components/error-view";
 import { PageHeader } from "@/components/page-header";
 import { Chip } from "@/components/phase-badge";
 import { DeleteTest } from "@/components/test/delete-test";
+import { LatestRun } from "@/components/test/latest-run";
 import { RunForm } from "@/components/test/run-form";
 import { RunsTable } from "@/components/test/runs-table";
 import { TestSettings } from "@/components/test/settings";
@@ -157,11 +158,16 @@ function TestPage() {
           void navigate({ search: (prev) => ({ ...prev, tab: v === "settings" ? "settings" : undefined }) })
         }
       >
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
+        <TabsList variant="line" className="h-auto w-full flex-wrap justify-start gap-2 border-b">
+          <TabsTrigger value="overview" className="flex-none px-3">
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex-none px-3">
+            Settings
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="overview" className="space-y-6 pt-4">
+          {runs.data?.runs[0] && !after && <LatestRun k={k} id={runs.data.runs[0].id} />}
           {canRun && (
             <Panel title="Run" id="run">
               <RunForm k={k} params={t.params} />

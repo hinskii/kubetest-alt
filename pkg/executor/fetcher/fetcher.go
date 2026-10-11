@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/hinskii/kubetest-alt/pkg/executor"
 )
@@ -88,10 +89,16 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 	if f.Stderr != nil {
 		f.Git.Stderr = f.Stderr
 	}
+	// git reports on stderr; the fetch log is one stream (stdout), so its
+	// lines and git's stay in order — the kubelet reads the two apart.
+	if f.Stdout != nil {
+		f.Git.Stderr = f.Stdout
+	}
 	if f.EnvLookup != nil {
 		f.Git.EnvLookup = f.EnvLookup
 	}
 
+	start := time.Now()
 	if c.Git != nil {
 		repoDir, err := gitMountDir(dstDir, c.Git.MountPath)
 		if err != nil {
@@ -101,33 +108,67 @@ func (f *Fetcher) Fetch(ctx context.Context, c Content, dstDir string) error {
 		if err := os.MkdirAll(repoDir, 0o755); err != nil {
 			return err
 		}
-		if err := f.Git.clone(ctx, *c.Git, repoDir); err != nil {
-			return err
-		}
 		rev := c.Git.Revision
 		if rev == "" {
 			rev = "HEAD"
 		}
+		f.say("Git: %s @ %s — %s", safeURL(c.Git.URI), rev, authOf(*c.Git, f.Git.EnvLookup))
+		f.say("Into: %s", repoDir)
+		if len(c.Git.Paths) > 0 {
+			f.say("Sparse checkout: %s", strings.Join(c.Git.Paths, ", "))
+		} else {
+			f.say("Whole repository (no sparse checkout)")
+		}
+		f.say("Fetching %s (shallow, depth 1)…", rev)
+		if err := f.Git.clone(ctx, *c.Git, repoDir); err != nil {
+			f.say("Clone failed after %s: %v", since(start), err)
+			return err
+		}
+		commit := f.Git.headCommit(ctx, repoDir)
+		n, size := tally(repoDir)
+		f.say("Checked out %s — %s, %s", shortCommit(commit), plural(n, "file"), bytesOf(size))
 		if err := writeContentInfo(dstDir, executor.ContentInfo{
-			GitRevision: rev, GitCommit: f.Git.headCommit(ctx, repoDir),
+			GitRevision: rev, GitCommit: commit,
 		}); err != nil {
 			return err
 		}
 	}
 	if len(c.Files) > 0 {
 		if err := writeFiles(dstDir, c.Files, f.EnvLookup); err != nil {
+			f.say("Writing the inline files failed: %v", err)
 			return err
 		}
+		sizes := make([]int64, len(c.Files))
+		for i, file := range c.Files {
+			if info, err := os.Stat(filepath.Join(dstDir, file.Path)); err == nil {
+				sizes[i] = info.Size()
+			}
+		}
+		f.say("Wrote %s into %s: %s", plural(len(c.Files), "inline file"), dstDir, listFiles(c.Files, sizes, 10))
+	}
+	for _, t := range c.Tarball {
+		f.say("Tarball: %s → %s", safeURL(t.URL), filepath.Join(dstDir, t.Path))
 	}
 	if len(c.Tarball) > 0 {
 		if err := fetchTarballs(ctx, dstDir, c.Tarball, f.HTTP); err != nil {
+			f.say("Fetching the tarballs failed: %v", err)
 			return err
 		}
+		n, size := tally(dstDir)
+		f.say("Unpacked — the content holds %s, %s", plural(n, "file"), bytesOf(size))
 	}
 	if err := checkEmptyMounts(dstDir, c.EmptyMounts); err != nil {
+		f.say("%v", err)
 		return err
 	}
-	return shareWithAnyUID(dstDir)
+	for _, m := range c.EmptyMounts {
+		f.say("Test data mounts at %s (by Kubernetes, from a ConfigMap or Secret)", m.Path)
+	}
+	if err := shareWithAnyUID(dstDir); err != nil {
+		return err
+	}
+	f.say("Content ready in %s", since(start))
+	return nil
 }
 
 // checkEmptyMounts refuses a testData mountPath that would hide fetched

@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"io"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -212,4 +213,56 @@ func TestScrape_NoStoragePrefixSkipsUpload(t *testing.T) {
 	require.NoError(t, e.Execute(context.Background()))
 	assert.Equal(t, int32(0), fake.uploadCalls.Load(), "no prefix → no result upload")
 	assert.Equal(t, PhasePassed, readResult(t, e.ResultDir).Phase)
+}
+
+// TestCollectLog_SaysWhatHappened: after the tool, the log (the run's
+// "collect results" stage, step 20a) says how the tool ended, the verdict
+// and its source, the artifacts and the result — after the marker.
+func TestCollectLog_SaysWhatHappened(t *testing.T) {
+	fake := &fakeScraper{returnResult: ScrapeResult{
+		Artifacts: []ArtifactRef{
+			{Path: "report/index.html", Key: "k1", SizeBytes: 1500},
+			{Path: "results/summary.json", Key: "k2", SizeBytes: 42},
+		},
+		TestCounts: &TestCounts{Total: 3, Passed: 2, Failed: 1},
+		TestCases:  []TestCase{{Name: "a", Status: "passed"}},
+	}}
+	req := ExecutionRequest{RunID: "run-1", StoragePrefix: "runs/ns/run-1/", WorkingDir: t.TempDir(),
+		Args: []string{"/bin/false"}, TimeoutSeconds: 30,
+		Artifacts: ArtifactSpec{Paths: []string{"report/**", "results/*.json"}}}
+	var stdout, loader bytes.Buffer
+	e := &Entry{Exec: shExit(1, nil), Stdout: &stdout, Stderr: io.Discard, Scraper: fake,
+		RequestPath: writeRequest(t, req), ResultDir: t.TempDir(), Loader: &loader}
+	require.NoError(t, e.Execute(context.Background()))
+
+	log := stdout.String()
+	require.Contains(t, log, CollectMarker)
+	log = log[strings.Index(log, CollectMarker):] // all of it after the marker, on the same stream
+	for _, want := range []string{
+		"Tool exited with code 1 after ",
+		"Verdict: failed, from the exit code",
+		"Tests: 3 (2 passed, 1 failed, 0 skipped)",
+		"Artifacts: 2 files (1.5 kB) matched report/**, results/*.json — uploaded",
+		"  report/index.html (1.5 kB)",
+		"Test cases: 1 from JUnit reports, kept in run history",
+		"Result: result.json uploaded (failed)",
+		"Collected in ",
+	} {
+		assert.Contains(t, log, want)
+	}
+}
+
+func TestCollectLog_NothingToCollect(t *testing.T) {
+	req := ExecutionRequest{RunID: "run-1", WorkingDir: t.TempDir(), Args: []string{"/bin/true"}, TimeoutSeconds: 30,
+		Verdict: VerdictSpec{From: "jtl", ErrorRateMax: "0.01"}}
+	var stdout bytes.Buffer
+	e := &Entry{Exec: shExit(0, nil), Stdout: &stdout, Stderr: io.Discard,
+		RequestPath: writeRequest(t, req), ResultDir: t.TempDir(), Loader: &bytes.Buffer{}}
+	_ = e.Execute(context.Background())
+	log := stdout.String()
+	assert.Contains(t, log, "from the JMeter results (error rate at most 0.01)")
+	assert.Contains(t, log, "Artifacts: not kept (no object storage)")
+	assert.Contains(t, log, "no object storage: it reads the pod's termination message")
+	assert.Equal(t, "1.2 MB", humanBytes(1_234_567))
+	assert.Equal(t, "14 B", humanBytes(14))
 }

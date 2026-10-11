@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"time"
+
 	"context"
 	"encoding/json"
 	"errors"
@@ -119,6 +121,9 @@ func projectRunResult(er *executor.ExecutionResult) *RunResult {
 		ScrapeError:  er.ScrapeError,
 		Attempts:     er.Attempts,
 		TestCases:    er.TestCases,
+	}
+	if t, err := time.Parse(time.RFC3339Nano, er.ToolFinishedAt); err == nil {
+		rr.ToolFinishedAt = &t
 	}
 	if c := er.Content; c != nil {
 		rr.Content = &testsv1alpha1.ContentStatus{GitRevision: c.GitRevision, GitCommit: c.GitCommit}

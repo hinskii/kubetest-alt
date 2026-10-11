@@ -49,11 +49,13 @@ type K8sLogSource struct {
 // position (see position.go). since (nil = from the first line) is where a
 // reopened or resumed stream starts; the API takes whole seconds, the
 // tailer drops the overlap.
-func (s *K8sLogSource) Open(ctx context.Context, namespace, podName string, since *time.Time) (io.ReadCloser, error) {
+//
+// container picks one of the pod's containers ("": its only one).
+func (s *K8sLogSource) Open(ctx context.Context, namespace, podName, container string, since *time.Time) (io.ReadCloser, error) {
 	if s.Client == nil {
 		return nil, fmt.Errorf("k8s log source: nil client")
 	}
-	opts := &corev1.PodLogOptions{Follow: true, Timestamps: true}
+	opts := &corev1.PodLogOptions{Follow: true, Timestamps: true, Container: container}
 	if since != nil {
 		t := metav1.NewTime(*since)
 		opts.SinceTime = &t

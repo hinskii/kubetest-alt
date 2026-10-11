@@ -17,6 +17,7 @@ limitations under the License.
 package api
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"maps"
@@ -74,6 +75,9 @@ type RunDetail struct {
 	Config     map[string]string `json:"config" required:"true" nullable:"false"`
 	Metrics    []Metric          `json:"metrics" required:"true" nullable:"false"`
 	Steps      []Step            `json:"steps" required:"true" nullable:"false"`
+	// Stages are a leaf run's course: queued, fetch, run, collect (step
+	// 20a); empty for a composite or parallel run, and for runs from before.
+	Stages []Stage `json:"stages" required:"true" nullable:"false"`
 	// Children are a composite run's child runs, by name.
 	Children []ChildRun `json:"children" required:"true" nullable:"false"`
 	// Report is the artifact path of the tool's main report.
@@ -132,6 +136,16 @@ type Step struct {
 	// Kind is Try, Worker or Step.
 	Kind       string     `json:"kind" required:"true" enum:"Try,Worker,Step"`
 	Phase      string     `json:"phase,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Message    string     `json:"message,omitempty"`
+}
+
+// Stage is one part of a leaf run's course.
+type Stage struct {
+	Kind       string     `json:"kind" required:"true" enum:"queue,fetch,run,collect"`
+	Name       string     `json:"name" required:"true"`
+	Phase      string     `json:"phase" required:"true"`
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	Message    string     `json:"message,omitempty"`
@@ -230,7 +244,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		Archived: run.Origin == apiclient.OriginArchive, ParentRun: run.ParentRun, Source: run.Source,
 		CreatedBy: run.Tags[TagCreatedBy], NotBefore: utc(run.NotBefore), QueuedAt: utc(run.QueuedAt),
 		StartedAt: utc(run.StartedAt), FinishedAt: utc(run.FinishedAt), DurationMs: run.DurationMs,
-		Report: run.Report, Config: run.Config, Metrics: []Metric{}, Steps: []Step{}, Children: []ChildRun{},
+		Report: run.Report, Config: run.Config, Metrics: []Metric{}, Steps: []Step{}, Stages: []Stage{}, Children: []ChildRun{},
 		Artifacts: []Artifact{}, Media: []Media{}, Events: []Event{}, FailedCases: []TestCase{}}
 	if out.Config == nil {
 		out.Config = map[string]string{}
@@ -256,6 +270,10 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		st := run.Steps[k]
 		out.Steps = append(out.Steps, Step{Key: k, Kind: stepKind(k), Phase: st.Phase,
+			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message})
+	}
+	for _, st := range run.Stages {
+		out.Stages = append(out.Stages, Stage{Kind: st.Kind, Name: st.Name, Phase: cmp.Or(st.Phase, "queued"),
 			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message})
 	}
 	if run.LiveView != "" && !out.Finished && s.LiveURL != nil {
@@ -315,7 +333,12 @@ func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
 		s.apiError(w, c, err)
 		return
 	}
-	body, err := client.OpenLogsFrom(r.Context(), ns, id, offset)
+	stage := r.URL.Query().Get("stage")
+	if stage != "" && stage != "fetch" {
+		writeError(w, http.StatusBadRequest, "stage: only fetch has a log of its own")
+		return
+	}
+	body, err := client.OpenStageLogsFrom(r.Context(), ns, id, stage, offset)
 	if err != nil {
 		s.apiError(w, c, err)
 		return

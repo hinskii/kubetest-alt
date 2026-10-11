@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 
@@ -9,6 +9,7 @@ import { admin, finishedRun, server, viewer } from "@/test/server";
 const R = "*/api/v1/clusters/dev/runs/team-a/smoke-abcde";
 const page = "/clusters/dev/runs/team-a/smoke-abcde";
 const region = (name: string | RegExp) => within(screen.getByRole("region", { name }));
+const openTab = (name: RegExp) => userEvent.click(screen.getByRole("tab", { name }));
 
 describe("run page", () => {
   afterEach(() => {
@@ -16,10 +17,61 @@ describe("run page", () => {
     localStorage.clear();
   });
 
-  it("shows the facts, steps, failed cases, gallery and artifacts of a finished run", async () => {
-    renderRoute(page);
+  it("shows a finished run: the log first, the rest in tabs with counts", async () => {
+    const { router } = renderRoute(page);
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("smoke-abcde");
     expect(screen.getByText("1 of 2 workers failed")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html",
+    );
+    expect(screen.getByRole("link", { name: "Compare with another run" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/runs/team-a/smoke-abcde/compare",
+    );
+    expect(screen.queryByRole("button", { name: "Abort run" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
+      "Log",
+      "Report",
+      "Tests2",
+      "Artifacts2",
+      "Steps2",
+      "Details",
+      "Events",
+    ]);
+    expect(screen.getByRole("tab", { name: "Log" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByText(/hello/)).toBeInTheDocument();
+    expect(region(/^Log/).getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/runs/team-a/smoke-abcde/logs.txt",
+    );
+
+    await openTab(/^Report/);
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "report" }));
+    expect(screen.getByTitle("Report of smoke-abcde")).toHaveAttribute("sandbox", "allow-scripts");
+    expect(region("Report").getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html?download=1",
+    );
+
+    await openTab(/^Tests/);
+    expect(region(/Failed tests/).getByText(/1 of 5 · 3 passed, 0 skipped/)).toBeInTheDocument();
+    expect(region(/Failed tests/).getByRole("link", { name: "checkout" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/tests/team-a/smoke/cases/history?case=shop+%E2%80%BA+checkout",
+    );
+
+    await openTab(/^Artifacts/);
+    expect(region(/Screenshots/).getByRole("img")).toHaveAttribute(
+      "src",
+      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/shots/pay%20(failed).png",
+    );
+    expect(region("Artifacts").getAllByRole("link", { name: "download" })).toHaveLength(2);
+
+    await openTab(/^Steps/);
+    expect(region("Steps").getAllByRole("row")[1]!.textContent).toContain("worker-2");
+
+    await openTab(/^Details/);
     const facts = within(screen.getByRole("region", { name: "Facts" }));
     expect(facts.getByRole("link", { name: "smoke" })).toHaveAttribute(
       "href",
@@ -32,41 +84,12 @@ describe("run page", () => {
     );
     expect(facts.getByText("3 passed · 2 failed · 0 skipped · 5 total")).toBeInTheDocument();
     expect(facts.getByText("120.568")).toBeInTheDocument();
+  });
 
-    expect(screen.getByRole("link", { name: "Open report" })).toHaveAttribute(
-      "href",
-      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html",
-    );
-    expect(screen.getByRole("link", { name: "Compare with another run" })).toHaveAttribute(
-      "href",
-      "/clusters/dev/runs/team-a/smoke-abcde/compare",
-    );
-    const report = screen.getByTitle("Report of smoke-abcde");
-    expect(report).toHaveAttribute("sandbox", "allow-scripts");
-    expect(region("Report").getByRole("link", { name: "Download" })).toHaveAttribute(
-      "href",
-      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html?download=1",
-    );
-
-    const steps = region("Steps")
-      .getAllByRole("row")
-      .map((r) => r.textContent);
-    expect(steps[1]).toContain("worker-2");
-    expect(region(/Failed tests/).getByRole("link", { name: "checkout" })).toHaveAttribute(
-      "href",
-      "/clusters/dev/tests/team-a/smoke/cases/history?case=shop+%E2%80%BA+checkout",
-    );
-    expect(region(/Screenshots/).getByRole("img")).toHaveAttribute(
-      "src",
-      "/clusters/dev/runs/team-a/smoke-abcde/artifacts/shots/pay%20(failed).png",
-    );
+  it("opens the tab the address names", async () => {
+    renderRoute(`${page}?tab=artifacts`);
+    expect(await screen.findByRole("tab", { name: /^Artifacts/ })).toHaveAttribute("aria-selected", "true");
     expect(region("Artifacts").getAllByRole("link", { name: "download" })).toHaveLength(2);
-    expect(await screen.findByText(/hello/)).toBeInTheDocument();
-    expect(region("Log").getByRole("link", { name: "Download" })).toHaveAttribute(
-      "href",
-      "/clusters/dev/runs/team-a/smoke-abcde/logs.txt",
-    );
-    expect(screen.queryByRole("button", { name: "Abort run" })).not.toBeInTheDocument();
   });
 
   it("lets developers comment a finished run and remove it again", async () => {
@@ -81,7 +104,7 @@ describe("run page", () => {
         return new HttpResponse(null, { status: 204 });
       }),
     );
-    renderRoute(page);
+    renderRoute(`${page}?tab=details`);
     const form = within(await screen.findByRole("form", { name: "Comment" }));
     await userEvent.type(form.getByLabelText("Comment text"), "known flake");
     await userEvent.click(form.getByRole("button", { name: "Save" }));
@@ -192,18 +215,25 @@ describe("run page", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     renderRoute(page);
     expect(await screen.findByRole("status")).toHaveTextContent("Now: BackOff — pulling slowly");
-    expect(screen.getByTitle("Live view of smoke-abcde")).toHaveAttribute("src", "/live/token-1/ui/");
-    expect(screen.queryByTitle("Report of smoke-abcde")).not.toBeInTheDocument();
-    expect(screen.getByText("A comment can be added once the run has finished.")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^Report/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Events/ })).toHaveTextContent("Events2");
     expect(await screen.findByText(/first/)).toBeInTheDocument();
-
     await act(() => vi.advanceTimersByTimeAsync(6_000));
     expect(await screen.findByText(/first\s+second/)).toBeInTheDocument();
     expect(offsets).toContain("6");
+
+    // The live view keeps its first signed link while the run refreshes.
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Live view" }));
+    expect(await screen.findByTitle("Live view of smoke-abcde")).toHaveAttribute("src", "/live/token-1/ui/");
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
     expect(screen.getByTitle("Live view of smoke-abcde")).toHaveAttribute("src", "/live/token-1/ui/");
     vi.useRealTimers();
 
-    const abort = within(screen.getByRole("form", { name: "Abort" }));
+    await openTab(/^Details/);
+    expect(screen.getByText("A comment can be added once the run has finished.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Abort run" }));
+    const abort = within(await screen.findByRole("form", { name: "Abort" }));
     await userEvent.type(abort.getByLabelText("Reason"), "wrong env");
     await userEvent.click(abort.getByRole("button", { name: "Abort run" }));
     expect(await screen.findByText("Abort requested.")).toBeInTheDocument();
@@ -212,7 +242,7 @@ describe("run page", () => {
 
   it("inverts tool frames in the dark theme unless original colours are chosen", async () => {
     setTheme("dark");
-    renderRoute(page);
+    renderRoute(`${page}?tab=report`);
     const frame = (await screen.findByTitle("Report of smoke-abcde")).parentElement!;
     expect(frame).not.toHaveAttribute("data-original");
     await userEvent.click(screen.getByRole("button", { name: "Original colors" }));
@@ -247,5 +277,55 @@ describe("run page", () => {
     );
     renderRoute(page);
     expect(await screen.findByRole("alert")).toHaveTextContent('run "smoke-abcde" not found');
+  });
+});
+
+describe("the run's stages", () => {
+  const page = "/clusters/dev/runs/team-a/smoke-abcde";
+  const log = `k6 output
+done
+--- kubetest: collecting results ---
+uploaded 3 artifacts
+`;
+
+  it("shows the tool's part of the log by default, and each stage's on a click", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get(`${R}/log`, ({ request }) => {
+        const stage = new URL(request.url).searchParams.get("stage") ?? "";
+        asked.push(stage);
+        return HttpResponse.text(stage === "fetch" ? "Cloning into '/data/repo'...\n" : log, {
+          headers: { "X-Run-Phase": "failed", "X-Next-Offset": "99" },
+        });
+      }),
+    );
+    const { router } = renderRoute(page);
+    const logPanel = await screen.findByRole("region", { name: "Log · Run k6" });
+    expect(await within(logPanel).findByText(/k6 output/)).toBeInTheDocument();
+    expect(within(logPanel).queryByText(/uploaded 3 artifacts/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show the log of Collect results" }));
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "log", stage: "collect" }));
+    const collect = await screen.findByRole("region", { name: "Log · Collect results" });
+    expect(await within(collect).findByText(/uploaded 3 artifacts/)).toBeInTheDocument();
+    expect(within(collect).queryByText(/k6 output/)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Show the log of Clone git repository" }));
+    expect(
+      await within(await screen.findByRole("region", { name: "Log · Clone git repository" })).findByText(
+        /Cloning into/,
+      ),
+    ).toBeInTheDocument();
+    expect(asked).toContain("fetch");
+    expect(screen.getByRole("button", { name: "Show the log of Clone git repository" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("shows what Kubernetes said for the queue", async () => {
+    renderRoute(`${page}?stage=queue`);
+    const queue = await screen.findByRole("region", { name: "Log · Queued" });
+    expect(within(queue).getByTestId("run-log")).toBeInTheDocument();
   });
 });

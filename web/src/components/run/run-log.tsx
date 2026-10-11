@@ -11,7 +11,7 @@ const FINAL = new Set(["passed", "failed", "error", "aborted"]);
  * useRunLog reads the stored log and, while the run is live, polls for
  * what was added (from the last offset). A phase change refreshes the run.
  */
-export function useRunLog(k: RunKey, live: boolean, phase: string) {
+export function useRunLog(k: RunKey, live: boolean, phase: string, stage?: "fetch") {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
@@ -28,7 +28,7 @@ export function useRunLog(k: RunKey, live: boolean, phase: string) {
     let polling = live;
     const poll = async () => {
       try {
-        const chunk = await runLogChunk(k, offset.current, ctl.signal);
+        const chunk = await runLogChunk(k, offset.current, ctl.signal, stage);
         if (chunk.text) setText((t) => t + chunk.text);
         offset.current = chunk.next;
         setState("ok");
@@ -52,14 +52,46 @@ export function useRunLog(k: RunKey, live: boolean, phase: string) {
     };
     // One poller per run; live only switches it off (finished runs read once).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [k.cluster, k.ns, k.id, live]);
+  }, [k.cluster, k.ns, k.id, live, stage]);
 
   return { text, state, error };
 }
 
-/** RunLog shows the run's log, following the end while you are at the bottom. */
-export function RunLog({ k, live, phase }: { k: RunKey; live: boolean; phase: string }) {
-  const { text, state, error } = useRunLog(k, live, phase);
+/** The line /entry writes where the tool's output ends and collecting begins. */
+export const COLLECT_MARKER = "--- kubetest: collecting results ---";
+
+/**
+ * partOf is the log of one stage: the tool's output (before the marker) or
+ * the collecting of results (after it); the whole log otherwise.
+ */
+export function partOf(text: string, part?: "tool" | "collect"): string {
+  if (!part) return text;
+  const i = text.indexOf(COLLECT_MARKER);
+  if (i < 0) return part === "tool" ? text : "";
+  return part === "tool" ? text.slice(0, i).trimEnd() : text.slice(i + COLLECT_MARKER.length).trimStart();
+}
+
+/**
+ * RunLog shows the run's log — or a stage's (the fetcher's own, or the
+ * tool's or the collecting part of the run's) — following the end while
+ * you are at the bottom.
+ */
+export function RunLog({
+  k,
+  live,
+  phase,
+  stage,
+  part,
+}: {
+  k: RunKey;
+  live: boolean;
+  phase: string;
+  stage?: "fetch";
+  part?: "tool" | "collect";
+}) {
+  const log = useRunLog(k, live, phase, stage);
+  const { state, error } = log;
+  const text = partOf(log.text, part);
   const pre = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
   useLayoutEffect(() => {

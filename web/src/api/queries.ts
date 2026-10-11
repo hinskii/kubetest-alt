@@ -88,13 +88,14 @@ export const runQuery = (k: RunKey) =>
     queryKey: ["clusters", k.cluster, "runs", k.ns, k.id],
     queryFn: async () =>
       unwrap(await api.GET("/api/v1/clusters/{cluster}/runs/{ns}/{id}", { params: runParams(k) })),
-    refetchInterval: (q) => (q.state.data?.finished ? false : 5_000),
+    // Every 2 s while the run goes: its stages (RunFlow) move live.
+    refetchInterval: (q) => (q.state.data?.finished ? false : 2_000),
   });
 
 /** A chunk of a run's log from offset on, with the run's phase. */
-export async function runLogChunk(k: RunKey, offset: number, signal?: AbortSignal) {
+export async function runLogChunk(k: RunKey, offset: number, signal?: AbortSignal, stage?: "fetch") {
   const r = await api.GET("/api/v1/clusters/{cluster}/runs/{ns}/{id}/log", {
-    params: { ...runParams(k), query: { offset } },
+    params: { ...runParams(k), query: stage ? { offset, stage } : { offset } },
     parseAs: "text",
     signal,
   });

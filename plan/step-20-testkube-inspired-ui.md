@@ -34,46 +34,87 @@ before the next.
 
 ---
 
-## 20a — Run drawer
+## 20a — The run as a flow, live
 
-Opening a run from a list slides it in from the right over the list,
-instead of leaving the page. The full run page stays at its own URL.
+Testkube's current dashboard shows a run as its steps laid out left to
+right (Initializing → Clone Git repository → Run test), each a tile with
+its state and time, changing live. Ours knows the same and shows a table
+at best. This part draws it. (It replaces the run drawer this part used
+to be: their dashboard dropped the drawer too; a run opens as its page.)
 
-**Behaviour**
-- A plain left click on a run link opens the drawer. Ctrl/Cmd/Shift/
-  middle click, "open in new tab", direct links and viewports under
-  900 px keep the full page (the link is a normal `<a href>` to it).
-- The drawer is shadcn's Sheet (Radix Dialog: focus moved in and back,
-  `aria-modal`), ~85 % wide. Header: run name, phase, "Open full page", ✕.
-- The address bar shows the run's URL (TanStack Router route masking:
-  the list with `?run=<ns>/<id>` underneath, the run's URL shown), so a
-  copied link opens the full page and a reload does too. Back, Esc, ✕
-  or a click on the backdrop close it; the list keeps its scroll and
-  filters. Forward reopens it.
-- ↑ / ↓ step to the previous / next run of the list it was opened from
-  (e.g. through failures) without closing.
-- Content: the run page's own component (`RunView`, moved out of the
-  route file), same queries — no second rendering path. Log polling and
-  the queued refresh are TanStack Query intervals tied to the component:
-  closing the drawer stops them.
+**Stages of a run (operator)** — `TestRun.status.stages`, an ordered
+list of `{name, kind, phase, startedAt, finishedAt, message}`, kept by
+the reconciler from what it already watches, persisted in the CR (and in
+run history) so a finished run shows them after its pod is gone:
 
-**Actions inside the drawer** (Run again, Abort, Comment, Delete) are
-the run page's mutations: run again / abort / comment stay in the drawer
-(run again opens the new run there), Delete closes it and invalidates
-the list's query.
+| kind | name shown | from |
+|---|---|---|
+| `queue` | Queued | `queuedAt` → the pod's start (Pending, scheduling, pulling) |
+| `fetch` | Clone git repository / Write files / Fetch tarball (by source; absent with no content) | the `content-fetcher` init container's start/finish |
+| `run` | Run `<tool>` (the tool label, else the image) | the wrapper container's start → start + the tool's duration (the wrapper's result) |
+| `collect` | Collect results | the tool's end → the container's end (scraping, uploads, result) |
 
-**Run links that open the drawer:** a Test's run history, a run's child
-runs, schedules, test-case history, analytics, run compare, cleanup
-preview, the tests list's last run (and later 20b's recent marks, 20c's
-bars). One `RunLink` component does it, so every list behaves alike.
+Phases are the step phases: queued, running, passed, failed, error,
+skipped. A run that fails ends the stage it was in with the reason as
+the message, for example `fetch` failed "FETCH_ERROR: …" or `queue`
+error "CreateContainerConfigError: secret … not found"; the stages after
+it are skipped.
+
+Composite, parallel and service runs already keep `status.steps`; the
+flow draws those as they are (below), and their own runs have stages.
+
+**Wire:** stages through the kubetest API (`Run.stages`; run history:
+a `stages` JSONB column, migration) and Control Center's `RunDetail`
+(`stages`; and `steps` as today). OpenAPI regenerated.
+
+**UI — `RunFlow` component**
+- Leaf run: tiles left to right joined by dotted connectors, each with a
+  state icon (spinner while running), its name and duration (ticking
+  while running), the message under a failed tile.
+- Composite run: its steps as the tiles, each linking to its child run;
+  parallel workers fan out as a column of tiles; services as a separate
+  lane above.
+- On the run page above the log, live (the run query already polls).
+
+**Test page (with 20c and 20e):** tabs instead of separate pages —
+- *Overview*: the 20c tiles for the last week, then a card for the latest
+  run (name, number, who, started, finished, duration, "Open details &
+  logs") with its `RunFlow`, live while it runs; the run form;
+- *Runs* (history, filters), *Insights* (today's Analytics and Test
+  cases pages as sections), *CLI* (20e), *Settings*.
 
 **Acceptance**
-- Vitest: opening from a list (the address is the run's), ↑/↓, Esc and
-  Back restore the list, modifier clicks aren't intercepted, Run again
-  and Delete, polling stops on close (no further requests in MSW).
-- Playwright: open, step with ↑/↓, Back closes, reload shows the full
-  page, Cmd-click opens a tab.
-- No new chunk: the drawer reuses the run page's.
+- Go: the stage derivation per pod state (queued, fetching, running,
+  collecting, each failure; no content; composite untouched), envtest
+  that a run's stages end up in its status; store migration test.
+- Vitest: `RunFlow` for a running, a passed, a failed-at-fetch, a
+  composite and a parallel run; ticking durations.
+- Playwright: a run's flow goes from running to passed on the e2e
+  cluster.
+
+**Done (first commit):**
+- the operator's stages, live, also while the pod is Pending (fetching);
+- `RunFlow` on the run page and in the Test's latest-run card;
+- **each stage has its log** — a tile click shows it under the stages
+  (`?stage=`):
+  - queue: the run's Kubernetes events;
+  - fetch: the content fetcher's own log, tailed into `stages/fetch/`
+    (flushed every second) and served with `?stage=fetch`;
+  - run / collect: the run's log split at the line `/entry` writes when
+    the tool exits;
+- the fetcher and `/entry` say what they do: repository (never its
+  credentials), auth, sparse paths, commit, files and sizes; exit code,
+  tries, the verdict's source, metrics, artifacts, the result. One
+  stream (stdout), so the lines keep their order;
+- **the run page in tabs** (`?tab=`), with counts: Log, Live view,
+  Report, Tests, Artifacts (with the gallery), Steps / Child runs,
+  Details (facts, parameters, metrics, comment), Events. The header holds
+  the actions (abort is a dialog), and the stages sit above the tabs.
+
+**Left:**
+- stages in run history (a `stages` column);
+- the flow of composite and parallel runs;
+- the Test page's tabs.
 
 ---
 

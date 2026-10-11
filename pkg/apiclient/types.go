@@ -91,6 +91,8 @@ type Run struct {
 	TestCounts *TestCounts           `json:"testCounts,omitempty"`
 	Metrics    map[string]float64    `json:"metrics,omitempty"`
 	Steps      map[string]StepResult `json:"steps,omitempty"`
+	// Stages are a leaf run's course: queued, fetch, run, collect (step 20a).
+	Stages []Stage `json:"stages,omitempty"`
 	// Abort is set once someone (or something) asked the run to stop.
 	Abort *testsv1alpha1.AbortRequest `json:"abort,omitempty"`
 	// NotBefore is when a scheduled run may start (TestRun.spec.notBefore).
@@ -243,6 +245,16 @@ type TestCounts struct {
 
 // StepResult is one composite step (or child) of a Run.
 type StepResult struct {
+	Phase      string     `json:"phase,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Message    string     `json:"message,omitempty"`
+}
+
+// Stage is one part of a leaf run's course (TestRun.status.stages).
+type Stage struct {
+	Kind       string     `json:"kind"`
+	Name       string     `json:"name"`
 	Phase      string     `json:"phase,omitempty"`
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`

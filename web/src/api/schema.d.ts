@@ -712,6 +712,7 @@ export interface components {
             queuedAt?: null | string;
             report?: string;
             source?: string;
+            stages: components["schemas"]["Stage"][];
             /** Format: date-time */
             startedAt?: null | string;
             steps: components["schemas"]["Step"][];
@@ -783,6 +784,17 @@ export interface components {
             /** Format: date-time */
             notBefore: string;
             testRef: string;
+        };
+        Stage: {
+            /** Format: date-time */
+            finishedAt?: null | string;
+            /** @enum {string} */
+            kind: "queue" | "fetch" | "run" | "collect";
+            message?: string;
+            name: string;
+            phase: string;
+            /** Format: date-time */
+            startedAt?: null | string;
         };
         StartedRun: {
             name: string;
@@ -1344,6 +1356,7 @@ export interface operations {
         parameters: {
             query?: {
                 offset?: number;
+                stage?: "fetch";
             };
             header?: never;
             path: {

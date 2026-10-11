@@ -34,11 +34,11 @@ export function Panel({
 
 function Facts({ rows }: { rows: [string, ReactNode][] }) {
   return (
-    <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
+    <dl className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] content-start gap-x-6 gap-y-1.5 text-sm">
       {rows.map(([k, v]) => (
         <div key={k} className="contents">
           <dt className="text-muted-foreground">{k}</dt>
-          <dd className="break-words">{v}</dd>
+          <dd className="min-w-0 [overflow-wrap:anywhere]">{v}</dd>
         </div>
       ))}
     </dl>
@@ -125,16 +125,16 @@ export function RunFacts({ cluster, run }: { cluster: string; run: RunDetail }) 
     ]);
   const config = Object.entries(run.config).sort(([a], [b]) => a.localeCompare(b));
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid items-start gap-6 lg:grid-cols-3">
       <Facts rows={rows} />
       {config.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <h3 className="font-semibold">Parameters</h3>
           <Facts rows={config.map(([k, v]) => [k, <span className="font-mono">{v}</span>])} />
         </div>
       )}
       {run.metrics.length > 0 && (
-        <div className="space-y-1.5">
+        <div className="min-w-0 space-y-1.5">
           <h3 className="font-semibold">Metrics</h3>
           <Facts
             rows={run.metrics.map((m) => [
@@ -328,51 +328,44 @@ export function Artifacts({ cluster, run }: { cluster: string; run: RunDetail })
 
 /** Events: the run's Kubernetes events, open while live or with warnings. */
 export function Events({ run }: { run: RunDetail }) {
-  const warnings = run.events.filter((e) => e.type === "Warning").length;
   return (
-    <details className="bg-card rounded-xl border p-5" open={!run.finished || warnings > 0}>
-      <summary className="cursor-pointer text-lg font-semibold">
-        Kubernetes events{" "}
-        <span className="text-muted-foreground text-sm font-normal">
-          {run.events.length}
-          {warnings > 0 && ` · ${warnings} warning${warnings > 1 ? "s" : ""}`}
-        </span>
-      </summary>
-      <div className="mt-4 space-y-2">
-        {run.eventsError && <p className="text-muted-foreground">Events unavailable: {run.eventsError}</p>}
-        {run.events.length > 0 && (
-          <>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Reason</TableHead>
-                  <TableHead>Object</TableHead>
-                  <TableHead>Message</TableHead>
+    <div className="space-y-2">
+      {run.eventsError && <p className="text-muted-foreground">Events unavailable: {run.eventsError}</p>}
+      {run.events.length > 0 && (
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Reason</TableHead>
+                <TableHead>Object</TableHead>
+                <TableHead>Message</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {run.events.map((e, i) => (
+                <TableRow key={i} className={cn(e.type === "Warning" && "bg-warning-soft text-warning")}>
+                  <TableCell className="text-muted-foreground">{when(e.time)}</TableCell>
+                  <TableCell>
+                    <strong>{e.reason}</strong>
+                    {e.count && e.count > 1 ? (
+                      <span className="text-muted-foreground"> ×{e.count}</span>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{e.object}</TableCell>
+                  <TableCell className="whitespace-normal">{e.message}</TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {run.events.map((e, i) => (
-                  <TableRow key={i} className={cn(e.type === "Warning" && "bg-warning-soft text-warning")}>
-                    <TableCell className="text-muted-foreground">{when(e.time)}</TableCell>
-                    <TableCell>
-                      <strong>{e.reason}</strong>
-                      {e.count && e.count > 1 ? (
-                        <span className="text-muted-foreground"> ×{e.count}</span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{e.object}</TableCell>
-                    <TableCell className="whitespace-normal">{e.message}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="text-muted-foreground text-xs">
-              From Kubernetes, which keeps events for about an hour.
-            </p>
-          </>
-        )}
-      </div>
-    </details>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="text-muted-foreground text-xs">
+            From Kubernetes, which keeps events for about an hour.
+          </p>
+        </>
+      )}
+      {!run.eventsError && run.events.length === 0 && (
+        <p className="text-muted-foreground">No Kubernetes events (they are kept for about an hour).</p>
+      )}
+    </div>
   );
 }

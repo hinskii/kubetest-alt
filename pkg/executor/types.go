@@ -196,6 +196,10 @@ type ExecutionResult struct {
 	// scraped no JUnit XML.
 	TestCases []TestCase `json:"testCases,omitempty"`
 
+	// ToolFinishedAt is when the tool (its last try) exited, RFC 3339:
+	// the run's "collect results" stage (scrape, uploads) starts there.
+	ToolFinishedAt string `json:"toolFinishedAt,omitempty"`
+
 	// Attempts lists every try when the run was retried (Retry.Count > 0
 	// and the first try wasn't passed); the last entry is the verdict
 	// above. Empty for a single try.
@@ -277,6 +281,11 @@ type StepResult struct {
 	StartedAt  string `json:"startedAt,omitempty"`
 	FinishedAt string `json:"finishedAt,omitempty"`
 }
+
+// CollectMarker is the log line /entry writes when the tool has exited and
+// it starts collecting results (verdict, metrics, artifacts, uploads):
+// where the log's "collect results" stage begins (step 20a).
+const CollectMarker = "--- kubetest: collecting results ---"
 
 // Phase values written to result.json. Must match testsv1alpha1.Phase strings
 // (the operator maps these into TestRun status directly).

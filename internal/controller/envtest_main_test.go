@@ -119,6 +119,13 @@ func (r *RecordingLogRegistry) EnsureTailer(_ context.Context, id string, keys s
 	return nil
 }
 
+func (r *RecordingLogRegistry) EnsureContainerTailer(_ context.Context, id string, keys storage.RunKeys, ns, pod, _ string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, LogRegistryCall{Kind: "ensure-container", ID: id, Keys: keys, Namespace: ns, PodName: pod})
+	return nil
+}
+
 func (r *RecordingLogRegistry) StopTailer(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

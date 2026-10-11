@@ -265,6 +265,44 @@
           "source": {
             "type": "string"
           },
+          "stages": {
+            "items": {
+              "properties": {
+                "finishedAt": {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "queue",
+                    "fetch",
+                    "run",
+                    "collect"
+                  ],
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "phase": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "format": "date-time",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
           "startedAt": {
             "format": "date-time",
             "type": "string"
@@ -1404,6 +1442,15 @@
             "description": "Bytes to skip (default 0).",
             "in": "query",
             "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "fetch: the content fetcher's log instead of the run's.",
+            "in": "query",
+            "name": "stage",
             "required": false,
             "schema": {
               "type": "string"

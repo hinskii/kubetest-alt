@@ -3410,6 +3410,56 @@ spec:
                   ResolvedSpec is a JSON snapshot of the Test spec taken at run start.
                   Historical runs remain interpretable after the Test is edited (§15.5).
                 type: string
+              stages:
+                description: |-
+                  Stages are a leaf run's own course, in order: queued, fetching the
+                  content, running the tool, collecting results (step 20a). Kept by
+                  the reconciler from the pod, so they survive the pod.
+                items:
+                  description: Stage is one part of a leaf run's course (TestRunStatus.Stages).
+                  properties:
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    kind:
+                      description: StageKind is what a stage of a run does.
+                      enum:
+                      - queue
+                      - fetch
+                      - run
+                      - collect
+                      type: string
+                    message:
+                      description: Message says why a stage failed.
+                      type: string
+                    name:
+                      description: 'Name is what the UI shows: "Clone git repository",
+                        "Run k6", …'
+                      type: string
+                    phase:
+                      description: |-
+                        StepPhase is the enum for StepResult.Phase. Kept as a separate type
+                        so we can add "skipped" without widening the run-level Phase enum
+                        on TestRun.status.phase (that field's CRD schema stays untouched
+                        across step 17 per plan). Values mirror Phase 1:1 plus "skipped".
+                      enum:
+                      - queued
+                      - running
+                      - paused
+                      - passed
+                      - failed
+                      - aborted
+                      - error
+                      - skipped
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                  required:
+                  - kind
+                  - name
+                  type: object
+                type: array
               startedAt:
                 format: date-time
                 type: string

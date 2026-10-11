@@ -184,6 +184,10 @@ type LogRegistry interface {
 	// chunks. Called on pod Running (may fire multiple times).
 	EnsureTailer(ctx context.Context, id string, keys storage.RunKeys, namespace, podName string) error
 
+	// EnsureContainerTailer is EnsureTailer for one container of the pod
+	// (the content fetcher's init container: the fetch stage's log).
+	EnsureContainerTailer(ctx context.Context, id string, keys storage.RunKeys, namespace, podName, container string) error
+
 	// StopTailer stops and removes the tailer for id. No-op if absent.
 	// Called on terminal transitions and finalize.
 	StopTailer(id string)
@@ -747,7 +751,9 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 	// for ImagePullBackOff / OOMKilled since Job status alone doesn't
 	// surface those.
 	pod, _ := r.findPodForJob(ctx, job)
+	r.ensureFetchTailer(ctx, run, pod)
 	if infra := AnalyzePod(pod, r.Now().Time, r.unschedulableTimeout()); infra.Reason != "" {
+		run.Status.Stages = r.stagesNow(run, pod, nil)
 		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseError,
 			infra.Reason, infra.Message, job)
 	}
@@ -776,9 +782,18 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 		// Fold scraper output (metrics, JUnit counts, artifact refs)
 		// into TestRun.Status before the terminal transition writes it.
 		applyRunResultToStatus(run, result)
+		run.Status.Stages = r.stagesNow(run, pod, result)
 		return r.terminalAndDeleteJob(ctx, run, result.Phase, "", result.ErrorMessage, job)
 
 	case JobStillRunning:
+		// The run's course, live — also while the pod is still Pending
+		// (the content fetcher runs as an init container).
+		if stages := r.stagesNow(run, pod, nil); pod != nil && !sameStages(stages, run.Status.Stages) {
+			run.Status.Stages = stages
+			if err := r.Status().Update(ctx, run); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		if IsPodRunning(pod) {
 			// Start log tail on first Running observation. EnsureTailer is
 			// idempotent, so subsequent reconciles on the same running pod
@@ -848,6 +863,7 @@ func (r *TestRunReconciler) terminalAndDeleteJob(ctx context.Context, run *tests
 	r.dispatchWebhooks(ctx, run)
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(tailerID(run))
+		r.LogRegistry.StopTailer(fetchTailerID(run))
 	}
 	if job != nil {
 		if err := deleteJobBackground(ctx, r.Client, job); err != nil {
@@ -1032,6 +1048,9 @@ func (r *TestRunReconciler) transitionTerminal(ctx context.Context, run *testsv1
 		run.Status.Message = reason
 	}
 	now := r.Now()
+	if len(run.Status.Stages) > 0 {
+		run.Status.Stages = finishStages(run.Status.Stages, phase, run.Status.Message, now)
+	}
 	if run.Status.StartedAt == nil {
 		run.Status.StartedAt = &now
 	}
@@ -1193,6 +1212,7 @@ func (r *TestRunReconciler) finalize(ctx context.Context, run *testsv1alpha1.Tes
 	}
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(tailerID(run))
+		r.LogRegistry.StopTailer(fetchTailerID(run))
 	}
 	// Drop the persisted-set entry so a future TestRun with the same name
 	// starts fresh, and the map stays bounded as runs are deleted. Reconcile's
