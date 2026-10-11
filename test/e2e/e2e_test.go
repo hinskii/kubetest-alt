@@ -98,9 +98,9 @@ func newClient(t *testing.T) client.Client {
 	return c
 }
 
-// TestE2E is the umbrella. Each sub-test is one plan scenario; we run
-// them serially so cluster state is deterministic + per-scenario
-// timing lands in `go test -v` output. Total budget from the plan: 15
+// TestE2E is the umbrella. Each sub-test is one plan scenario; they run
+// in parallel (each owns its objects) and per-scenario timing lands in
+// `go test -v` output. Total budget from the plan: 15
 // min. Individual timings emitted via t.Log for the report.
 func TestE2E(t *testing.T) {
 	if os.Getenv("SKIP_E2E") != "" {
@@ -119,75 +119,92 @@ func TestE2E(t *testing.T) {
 	// re-parsing per test.
 	applyKustomize(t, "config/samples/tools/", workloadNS)
 
-	t.Run("Scenario1_K6_Passing", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=1 tool=k6 duration=%s", time.Since(start)) }()
-		scenarioK6Passing(t, ctx, c)
-	})
-	t.Run("Scenario2_JMeter_FailingVerdictFromJTL", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=2 tool=jmeter duration=%s", time.Since(start)) }()
-		scenarioJMeterFailing(t, ctx, c)
-	})
-	t.Run("Scenario3_ContentFetchFailure", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=3 kind=content-fetch duration=%s", time.Since(start)) }()
-		scenarioContentFetchFail(t, ctx, c)
-	})
-	t.Run("Scenario4_GitOpsGuard409", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=4 kind=gitops-guard duration=%s", time.Since(start)) }()
-		scenarioGitOpsGuard(t, ctx, c)
-	})
-	t.Run("Scenario5_Cron", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=5 kind=cron duration=%s", time.Since(start)) }()
-		scenarioCron(t, ctx, c)
-	})
-	// Step 17: composite Test — smoke→load with skip-on-fail.
-	// Step 1 (smoke) fails via a jmeter plan targeting an .invalid TLD
-	// (verdictFrom:jtl override → failed). Step 2 (load) is condition:
-	// "passed" → gets marked SKIPPED in Status.Steps[s1] without
-	// TestRun.Phase ever taking a "skipped" value. Parent → failed.
-	t.Run("Scenario6_Composite_SkipOnFail", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=6 kind=composite duration=%s", time.Since(start)) }()
-		scenarioCompositeSkipOnFail(t, ctx, c)
-	})
+	// The scenarios run in parallel: each uses its own Tests and runs, and
+	// most of their time is waiting on pods (the cron scenario alone waits
+	// for the next minute). The group returns when all have finished; the
+	// checks after it read cluster-wide state (metrics, the operator's log).
+	t.Run("Scenarios", func(t *testing.T) {
+		t.Run("Scenario1_K6_Passing", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=1 tool=k6 duration=%s", time.Since(start)) }()
+			scenarioK6Passing(t, ctx, c)
+		})
+		t.Run("Scenario2_JMeter_FailingVerdictFromJTL", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=2 tool=jmeter duration=%s", time.Since(start)) }()
+			scenarioJMeterFailing(t, ctx, c)
+		})
+		t.Run("Scenario3_ContentFetchFailure", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=3 kind=content-fetch duration=%s", time.Since(start)) }()
+			scenarioContentFetchFail(t, ctx, c)
+		})
+		t.Run("Scenario4_GitOpsGuard409", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=4 kind=gitops-guard duration=%s", time.Since(start)) }()
+			scenarioGitOpsGuard(t, ctx, c)
+		})
+		t.Run("Scenario5_Cron", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=5 kind=cron duration=%s", time.Since(start)) }()
+			scenarioCron(t, ctx, c)
+		})
+		// Step 17: composite Test — smoke→load with skip-on-fail.
+		// Step 1 (smoke) fails via a jmeter plan targeting an .invalid TLD
+		// (verdictFrom:jtl override → failed). Step 2 (load) is condition:
+		// "passed" → gets marked SKIPPED in Status.Steps[s1] without
+		// TestRun.Phase ever taking a "skipped" value. Parent → failed.
+		t.Run("Scenario6_Composite_SkipOnFail", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=6 kind=composite duration=%s", time.Since(start)) }()
+			scenarioCompositeSkipOnFail(t, ctx, c)
+		})
 
-	// Step 19a: spec.retry — the wrapper tries again inside the same pod.
-	t.Run("Scenario7_RetryPassesOnSecondTry", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=7 kind=retry duration=%s", time.Since(start)) }()
-		scenarioRetry(t, ctx, c)
-	})
+		// Step 19a: spec.retry — the wrapper tries again inside the same pod.
+		t.Run("Scenario7_RetryPassesOnSecondTry", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=7 kind=retry duration=%s", time.Since(start)) }()
+			scenarioRetry(t, ctx, c)
+		})
 
-	// Step 19b: spec.services — a real dependency reached over DNS.
-	t.Run("Scenario8_ServiceReachedByTheTest", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=8 kind=services duration=%s", time.Since(start)) }()
-		scenarioServices(t, ctx, c)
-	})
+		// Step 19b: spec.services — a real dependency reached over DNS.
+		t.Run("Scenario8_ServiceReachedByTheTest", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=8 kind=services duration=%s", time.Since(start)) }()
+			scenarioServices(t, ctx, c)
+		})
 
-	// Step 19c: spec.parallel — one Job per worker, aggregated verdict.
-	t.Run("Scenario9_ParallelMatrix", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=9 kind=parallel duration=%s", time.Since(start)) }()
-		scenarioParallel(t, ctx, c)
-	})
+		// Step 19c: spec.parallel — one Job per worker, aggregated verdict.
+		t.Run("Scenario9_ParallelMatrix", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=9 kind=parallel duration=%s", time.Since(start)) }()
+			scenarioParallel(t, ctx, c)
+		})
 
-	// Post-scenario: /metrics from operator + apiserver. Asserts the
-	// step-14 counters got real events end-to-end.
-	t.Run("Scenario10_ControlCenter", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=10 tool=control-center duration=%s", time.Since(start)) }()
-		scenarioControlCenter(t, ctx, c)
-	})
+		// Post-scenario: /metrics from operator + apiserver. Asserts the
+		// step-14 counters got real events end-to-end.
+		t.Run("Scenario10_ControlCenter", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=10 tool=control-center duration=%s", time.Since(start)) }()
+			scenarioControlCenter(t, ctx, c)
+		})
 
-	t.Run("Scenario11_CLI", func(t *testing.T) {
-		start := time.Now()
-		defer func() { t.Logf("SCENARIO_TIMING scenario=11 tool=cli duration=%s", time.Since(start)) }()
-		scenarioCLI(t, ctx, c)
+		t.Run("Scenario11_CLI", func(t *testing.T) {
+			t.Parallel()
+			start := time.Now()
+			defer func() { t.Logf("SCENARIO_TIMING scenario=11 tool=cli duration=%s", time.Since(start)) }()
+			scenarioCLI(t, ctx, c)
+		})
 	})
 
 	t.Run("APIRequiresToken", func(t *testing.T) {
