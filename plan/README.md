@@ -52,3 +52,4 @@ make test-coverage        # core logic packages (compiler, executor, scraper, ex
 | 19 | step-19-retry-services-parallel.md | Retry, services, parallel workers |
 | 20R | step-20r-react-control-center.md | Control Center in React (Vite, shadcn/ui, TanStack) — before the rest of 20 |
 | 20 | step-20-testkube-inspired-ui.md | What Testkube's dashboard does better; test paths; content/testData |
+| 21 | step-21-faster-ci.md | Faster CI: images built once, no duplicate test runs, caches, parallel e2e — done between R2 and R3 |
