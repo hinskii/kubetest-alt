@@ -13,9 +13,6 @@ export function artifactUrl(c: string, ns: string, id: string, path: string, dow
 
 export const goPage = {
   logs: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/logs.txt`,
-  newTest: (c: string, ns?: string) => `/clusters/${seg(c)}/tests/new` + (ns ? `?namespace=${seg(ns)}` : ""),
-  duplicate: (c: string, ns: string, name: string) =>
-    `/clusters/${seg(c)}/tests/new?namespace=${seg(ns)}&from=${seg(name)}`,
   test: (c: string, ns: string, name: string) => `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(name)}`,
   edit: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/edit`,
 };

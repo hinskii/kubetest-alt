@@ -9,6 +9,9 @@ import { server } from "./server";
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
+// …and what CodeMirror measures text with.
+Range.prototype.getClientRects ??= () => [] as unknown as DOMRectList;
+Range.prototype.getBoundingClientRect ??= () => new DOMRect();
 globalThis.ResizeObserver ??= class {
   observe() {}
   unobserve() {}

@@ -608,6 +608,24 @@
         ],
         "type": "object"
       },
+      "FormError": {
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "error",
+          "errors"
+        ],
+        "type": "object"
+      },
       "GitInfo": {
         "properties": {
           "commit": {
@@ -2744,7 +2762,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/FormError"
                 }
               }
             },
@@ -2846,16 +2864,6 @@
               }
             },
             "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
           }
         },
         "summary": "The Test a form describes, as YAML, with what is wrong — the same build as createTest."
@@ -3060,7 +3068,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Error"
+                  "$ref": "#/components/schemas/FormError"
                 }
               }
             },
@@ -3772,16 +3780,6 @@
               }
             },
             "description": "Not Found"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Unprocessable Entity"
           },
           "502": {
             "content": {

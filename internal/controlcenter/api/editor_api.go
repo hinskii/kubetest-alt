@@ -267,21 +267,21 @@ func (s *Server) build(w http.ResponseWriter, r *http.Request, edit bool) (*edit
 
 // preview answers the editor's live YAML: the Test the form would write —
 // while the form is still incomplete too, with what is missing listed
-// (people fill it in step by step). Only a Test that can't be built at all
-// (broken YAML) is 422. No dry run: that is Check and Create.
+// (people fill it in step by step). A Test that can't be built at all
+// (broken YAML) has no YAML, only its errors; still a 200, as the request
+// itself is fine (browsers log every 4xx). No dry run: that is Check and
+// Create.
 func (s *Server) preview(edit bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		b, _, ok := s.build(w, r, edit)
 		if !ok {
 			return
 		}
-		out, status := Preview{Errors: b.errors, Warnings: b.warnings}, http.StatusOK
-		if b.t == nil {
-			status = http.StatusUnprocessableEntity
-		} else {
+		out := Preview{Errors: b.errors, Warnings: b.warnings}
+		if b.t != nil {
 			out.YAML = ManifestYAML(b.t)
 		}
-		writeJSON(w, status, out)
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 

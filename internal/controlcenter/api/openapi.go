@@ -42,9 +42,11 @@ type route struct {
 	// Out is the success response body (nil: none) with its status.
 	Out    any
 	Status int
-	// Errors are the error statuses it answers with (body: Error).
-	Errors  []int
-	handler http.HandlerFunc
+	// Errors are the error statuses it answers with (body: Error, or
+	// ErrorBodies' for that status).
+	Errors      []int
+	ErrorBodies map[int]any
+	handler     http.HandlerFunc
 }
 
 type clusterParams struct {
@@ -115,11 +117,11 @@ func (s *Server) routes() []route {
 			Out: TemplateList{}, Errors: []int{400, 404}, handler: s.listTemplates},
 		{Method: http.MethodPost, Path: Prefix + "/clusters/{cluster}/tests/preview", ID: "previewTest",
 			Summary: "The Test a form describes, as YAML, with what is wrong — the same build as createTest.",
-			In:      []any{clusterParams{}, TestForm{}}, Out: Preview{}, Errors: []int{400, 404, 422}, handler: s.preview(false)},
+			In:      []any{clusterParams{}, TestForm{}}, Out: Preview{}, Errors: []int{400, 404}, handler: s.preview(false)},
 		{Method: http.MethodPost, Path: Prefix + "/clusters/{cluster}/tests", ID: "createTest", Role: auth.RoleDeveloper,
 			Summary: "Create the form's Test (managed by the GUI), or with dry-run=true check it.",
 			In:      []any{writeParams{}, TestForm{}}, Out: SavedTest{}, Status: http.StatusCreated,
-			Errors: []int{400, 403, 404, 409, 502}, handler: s.write(false)},
+			Errors: []int{400, 403, 404, 409, 502}, ErrorBodies: map[int]any{400: FormError{}}, handler: s.write(false)},
 		{Method: http.MethodGet, Path: Prefix + "/clusters/{cluster}/tests", ID: "listTests",
 			Summary: "Every Test in the cluster, by namespace and name.", In: []any{clusterParams{}},
 			Out: TestList{}, Errors: []int{404, 502}, handler: s.listTests},
@@ -131,11 +133,11 @@ func (s *Server) routes() []route {
 			Out: TestFormOf{}, Errors: []int{404, 502}, handler: s.testForm},
 		{Method: http.MethodPost, Path: testPath + "/preview", ID: "previewTestEdit",
 			Summary: "The edited Test a form describes, as YAML, with what is wrong.", In: []any{testParams{}, TestForm{}},
-			Out: Preview{}, Errors: []int{400, 404, 422, 502}, handler: s.preview(true)},
+			Out: Preview{}, Errors: []int{400, 404, 502}, handler: s.preview(true)},
 		{Method: http.MethodPut, Path: testPath, ID: "updateTest", Role: auth.RoleDeveloper,
 			Summary: "Save the form over a GUI-managed Test (a merge patch, conditional on the form's resourceVersion), or with dry-run=true check it.",
 			In:      []any{writeTestParams{}, TestForm{}}, Out: SavedTest{}, Errors: []int{400, 403, 404, 409, 502},
-			handler: s.write(true)},
+			ErrorBodies: map[int]any{400: FormError{}}, handler: s.write(true)},
 		{Method: http.MethodDelete, Path: testPath, ID: "deleteTest", Role: auth.RoleAdmin,
 			Summary: "Delete a GUI-managed Test; its run history stays.", In: []any{testParams{}},
 			Status: http.StatusNoContent, Errors: []int{403, 404, 409, 502}, handler: s.deleteTest},
@@ -229,7 +231,11 @@ func OpenAPISpec() (*openapi31.Spec, error) {
 		}
 		oc.AddRespStructure(rt.Out, openapi.WithHTTPStatus(status))
 		for _, code := range rt.Errors {
-			oc.AddRespStructure(Error{}, openapi.WithHTTPStatus(code))
+			body, ok := rt.ErrorBodies[code]
+			if !ok {
+				body = Error{}
+			}
+			oc.AddRespStructure(body, openapi.WithHTTPStatus(code))
 		}
 		if err := r.AddOperation(oc); err != nil {
 			return nil, err

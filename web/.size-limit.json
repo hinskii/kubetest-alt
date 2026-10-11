@@ -6,8 +6,16 @@
   },
   {
     "name": "CodeMirror, loaded on demand (brotli)",
-    "path": "../internal/controlcenter/webui/dist/assets/yaml-view-*.js",
+    "path": [
+      "../internal/controlcenter/webui/dist/assets/codemirror-*.js",
+      "../internal/controlcenter/webui/dist/assets/yaml-view-*.js"
+    ],
     "limit": "150 kB"
+  },
+  {
+    "name": "The editor's languages (JS, Python, XML), loaded on demand (brotli)",
+    "path": "../internal/controlcenter/webui/dist/assets/code-editor-*.js",
+    "limit": "60 kB"
   },
   {
     "name": "Analytics with Recharts, loaded on demand (brotli)",
@@ -17,7 +25,7 @@
   {
     "name": "All JavaScript (brotli)",
     "path": "../internal/controlcenter/webui/dist/assets/*.js",
-    "limit": "450 kB"
+    "limit": "500 kB"
   },
   {
     "name": "CSS (brotli)",

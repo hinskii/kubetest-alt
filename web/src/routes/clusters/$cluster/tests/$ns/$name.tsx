@@ -107,7 +107,13 @@ function TestPage() {
         )}
         {canRun && (
           <Button variant="outline" asChild title="A GUI-managed copy, opened in the editor">
-            <a href={goPage.duplicate(k.cluster, k.ns, k.name)}>Duplicate</a>
+            <Link
+              to="/clusters/$cluster/tests/new"
+              params={{ cluster: k.cluster }}
+              search={{ namespace: k.ns, from: k.name }}
+            >
+              Duplicate
+            </Link>
           </Button>
         )}
         {me.data?.can.delete && !t.locked && <DeleteTest k={k} />}

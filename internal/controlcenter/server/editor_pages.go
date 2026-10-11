@@ -91,8 +91,6 @@ type editorData struct {
 	YAMLOnly string
 }
 
-func newTestPath(c string) string { return clusterPath(c) + "/tests/new" }
-
 // templateOptions turns the catalog into wizard choices, with the form's
 // values for the chosen template's parameters.
 func templateOptions(list []testsv1alpha1.TestTemplate, f uiapi.TestForm) []templateOption {
@@ -112,32 +110,6 @@ func templateOptions(list []testsv1alpha1.TestTemplate, f uiapi.TestForm) []temp
 	}
 	slices.SortFunc(out, func(a, b templateOption) int { return strings.Compare(a.Name, b.Name) })
 	return out
-}
-
-// newTestPage: GET /tests/new — the wizard, empty, for a template
-// (?template=), or as a copy of a Test (?from=, Duplicate).
-func (s *Server) newTestPage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	q := r.URL.Query()
-	client := api(r, c)
-	f := uiapi.TestForm{Namespace: strings.TrimSpace(q.Get(fieldNamespace)), Name: strings.TrimSpace(q.Get(fieldName)),
-		Template: q.Get(fieldTemplate), Mode: uiapi.ModeForm, Params: map[string]string{}}
-	data := editorData{Cluster: c.Name, Action: newTestPath(c.Name), Back: clusterPath(c.Name), Step: stepBasics}
-	if from := q.Get("from"); from != "" && f.Namespace != "" {
-		src, err := client.GetTest(r.Context(), f.Namespace, from)
-		if err != nil {
-			s.apiError(w, r, c, err)
-			return
-		}
-		f = s.formOf(r.Context(), client, src, &data)
-		f.Name, f.ResourceVersion = from+"-copy", ""
-		data.Back = testPath(c.Name, src.Namespace, from)
-	}
-	data.Form = f
-	s.renderEditor(w, r, c, client, data)
 }
 
 // formOf fills the editor from an existing Test; Tests the form can't
@@ -181,14 +153,9 @@ func (s *Server) editTestPage(w http.ResponseWriter, r *http.Request) {
 	s.renderEditor(w, r, c, client, data)
 }
 
-// submitNewTest: POST /tests/new.
-func (s *Server) submitNewTest(w http.ResponseWriter, r *http.Request) {
-	s.submitEditor(w, r, false)
-}
-
 // submitEditTest: POST /tests/{ns}/{name}/edit.
 func (s *Server) submitEditTest(w http.ResponseWriter, r *http.Request) {
-	s.submitEditor(w, r, true)
+	s.submitEditor(w, r)
 }
 
 // editorState is a submitted wizard: the form, the page's data, the Test
@@ -204,10 +171,11 @@ type editorState struct {
 	t         *testsv1alpha1.Test
 }
 
-// prepareEditor reads a submitted wizard and builds the Test it
-// describes — shared by every button and by the live YAML, so the preview
-// is what Create would write. false: an error page was written.
-func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request, edit bool) (*editorState, bool) {
+// prepareEditor reads a submitted edit and builds the Test it describes —
+// shared by every button and by the live YAML, so the preview is what Save
+// would write. false: an error page was written. (Creating is the React
+// wizard's, step 20R R4.)
+func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request) (*editorState, bool) {
 	c, ok := s.cluster(w, r)
 	if !ok {
 		return nil, false
@@ -217,19 +185,16 @@ func (s *Server) prepareEditor(w http.ResponseWriter, r *http.Request, edit bool
 		return nil, false
 	}
 	st := &editorState{c: c, client: api(r, c), f: formFromValues(r.PostForm), base: &testsv1alpha1.Test{}}
-	st.data = editorData{Cluster: c.Name, Edit: edit, Action: newTestPath(c.Name), Back: clusterPath(c.Name), Step: stepReview}
-	if edit {
-		ns, name := r.PathValue("ns"), r.PathValue("name")
-		current, err := st.client.GetTest(r.Context(), ns, name)
-		if err != nil {
-			s.apiError(w, r, c, err)
-			return nil, false
-		}
-		st.base = current
-		st.f.Namespace, st.f.Name = ns, name
-		st.data.Action, st.data.Back = testPath(c.Name, ns, name)+"/edit", testPath(c.Name, ns, name)
-		st.data.YAMLOnly = uiapi.FormUnsupported(current)
+	ns, name := r.PathValue("ns"), r.PathValue("name")
+	current, err := st.client.GetTest(r.Context(), ns, name)
+	if err != nil {
+		s.apiError(w, r, c, err)
+		return nil, false
 	}
+	st.base = current
+	st.f.Namespace, st.f.Name = ns, name
+	st.data = editorData{Cluster: c.Name, Edit: true, Action: testPath(c.Name, ns, name) + "/edit",
+		Back: testPath(c.Name, ns, name), Step: stepReview, YAMLOnly: uiapi.FormUnsupported(current)}
 	if st.f.Mode == uiapi.ModeYAML {
 		if st.t, st.data.Errors = uiapi.ParseManifest(st.f.YAML, st.base); st.t != nil {
 			st.f.Namespace = st.t.Namespace
@@ -259,8 +224,8 @@ type yamlPanel struct {
 // is missing listed under it (people fill it in step by step). Only a
 // Test that can't be built at all (broken YAML) is 422, and the page keeps
 // the last YAML. No dry run: that stays on Create.
-func (s *Server) editorYAML(w http.ResponseWriter, r *http.Request, edit bool) {
-	st, ok := s.prepareEditor(w, r, edit)
+func (s *Server) editorYAML(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.prepareEditor(w, r)
 	if !ok {
 		return
 	}
@@ -275,16 +240,13 @@ func (s *Server) editorYAML(w http.ResponseWriter, r *http.Request, edit bool) {
 	}
 }
 
-// newTestYAML: POST /tests/new/yaml.
-func (s *Server) newTestYAML(w http.ResponseWriter, r *http.Request) { s.editorYAML(w, r, false) }
-
 // editTestYAML: POST /tests/{ns}/{name}/edit/yaml.
-func (s *Server) editTestYAML(w http.ResponseWriter, r *http.Request) { s.editorYAML(w, r, true) }
+func (s *Server) editTestYAML(w http.ResponseWriter, r *http.Request) { s.editorYAML(w, r) }
 
 // submitEditor handles every button of the wizard: preview (dry run),
 // save, download the YAML, switch between form and YAML.
-func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool) {
-	st, ok := s.prepareEditor(w, r, edit)
+func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request) {
+	st, ok := s.prepareEditor(w, r)
 	if !ok {
 		return
 	}
@@ -327,18 +289,15 @@ func (s *Server) submitEditor(w http.ResponseWriter, r *http.Request, edit bool)
 	}
 
 	save := action == actSave
-	written, err := uiapi.WriteTest(r.Context(), client, edit, base, t, f.ResourceVersion, !save)
+	written, err := uiapi.WriteTest(r.Context(), client, true, base, t, f.ResourceVersion, !save)
 	switch {
 	case err != nil:
 		data.CheckErr, data.SaveFailed = messageOf(err), save
-		if edit && apiclient.IsConflict(err) && strings.Contains(data.CheckErr, "modified") {
+		if apiclient.IsConflict(err) && strings.Contains(data.CheckErr, "modified") {
 			data.CheckErr = "The Test changed since you opened the editor. Reload it to start from the current version."
 		}
-	case save && edit:
-		redirect(w, r, testPath(c.Name, written.Namespace, written.Name), "Test saved.")
-		return
 	case save:
-		redirect(w, r, testPath(c.Name, written.Namespace, written.Name), "Test created.")
+		redirect(w, r, testPath(c.Name, written.Namespace, written.Name), "Test saved.")
 		return
 	default:
 		data.Admitted = true
@@ -354,19 +313,11 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *cluster
 		}
 		data.Templates = templateOptions(list, data.Form)
 	}
-	if !data.Edit {
-		data.Namespaces = uiapi.NamespacesOf(r.Context(), client)
-		data.NamespaceListed = slices.Contains(data.Namespaces, data.Form.Namespace)
-	}
 	// One empty row to add a file to (without JavaScript, too).
 	data.Form.Files = append(slices.Clone(data.Form.Files), uiapi.FileField{})
 	data.Form.TestData = append(slices.Clone(data.Form.TestData), uiapi.TestDataField{})
-	title, crumbs := "New test", clusterCrumbs(c)
-	if data.Edit {
-		title = "Edit " + data.Form.Name
-		crumbs = append(crumbs, views.Crumb{Label: data.Form.Name, Href: data.Back})
-	}
-	s.page(w, r, "editor", title, crumbs, data)
+	crumbs := append(clusterCrumbs(c), views.Crumb{Label: data.Form.Name, Href: data.Back})
+	s.page(w, r, "editor", "Edit "+data.Form.Name, crumbs, data)
 }
 
 // deleteTest: POST /tests/{ns}/{name}/delete (admin). The run history

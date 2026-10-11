@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ClustersClusterIndexRouteImport } from './routes/clusters/$cluster/index'
 import { Route as ClustersClusterSchedulesRouteImport } from './routes/clusters/$cluster/schedules'
+import { Route as ClustersClusterTestsNewRouteImport } from './routes/clusters/$cluster/tests/new'
 import { Route as ClustersClusterRunsNsIdRouteImport } from './routes/clusters/$cluster/runs/$ns/$id'
 import { Route as ClustersClusterTestsNsNameRouteImport } from './routes/clusters/$cluster/tests/$ns/$name'
 import { Route as ClustersClusterRunsNsIdCompareRouteImport } from './routes/clusters/$cluster/runs/$ns/$id_.compare'
@@ -36,6 +37,11 @@ const ClustersClusterSchedulesRoute =
     path: '/clusters/$cluster/schedules',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ClustersClusterTestsNewRoute = ClustersClusterTestsNewRouteImport.update({
+  id: '/clusters/$cluster/tests/new',
+  path: '/clusters/$cluster/tests/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ClustersClusterRunsNsIdRoute = ClustersClusterRunsNsIdRouteImport.update({
   id: '/clusters/$cluster/runs/$ns/$id',
   path: '/clusters/$cluster/runs/$ns/$id',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/clusters/$cluster/schedules': typeof ClustersClusterSchedulesRoute
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/new': typeof ClustersClusterTestsNewRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
   '/clusters/$cluster/runs/$ns/$id/compare': typeof ClustersClusterRunsNsIdCompareRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/clusters/$cluster/schedules': typeof ClustersClusterSchedulesRoute
   '/clusters/$cluster': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/new': typeof ClustersClusterTestsNewRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
   '/clusters/$cluster/runs/$ns/$id/compare': typeof ClustersClusterRunsNsIdCompareRoute
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/clusters/$cluster/schedules': typeof ClustersClusterSchedulesRoute
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/new': typeof ClustersClusterTestsNewRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
   '/clusters/$cluster/runs/$ns/$id_/compare': typeof ClustersClusterRunsNsIdCompareRoute
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/'
     | '/clusters/$cluster/schedules'
     | '/clusters/$cluster/'
+    | '/clusters/$cluster/tests/new'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
     | '/clusters/$cluster/runs/$ns/$id/compare'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/'
     | '/clusters/$cluster/schedules'
     | '/clusters/$cluster'
+    | '/clusters/$cluster/tests/new'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
     | '/clusters/$cluster/runs/$ns/$id/compare'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/'
     | '/clusters/$cluster/schedules'
     | '/clusters/$cluster/'
+    | '/clusters/$cluster/tests/new'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
     | '/clusters/$cluster/runs/$ns/$id_/compare'
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ClustersClusterSchedulesRoute: typeof ClustersClusterSchedulesRoute
   ClustersClusterIndexRoute: typeof ClustersClusterIndexRoute
+  ClustersClusterTestsNewRoute: typeof ClustersClusterTestsNewRoute
   ClustersClusterRunsNsIdRoute: typeof ClustersClusterRunsNsIdRoute
   ClustersClusterTestsNsNameRoute: typeof ClustersClusterTestsNsNameRoute
   ClustersClusterRunsNsIdCompareRoute: typeof ClustersClusterRunsNsIdCompareRoute
@@ -188,6 +201,13 @@ declare module '@tanstack/react-router' {
       path: '/clusters/$cluster/schedules'
       fullPath: '/clusters/$cluster/schedules'
       preLoaderRoute: typeof ClustersClusterSchedulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/clusters/$cluster/tests/new': {
+      id: '/clusters/$cluster/tests/new'
+      path: '/clusters/$cluster/tests/new'
+      fullPath: '/clusters/$cluster/tests/new'
+      preLoaderRoute: typeof ClustersClusterTestsNewRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/clusters/$cluster/runs/$ns/$id': {
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ClustersClusterSchedulesRoute: ClustersClusterSchedulesRoute,
   ClustersClusterIndexRoute: ClustersClusterIndexRoute,
+  ClustersClusterTestsNewRoute: ClustersClusterTestsNewRoute,
   ClustersClusterRunsNsIdRoute: ClustersClusterRunsNsIdRoute,
   ClustersClusterTestsNsNameRoute: ClustersClusterTestsNsNameRoute,
   ClustersClusterRunsNsIdCompareRoute: ClustersClusterRunsNsIdCompareRoute,

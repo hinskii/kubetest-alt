@@ -22,6 +22,21 @@ export default defineConfig({
     outDir: "../internal/controlcenter/webui/dist",
     emptyOutDir: false, // keeps dist/.gitkeep; old hashed files are removed by `make web-build`
     assetsDir: "assets",
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          // CodeMirror's core in one named chunk, shared by the read-only
+          // YAML view and the editor (budgeted in .size-limit.json); the
+          // editor's languages stay in the editor's chunk.
+          groups: [
+            {
+              name: "codemirror",
+              test: /[\\/]node_modules[\\/](@codemirror[\\/](state|view|language|commands|search|autocomplete|lint|lang-yaml)|@lezer[\\/](common|highlight|lr|yaml)|@uiw[\\/]|crelt|style-mod|w3c-keyname)[\\/]/,
+            },
+          ],
+        },
+      },
+    },
   },
   server: {
     port: 5173,

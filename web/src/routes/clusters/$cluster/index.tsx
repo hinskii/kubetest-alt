@@ -14,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { when } from "@/lib/format";
-import { goPage } from "@/lib/paths";
 
 const search = z.object({
   namespace: z.string().optional().catch(undefined),
@@ -60,7 +59,9 @@ function TestsPage() {
         </Button>
         {me.data?.can.run && (
           <Button asChild>
-            <a href={goPage.newTest(cluster, namespace)}>New test</a>
+            <Link to="/clusters/$cluster/tests/new" params={{ cluster }} search={{ namespace }}>
+              New test
+            </Link>
           </Button>
         )}
       </PageHeader>

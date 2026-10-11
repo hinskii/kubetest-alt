@@ -246,7 +246,10 @@ spec:
 	assert.Contains(t, strings.Join(p.Errors, "\n"), "unknown field")
 
 	broken := w.do(t, http.MethodPost, previewAPI, viewer, TestForm{Mode: ModeYAML, YAML: "kind: [unclosed"})
-	assert.Equal(t, http.StatusUnprocessableEntity, broken.Code, "nothing to show: the UI keeps the last YAML")
+	require.Equal(t, http.StatusOK, broken.Code, "an answer, not a failed request: the browser logs those")
+	p = decodeAs[Preview](t, broken)
+	assert.Empty(t, p.YAML, "nothing to show: the UI keeps the last YAML")
+	assert.NotEmpty(t, p.Errors)
 }
 
 func TestEditor_EditAndDuplicate(t *testing.T) {

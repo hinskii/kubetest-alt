@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query";
 
-import { api, unwrap } from "./client";
+import { ApiError, api, unwrap, type TestForm } from "./client";
 
 /** Lists refresh every 10 s while the tab is visible (as the Go pages did). */
 export const REFRESH_MS = 10_000;
@@ -218,3 +218,86 @@ export const comparisonQuery = (k: TestKey, run: string[]) =>
         }),
       ),
   });
+
+export const namespacesQuery = (cluster: string) =>
+  queryOptions({
+    queryKey: ["clusters", cluster, "namespaces"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/clusters/{cluster}/namespaces", { params: { path: { cluster } } })),
+    staleTime: 60_000,
+  });
+
+export const templatesQuery = (cluster: string, namespace: string) =>
+  queryOptions({
+    queryKey: ["clusters", cluster, "templates", namespace],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/templates", {
+          params: { path: { cluster }, query: { namespace } },
+        }),
+      ),
+    staleTime: 60_000,
+  });
+
+export const testFormQuery = (k: TestKey) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "form"],
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/form", { params: testParams(k) })),
+  });
+
+/**
+ * previewTest is the YAML a form describes (the save's own build). A form
+ * that can't be built at all has no YAML, only its errors: the page keeps
+ * its last YAML and shows them.
+ */
+export async function previewTest(cluster: string, form: TestForm, edit?: TestKey, signal?: AbortSignal) {
+  const r = edit
+    ? await api.POST("/api/v1/clusters/{cluster}/tests/{ns}/{name}/preview", {
+        params: testParams(edit),
+        body: form,
+        signal,
+      })
+    : await api.POST("/api/v1/clusters/{cluster}/tests/preview", {
+        params: { path: { cluster } },
+        body: form,
+        signal,
+      });
+  return unwrap(r);
+}
+
+/** FormRefused is a form the API wouldn't save, with every reason. */
+export class FormRefused extends ApiError {
+  constructor(
+    status: number,
+    message: string,
+    readonly errors: string[],
+  ) {
+    super(status, message);
+  }
+}
+
+function refused(r: { error?: unknown; response: Response }): never {
+  const e = r.error as { error?: string; errors?: string[] } | undefined;
+  throw new FormRefused(
+    r.response.status,
+    e?.error ?? r.response.statusText,
+    e?.errors ?? (e?.error ? [e.error] : []),
+  );
+}
+
+export async function createTest(cluster: string, form: TestForm, dryRun = false) {
+  const r = await api.POST("/api/v1/clusters/{cluster}/tests", {
+    params: { path: { cluster }, query: dryRun ? { "dry-run": true } : {} },
+    body: form,
+  });
+  return r.data ?? refused(r);
+}
+
+export async function updateTest(k: TestKey, form: TestForm, dryRun = false) {
+  const r = await api.PUT("/api/v1/clusters/{cluster}/tests/{ns}/{name}", {
+    params: { ...testParams(k), query: dryRun ? { "dry-run": true } : {} },
+    body: form,
+  });
+  return r.data ?? refused(r);
+}

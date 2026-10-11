@@ -148,33 +148,34 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	assert.True(t, clusters[0].Reachable, "Control Center → service proxy → API server: %s", clusters[0].Error)
 
 	// 3. A k6 Test from the catalog template, long enough to watch live,
-	//    made with the wizard: the review is a dry run through the real
-	//    admission webhooks, then the Test is created, managed in the GUI.
-	wizard := url.Values{
-		"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-k6"}, "template": {"k6"},
-		"param.k6.dashboardPeriod": {"1s"},
+	//    made through the wizard's API: the check is a dry run through the
+	//    real admission webhooks, then the Test is created, managed in the
+	//    GUI. (The wizard itself: web/e2e, Playwright.)
+	clusterAPI := ui + "/api/v1/clusters/local"
+	wizard := map[string]any{
+		"mode": "form", "namespace": workloadNS, "name": "e2e-cc-k6", "template": "k6",
+		"params": map[string]string{"dashboardPeriod": "1s"},
 		// Just the inline file: no script parameter — the first file is it.
-		"source": {"inline"}, "file.path": {"live.js"},
-		"file.content": {"import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"},
+		"source": "inline", "files": []map[string]string{{"path": "live.js",
+			"content": "import { sleep } from 'k6';\nexport const options = { vus: 1, duration: '45s' };\nexport default function () { sleep(0.5); }\n"}},
 	}
-	newPage := ccPage(t, ui+"/clusters/local/tests/new?namespace="+workloadNS, ccDeveloper)
-	assert.Contains(t, newPage, `<option value="k6"`, "the catalog of the namespace")
-	wizard.Set("action", "preview")
-	review := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, wizard)
-	reviewBody, _ := io.ReadAll(review.Body)
-	_ = review.Body.Close()
-	require.Contains(t, string(reviewBody), "The API would admit this Test", string(reviewBody))
-	bad := url.Values{"mode": {"form"}, "namespace": {workloadNS}, "name": {"e2e-cc-bad"}, "template": {"k6"},
-		"param.k6.script": {"x.js"},
-		"podAnnotations":  {"x=y"}, "serviceAccount": {"kube-system-admin"}, "action": {"preview"}}
-	refused := ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, bad)
-	refusedBody, _ := io.ReadAll(refused.Body)
-	_ = refused.Body.Close()
-	assert.Contains(t, string(refusedBody), "The API would refuse it", "the webhook's pod policy, before anything exists")
-	wizard.Set("action", "save")
-	resp = ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/new", ccDeveloper, wizard)
+	assert.Contains(t, ccPage(t, clusterAPI+"/templates?namespace="+workloadNS, ccDeveloper), `"name":"k6"`,
+		"the catalog of the namespace")
+	resp = ccJSON(t, http.MethodPost, clusterAPI+"/tests?dry-run=true", ccDeveloper, wizard)
+	checkBody, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
+	require.Equal(t, http.StatusOK, resp.StatusCode, "the API would admit it: %s", checkBody)
+	bad := map[string]any{"mode": "form", "namespace": workloadNS, "name": "e2e-cc-bad", "template": "k6",
+		"params": map[string]string{"script": "x.js"}, "podAnnotations": "x=y", "serviceAccount": "kube-system-admin"}
+	resp = ccJSON(t, http.MethodPost, clusterAPI+"/tests?dry-run=true", ccDeveloper, bad)
+	refusedBody, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	assert.NotEqual(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, string(refusedBody), "is not allowed for test pods",
+		"the webhook's pod policy, before anything exists")
+	resp = ccJSON(t, http.MethodPost, clusterAPI+"/tests", ccDeveloper, wizard)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
 	test := &testsv1alpha1.Test{}
 	require.NoError(t, c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, test))
 	assert.Equal(t, "ui", test.Labels["app.kubernetes.io/managed-by"])

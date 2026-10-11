@@ -30,15 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 )
-
-const newURL = clusterURL + "/tests/new"
 
 func k6Template() *testsv1alpha1.TestTemplate {
 	return &testsv1alpha1.TestTemplate{
@@ -61,92 +58,89 @@ func (w *world) test(t *testing.T, name string) *testsv1alpha1.Test {
 	return &out
 }
 
-func wizardForm(action string) url.Values {
+// The new-test wizard is the React UI's (step 20R R4b) and the build it
+// runs is the api package's (editor_api_test.go); these are the
+// server-rendered edit page's tests until R4c replaces it.
+
+// k6Test is a GUI-managed Test of the k6 template from git; mutate
+// changes it.
+func k6Test(name string, mutate func(*testsv1alpha1.Test)) *testsv1alpha1.Test {
+	t := &testsv1alpha1.Test{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a",
+			Labels: map[string]string{"kubetest.io/tool": "k6", "app.kubernetes.io/managed-by": "ui"}},
+		Spec: testsv1alpha1.TestSpec{
+			Use: []string{"k6"},
+			Content: testsv1alpha1.Content{Git: &testsv1alpha1.GitContent{URI: "https://github.com/org/perf",
+				Revision: "main", Paths: []string{"perf"}}},
+			Config: map[string]testsv1alpha1.Parameter{"script": {Type: "string", Default: "perf/checkout.js"}},
+		},
+	}
+	if mutate != nil {
+		mutate(t)
+	}
+	return t
+}
+
+func editURL(name string) string { return clusterURL + "/tests/team-a/" + name + "/edit" }
+
+// editForm is the edit page's form for k6Test("checkout") as posted.
+func editForm(action, rv string) url.Values {
 	return url.Values{
-		"action": {action}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"checkout"},
-		"template": {"k6"}, "param.k6.script": {""}, "param.k6.vus": {"10"},
+		"action": {action}, "mode": {"form"}, "template": {"k6"}, "resourceVersion": {rv},
+		"param.k6.script": {""}, "param.k6.vus": {"10"},
 		"source": {"git"}, "gitURI": {"https://github.com/org/perf"}, "gitRevision": {"main"},
-		"gitPath":   {"perf/checkout.js"},
-		"gitSecret": {"git-token"},
-		"env":       {"TARGET=https://shop\n"}, "memoryLimit": {"1Gi"},
+		"gitPath": {"perf/checkout.js"}, "gitSecret": {"git-token"},
+		"env": {"TARGET=https://shop\n"}, "memoryLimit": {"1Gi"},
 		"podAnnotations": {"sidecar.istio.io/inject=false"}, "timeout": {"15m"},
 		// One empty file row, as the page always offers.
 		"file.path": {""}, "file.content": {""},
 	}
 }
 
-func TestEditor_NewTestFromTemplate(t *testing.T) {
-	w := newWorld(t, smokeTest(), k6Template())
-
-	page := w.get(t, newURL+"?namespace=team-a", developer)
+func TestEditor_EditAndSave(t *testing.T) {
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	page := w.get(t, editURL("checkout"), developer)
 	require.Equal(t, http.StatusOK, page.Code, page.Body.String())
-	body := page.Body.String()
-	assert.Contains(t, body, `<select name="template" id="tool">`, "the tool is a drop-down list")
-	assert.Contains(t, body, `<option value="k6"`)
-	assert.Contains(t, body, `name="param.k6.vus" value="10"`)
-	assert.Contains(t, body, `<option value="team-a" selected>team-a</option>`, "the namespace from a list")
-	assert.Contains(t, body, `<option value="__other">Other namespace…</option>`, "or typed")
+	assert.Contains(t, page.Body.String(), `<option value="k6" selected`)
+	rv := w.test(t, "checkout").ResourceVersion
 
-	// Review: the YAML for Git and the API's dry run; nothing is created.
-	rec := w.post(t, newURL, developer, wizardForm(actPreview))
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body = rec.Body.String()
+	// Review: the YAML and the API's dry run; nothing is written.
+	body := w.post(t, editURL("checkout"), developer, editForm(actPreview, rv)).Body.String()
 	assert.Contains(t, body, "The API would admit this Test")
-	assert.Contains(t, body, "use:\n    - k6")
-	assert.Contains(t, body, "script:\n      type: string\n      default: perf/checkout.js", "the main path from the path in the repository")
-	assert.Contains(t, body, "paths:\n        - perf\n", "and the sparse checkout: the file's directory")
-	assert.NotContains(t, body, "vus:", "a parameter equal to the template's default stays out")
-	assert.Contains(t, body, "kubetest.io/tool: k6")
-	assert.NotContains(t, body, "managed-by", "the YAML is for Git")
-	err := w.k8s.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "checkout"}, &testsv1alpha1.Test{})
-	assert.True(t, apierrors.IsNotFound(err), "a review creates nothing")
+	assert.Contains(t, body, "memory: 1Gi")
+	assert.Nil(t, w.test(t, "checkout").Spec.Pod, "a review writes nothing")
 
-	rec = w.post(t, newURL, developer, wizardForm(actSave))
+	rec := w.post(t, editURL("checkout"), developer, editForm(actSave, rv))
 	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	assert.Equal(t, clusterURL+"/tests/team-a/checkout?notice=Test+created.", rec.Header().Get("Location"))
+	assert.Equal(t, clusterURL+"/tests/team-a/checkout?notice=Test+saved.", rec.Header().Get("Location"))
 	got := w.test(t, "checkout")
-	assert.Equal(t, "ui", got.Labels["app.kubernetes.io/managed-by"])
-	assert.Equal(t, developer, got.Annotations["kubetest.io/created-by"])
-	assert.Equal(t, []string{"k6"}, got.Spec.Use)
-	assert.Equal(t, "perf/checkout.js", got.Spec.Config["script"].Default)
-	assert.Equal(t, []string{"perf"}, got.Spec.Content.Git.Paths)
-	assert.Equal(t, "string", got.Spec.Config["script"].Type)
-	require.NotNil(t, got.Spec.Content.Git)
 	assert.Equal(t, "git-token", got.Spec.Content.Git.TokenFrom.SecretKeyRef.Name)
-	assert.Equal(t, "token", got.Spec.Content.Git.TokenFrom.SecretKeyRef.Key)
-	assert.Empty(t, got.Spec.Content.Files, "the empty file row is no file")
 	assert.Equal(t, []corev1.EnvVar{{Name: "TARGET", Value: "https://shop"}}, got.Spec.Container.Env)
 	assert.Equal(t, resource.MustParse("1Gi"), got.Spec.Container.Resources.Limits[corev1.ResourceMemory])
 	assert.Equal(t, map[string]string{"sidecar.istio.io/inject": "false"}, got.Spec.Pod.Annotations)
 	assert.Equal(t, 15*time.Minute, got.Spec.Timeout.Duration)
-	assert.Empty(t, got.Spec.Container.Image, "the template's image")
 }
 
 func TestEditor_ErrorsKeepTheForm(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := wizardForm(actSave)
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	form := editForm(actSave, w.test(t, "checkout").ResourceVersion)
 	form.Set("template", "")
-	form.Set("name", "Bad_Name")
 	form.Set("timeout", "soon")
 	form.Set("memoryLimit", "lots")
 	form.Set("podAnnotations", "no-equals-sign")
-	rec := w.post(t, newURL, developer, form)
+	rec := w.post(t, editURL("checkout"), developer, form)
 	require.Equal(t, http.StatusOK, rec.Code)
 	body := rec.Body.String()
-	for _, want := range []string{"Fix these first", "Name: ", "Image: required", "Command or arguments",
+	for _, want := range []string{"Fix these first", "Image: required", "Command or arguments",
 		"Timeout: &#34;soon&#34;", "Memory limit", "Pod annotations"} {
 		assert.Contains(t, body, want)
 	}
-	assert.Contains(t, body, `value="Bad_Name"`, "what was typed stays")
-
-	form = wizardForm(actSave)
-	form.Set("param.k6.vus", "many")
-	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "is not an integer")
+	assert.Contains(t, body, `value="lots"`, "what was typed stays")
 }
 
 func TestEditor_DownloadYAML(t *testing.T) {
-	w := newWorld(t, k6Template())
-	rec := w.post(t, newURL, developer, wizardForm(actDownload))
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	rec := w.post(t, editURL("checkout"), developer, editForm(actDownload, ""))
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, `attachment; filename="checkout.yaml"`, rec.Header().Get("Content-Disposition"))
 	assert.True(t, strings.HasPrefix(rec.Body.String(), "apiVersion: tests.kubetest.io/v1alpha1\nkind: Test\n"), rec.Body.String())
@@ -200,15 +194,15 @@ func TestEditor_EditKeepsWhatTheFormDoesNotCover(t *testing.T) {
 }
 
 func TestEditor_YAMLMode(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := wizardForm(actToYAML)
-	page := w.post(t, newURL, developer, form).Body.String()
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	rv := w.test(t, "checkout").ResourceVersion
+	page := w.post(t, editURL("checkout"), developer, editForm(actToYAML, rv)).Body.String()
 	assert.Contains(t, page, `<textarea name="yaml"`)
 
 	yamlText := `apiVersion: tests.kubetest.io/v1alpha1
 kind: Test
 metadata:
-  name: with-services
+  name: checkout
   namespace: team-a
 spec:
   use: [k6]
@@ -216,38 +210,36 @@ spec:
     db:
       image: postgres:17
 `
-	rec := w.post(t, newURL, developer, url.Values{"action": {actSave}, "mode": {"yaml"}, "yaml": {yamlText}})
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	assert.Equal(t, "postgres:17", w.test(t, "with-services").Spec.Services["db"].Image)
-
 	typo := strings.Replace(yamlText, "use:", "uses:", 1)
-	body := w.post(t, newURL, developer, url.Values{"action": {actPreview}, "mode": {"yaml"}, "yaml": {typo}}).Body.String()
+	body := w.post(t, editURL("checkout"), developer, url.Values{"action": {actPreview}, "mode": {"yaml"}, "yaml": {typo}}).Body.String()
 	assert.Contains(t, body, "unknown field")
 
+	rec := w.post(t, editURL("checkout"), developer, url.Values{"action": {actSave}, "mode": {"yaml"}, "yaml": {yamlText},
+		"resourceVersion": {rv}})
+	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
+	assert.Equal(t, "postgres:17", w.test(t, "checkout").Spec.Services["db"].Image)
+
 	// Back to the form: what the form covers comes back into it.
-	back := w.post(t, newURL, developer, url.Values{"action": {actToForm}, "mode": {"yaml"},
-		"yaml": {strings.Replace(yamlText, "with-services", "again", 1)}}).Body.String()
-	assert.Contains(t, back, `name="name" value="again"`)
+	back := w.post(t, editURL("checkout"), developer, url.Values{"action": {actToForm}, "mode": {"yaml"},
+		"yaml": {yamlText}}).Body.String()
 	assert.Contains(t, back, `<option value="k6" selected`)
+	assert.Contains(t, back, `data-mode="form"`)
 }
 
-func TestEditor_GitOpsTestIsDuplicatedNotEdited(t *testing.T) {
+func TestEditor_GitOpsTestIsNotEdited(t *testing.T) {
 	gitops := smokeTest()
 	gitops.Labels["app.kubernetes.io/managed-by"] = "argocd"
 	w := newWorld(t, gitops, k6Template())
-
-	assert.Equal(t, http.StatusConflict, w.get(t, clusterURL+"/tests/team-a/smoke/edit", developer).Code)
-
-	dup := w.get(t, newURL+"?namespace=team-a&from=smoke", developer).Body.String()
-	assert.Contains(t, dup, `name="name" value="smoke-copy"`)
-	assert.Contains(t, dup, "grafana/k6:1.4.0")
+	assert.Equal(t, http.StatusConflict, w.get(t, editURL("smoke"), developer).Code)
 }
 
 func TestEditor_Roles(t *testing.T) {
 	w := newWorld(t, smokeTest(), k6Template())
 	viewer := "someone@example.com"
-	assert.Equal(t, http.StatusForbidden, w.get(t, newURL, viewer).Code)
-	assert.Equal(t, http.StatusForbidden, w.post(t, newURL, viewer, wizardForm(actSave)).Code)
+	assert.Equal(t, http.StatusForbidden, w.get(t, editURL("smoke"), viewer).Code)
+	assert.Equal(t, http.StatusForbidden, w.post(t, editURL("smoke"), viewer, editForm(actSave, "")).Code)
+	// The new-test page is the UI's; creating needs the role at the API.
+	assert.Equal(t, http.StatusOK, w.get(t, clusterURL+"/tests/new", viewer).Code)
 }
 
 func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
@@ -261,42 +253,18 @@ func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
 	assert.NotContains(t, out, "managed-by")
 }
 
-func TestEditor_InlineFilesNeedNoPath(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := url.Values{"action": {actSave}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"inline"},
-		"template": {"k6"}, "param.k6.script": {""}, "source": {"inline"},
-		"file.path": {"load.js", "/data/users.csv", ""}, "file.content": {"export default function () {}", "id\n1\n", ""}}
-	rec := w.post(t, newURL, developer, form)
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	got := w.test(t, "inline")
-	assert.NotContains(t, got.Spec.Config, "script", "inline: no path in the Test — the first file is the script")
-	assert.Equal(t, []string{"load.js", "data/users.csv"},
-		[]string{got.Spec.Content.Files[0].Path, got.Spec.Content.Files[1].Path}, "paths relative to /data/repo")
-	assert.Nil(t, got.Spec.Content.Git)
-
-	page := w.get(t, clusterURL+"/tests/team-a/inline/edit", developer).Body.String()
+func TestEditor_InlineFiles(t *testing.T) {
+	inline := k6Test("inline", func(t *testsv1alpha1.Test) {
+		t.Spec.Content = testsv1alpha1.Content{Files: []testsv1alpha1.FileContent{{Path: "load.js", Content: "export default function () {}"}}}
+		t.Spec.Config = nil
+	})
+	w := newWorld(t, inline, k6Template())
+	page := w.get(t, editURL("inline"), developer).Body.String()
 	assert.Contains(t, page, `name="file.path" value="load.js"`)
 	assert.Contains(t, page, `name="source" value="inline" checked`)
 
-	// A value the user typed stays; with git the path in the repository.
-	form.Set("name", "typed")
-	form.Set("param.k6.script", "main.js")
-	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	assert.Equal(t, "main.js", w.test(t, "typed").Spec.Config["script"].Default)
-	form.Set("name", "from-git")
-	form.Set("param.k6.script", "")
-	form.Set("source", "git")
-	form.Set("gitURI", "https://github.com/org/perf")
-	form.Set("gitPath", "load/main.js")
-	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	fromGit := w.test(t, "from-git")
-	assert.Equal(t, "load/main.js", fromGit.Spec.Config["script"].Default)
-	assert.Empty(t, fromGit.Spec.Content.Files, "git or inline, never both")
-
-	// No files at all.
-	form = url.Values{"action": {actPreview}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"empty"},
-		"template": {"k6"}, "source": {"inline"}}
-	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "Inline files: add at least one file.")
+	form := url.Values{"action": {actPreview}, "mode": {"form"}, "template": {"k6"}, "source": {"inline"}}
+	assert.Contains(t, w.post(t, editURL("inline"), developer, form).Body.String(), "Inline files: add at least one file.")
 }
 
 func TestEditor_ProjectToolsTakeGitOnly(t *testing.T) {
@@ -308,152 +276,75 @@ func TestEditor_ProjectToolsTakeGitOnly(t *testing.T) {
 			Config: map[string]testsv1alpha1.Parameter{"projectDir": {Type: "string", Path: "directory"}},
 		},
 	}
-	w := newWorld(t, pw)
-	page := w.get(t, newURL+"?namespace=team-a", developer).Body.String()
-	assert.Contains(t, page, `data-main-kind="directory"`)
-	form := url.Values{"action": {actPreview}, "mode": {"form"}, "namespace": {"team-a"}, "name": {"web"},
-		"template": {"playwright"}, "source": {"inline"}, "file.path": {"package.json"}, "file.content": {"{}"}}
-	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "playwright runs a project: its code comes from git")
+	web := k6Test("web", func(t *testsv1alpha1.Test) {
+		t.Spec.Use, t.Spec.Config = []string{"playwright"}, nil
+	})
+	w := newWorld(t, pw, web)
+	assert.Contains(t, w.get(t, editURL("web"), developer).Body.String(), `data-main-kind="directory"`)
+	form := url.Values{"action": {actPreview}, "mode": {"form"}, "template": {"playwright"}, "source": {"inline"},
+		"file.path": {"package.json"}, "file.content": {"{}"}}
+	assert.Contains(t, w.post(t, editURL("web"), developer, form).Body.String(), "playwright runs a project: its code comes from git")
 }
 
 func TestEditor_TestData(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := wizardForm(actSave)
-	form["td.kind"] = []string{"configMap", "secret", "configMap", ""}
-	form["td.name"] = []string{"products-stage", "account", "fixtures", ""}
-	form["td.where"] = []string{"", "files", "dir", ""}
-	form["td.mountPath"] = []string{"", "", "/data/fixtures", ""}
-	form["td.items"] = []string{"", "env=/data/repo/perf/.env", "", ""}
-	rec := w.post(t, newURL, developer, form)
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	assert.Equal(t, []testsv1alpha1.TestDataSource{
-		{ConfigMap: "products-stage"},
-		{Secret: "account", Items: []testsv1alpha1.TestDataItem{{Key: "env", Path: "/data/repo/perf/.env"}}},
-		{ConfigMap: "fixtures", MountPath: "/data/fixtures"},
-	}, w.test(t, "checkout").Spec.Content.TestData)
-
-	page := w.get(t, clusterURL+"/tests/team-a/checkout/edit", developer).Body.String()
+	withData := k6Test("checkout", func(t *testsv1alpha1.Test) {
+		t.Spec.Content.TestData = []testsv1alpha1.TestDataSource{
+			{Secret: "account", Items: []testsv1alpha1.TestDataItem{{Key: "env", Path: "/data/repo/perf/.env"}}}}
+	})
+	w := newWorld(t, withData, k6Template())
+	page := w.get(t, editURL("checkout"), developer).Body.String()
 	assert.Contains(t, page, `name="td.name" value="account"`)
 	assert.Contains(t, page, "env=/data/repo/perf/.env</textarea>")
 
-	bad := wizardForm(actPreview)
+	bad := editForm(actPreview, "")
 	bad["td.name"] = []string{"x"}
 	bad["td.where"] = []string{"files"}
 	bad["td.items"] = []string{"no-path"}
-	assert.Contains(t, w.post(t, newURL, developer, bad).Body.String(), "is not key=/absolute/path")
+	assert.Contains(t, w.post(t, editURL("checkout"), developer, bad).Body.String(), "is not key=/absolute/path")
 }
 
-func TestEditor_GitPathIsRequiredAndStatedOnce(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := wizardForm(actPreview)
-	form.Set("gitPath", "")
-	body := w.post(t, newURL, developer, form).Body.String()
-	assert.Contains(t, body, "Path in the repository: required")
-
-	// Git without the parameter's value or a path: required, with its
-	// description.
-	form = wizardForm(actPreview)
-	form.Set("gitPath", "")
-	k6 := k6Template()
-	k6.Spec.Config["script"] = testsv1alpha1.Parameter{Type: "string", Path: "file", Description: "The k6 script."}
-	w = newWorld(t, k6)
-	assert.Contains(t, w.post(t, newURL, developer, form).Body.String(), "script: required — The k6 script.")
-
-	// A directory is the sparse checkout itself; "." the whole repository.
-	w = newWorld(t, k6Template())
-	form = wizardForm(actSave)
-	form.Set("name", "dir")
-	form.Set("gitPath", "e2e/web/")
-	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	got := w.test(t, "dir")
-	assert.Equal(t, []string{"e2e/web"}, got.Spec.Content.Git.Paths)
-	assert.Equal(t, "e2e/web", got.Spec.Config["script"].Default)
-	form.Set("name", "whole")
-	form.Set("gitPath", ".")
-	require.Equal(t, http.StatusSeeOther, w.post(t, newURL, developer, form).Code)
-	assert.Empty(t, w.test(t, "whole").Spec.Content.Git.Paths, "the whole repository: no sparse checkout")
-
-	// The editor shows the path back once — not again as sparse paths.
-	page := w.get(t, clusterURL+"/tests/team-a/dir/edit", developer).Body.String()
+func TestEditor_GitPathIsStatedOnce(t *testing.T) {
+	dir := k6Test("dir", func(t *testsv1alpha1.Test) {
+		t.Spec.Content.Git.Paths = []string{"e2e/web"}
+		t.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string", Default: "e2e/web"}}
+	})
+	w := newWorld(t, dir, k6Template())
+	page := w.get(t, editURL("dir"), developer).Body.String()
 	assert.Contains(t, page, `name="gitPath" value="e2e/web"`)
 	assert.Contains(t, page, `name="param.k6.script" value=""`, "the parameter follows the path")
 	assert.Contains(t, page, `<textarea name="gitPaths" rows="2" class="mono"></textarea>`)
+
+	form := editForm(actPreview, "")
+	form.Set("gitPath", "")
+	assert.Contains(t, w.post(t, editURL("dir"), developer, form).Body.String(), "Path in the repository: required")
 }
 
 func TestEditor_MainPathOutsideTheCheckoutWarns(t *testing.T) {
-	w := newWorld(t, k6Template())
-	form := wizardForm(actPreview)
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	form := editForm(actPreview, "")
 	form.Set("gitPaths", "perf")
 	form.Set("param.k6.script", "other/x.js")
-	body := w.post(t, newURL, developer, form).Body.String()
+	body := w.post(t, editURL("checkout"), developer, form).Body.String()
 	assert.Contains(t, body, "script is other/x.js, which the sparse checkout (perf) leaves out")
 	assert.Contains(t, body, "The API would admit this Test", "a warning, not an error")
 }
 
 func TestEditor_LiveYAML(t *testing.T) {
-	w := newWorld(t, k6Template())
-	live := newURL + "/yaml"
-	rec := w.post(t, live, developer, wizardForm(actPreview))
+	w := newWorld(t, k6Test("checkout", nil), k6Template())
+	live := editURL("checkout") + "/yaml"
+	rec := w.post(t, live, developer, editForm(actPreview, ""))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	body := rec.Body.String()
 	assert.NotContains(t, body, "<html", "a fragment, not a page")
 	assert.Contains(t, body, `class="chroma"`, "highlighted")
-	assert.Contains(t, body, `<textarea id="yaml-live-raw" hidden readonly>`)
 
-	// The same YAML Create's download gives.
-	dl := w.post(t, newURL, developer, wizardForm(actDownload)).Body.String()
-	assert.Contains(t, body, html.EscapeString(dl), "the preview is what Create writes")
-
-	// Incomplete: the YAML so far, and what is missing under it.
-	bad := wizardForm(actPreview)
-	bad.Set("name", "Bad_Name")
-	rec = w.post(t, live, developer, bad)
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "1 to fill in before it can be created")
-	assert.Contains(t, rec.Body.String(), "yaml-live-raw", "the YAML builds while the form is incomplete")
+	// The same YAML the download gives.
+	dl := w.post(t, editURL("checkout"), developer, editForm(actDownload, "")).Body.String()
+	assert.Contains(t, body, html.EscapeString(dl), "the preview is what Save writes")
 
 	// Broken YAML (YAML mode) can't be built: 422, the page keeps the last.
 	rec = w.post(t, live, developer, url.Values{"mode": {"yaml"}, "yaml": {"kind: [unclosed"}})
 	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code)
 	assert.NotContains(t, rec.Body.String(), "yaml-live-raw")
-
-	// Editing: the same for a Test's edit page; viewers can't.
-	existing := smokeTest()
-	existing.Spec.Use = []string{"k6"}
-	existing.Spec.Config = map[string]testsv1alpha1.Parameter{"script": {Type: "string", Default: "a.js"}}
-	w = newWorld(t, existing, k6Template())
-	form := url.Values{"mode": {"form"}, "template": {"k6"}, "param.k6.script": {"b.js"}}
-	rec = w.post(t, clusterURL+"/tests/team-a/smoke/edit/yaml", developer, form)
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Contains(t, rec.Body.String(), "b.js")
-	assert.Equal(t, http.StatusForbidden, w.post(t, clusterURL+"/tests/team-a/smoke/edit/yaml", "someone@example.com", form).Code)
-}
-
-func TestEditor_NamespaceListAndReload(t *testing.T) {
-	other := k6Template()
-	other.Namespace = "team-b"
-	other.Name = "jmeter"
-	w := newWorld(t, k6Template(), other)
-
-	page := w.get(t, newURL, developer).Body.String()
-	assert.Contains(t, page, `<option value="team-a">team-a</option>`, "namespaces with a catalog are listed")
-	assert.Contains(t, page, `<option value="team-b">team-b</option>`)
-
-	// Choosing another namespace reloads the wizard with its catalog,
-	// keeping what was typed and the step — no checks.
-	form := url.Values{"mode": {"form"}, "namespaceChoice": {"team-b"}, "namespace": {"team-a"},
-		"name": {"kept-name"}, "action": {"reload"}, "step": {"2"}}
-	body := w.post(t, newURL, developer, form).Body.String()
-	assert.Contains(t, body, `<option value="jmeter"`, "team-b's catalog")
-	assert.NotContains(t, body, `<option value="k6"`)
-	assert.Contains(t, body, `value="kept-name"`)
-	assert.Contains(t, body, `data-step="2"`)
-	assert.NotContains(t, body, "Fix these first", "a reload checks nothing")
-
-	// A typed namespace when "Other namespace…" is chosen.
-	form.Set("namespaceChoice", "__other")
-	form.Set("namespace", "brand-new")
-	body = w.post(t, newURL, developer, form).Body.String()
-	assert.Contains(t, body, `<option value="__other" selected>`)
-	assert.Contains(t, body, `name="namespace" value="brand-new"`)
+	assert.Equal(t, http.StatusForbidden, w.post(t, live, "someone@example.com", editForm(actPreview, "")).Code)
 }

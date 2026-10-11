@@ -67,11 +67,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	// React pages (step 20R): the UI's router renders them.
 	mux.Handle("GET /clusters/{cluster}", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}", webui.Index())
-	mux.Handle("GET /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestPage)))
-	mux.Handle("POST /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitNewTest)))
+	mux.Handle("GET /clusters/{cluster}/tests/new", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
-	mux.Handle("POST /clusters/{cluster}/tests/new/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestYAML)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", webui.Index())
