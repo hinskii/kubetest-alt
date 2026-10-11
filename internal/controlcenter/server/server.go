@@ -82,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+webui.AssetsPrefix, webui.Assets())
 	(&uiapi.Server{
 		Clusters: s.Clusters, ProbeTimeout: s.ProbeTimeout, Log: s.Log,
+		LiveURL: func(cluster, ns, run, entry string) string {
+			return s.liveURL(cluster, ns, run, entry, time.Now())
+		},
 		OnProbe: func(cluster string, up bool) {
 			v := 0.0
 			if up {

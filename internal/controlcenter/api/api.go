@@ -46,6 +46,9 @@ type Server struct {
 	ProbeTimeout time.Duration
 	// OnProbe hears every probe's outcome (the cluster_up metric).
 	OnProbe func(cluster string, up bool)
+	// LiveURL signs the link to a run's live UI (the server's /live/
+	// route); nil: runs show no live view.
+	LiveURL func(cluster, namespace, run, entry string) string
 	Log     *slog.Logger
 }
 

@@ -3,8 +3,19 @@
 
 const seg = encodeURIComponent;
 
+const runBase = (c: string, ns: string, id: string) => `/clusters/${seg(c)}/runs/${seg(ns)}/${seg(id)}`;
+
+/** artifactUrl is a run's stored file, served sandboxed by Control Center. */
+export function artifactUrl(c: string, ns: string, id: string, path: string, download = false): string {
+  const p = path.split("/").map(seg).join("/");
+  return `${runBase(c, ns, id)}/artifacts/${p}${download ? "?download=1" : ""}`;
+}
+
 export const goPage = {
-  run: (c: string, ns: string, id: string) => `/clusters/${seg(c)}/runs/${seg(ns)}/${seg(id)}`,
+  logs: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/logs.txt`,
+  compare: (c: string, ns: string, id: string) => `${runBase(c, ns, id)}/compare`,
+  caseHistory: (c: string, ns: string, test: string, key: string) =>
+    `/clusters/${seg(c)}/tests/${seg(ns)}/${seg(test)}/cases/history?case=${seg(key)}`,
   schedules: (c: string) => `/clusters/${seg(c)}/schedules`,
   newTest: (c: string, ns?: string) => `/clusters/${seg(c)}/tests/new` + (ns ? `?namespace=${seg(ns)}` : ""),
   duplicate: (c: string, ns: string, name: string) =>
@@ -15,8 +26,3 @@ export const goPage = {
   analytics: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/analytics`,
   cleanup: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/cleanup`,
 };
-
-/** withNotice adds the notice a page shows on load (as the Go pages do). */
-export function withNotice(path: string, notice: string): string {
-  return `${path}${path.includes("?") ? "&" : "?"}notice=${encodeURIComponent(notice)}`;
-}

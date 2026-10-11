@@ -54,9 +54,10 @@ const (
 
 // Options add to the API server; zero values leave a feature off.
 type Options struct {
-	Store   apiserver.RunReader
-	Deleter apiserver.RunDeleter
-	Cases   apiserver.CaseReader
+	Store     apiserver.RunReader
+	Deleter   apiserver.RunDeleter
+	Commenter apiserver.RunCommenter
+	Cases     apiserver.CaseReader
 }
 
 // Env is the kubetest API server and Control Center's view of it.
@@ -78,7 +79,7 @@ func New(t *testing.T, o Options, objs ...client.Object) *Env {
 	objects := storage.NewFake()
 	api := &apiserver.Server{K8sClient: k8s, Bucket: Bucket,
 		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects,
-		Store: o.Store, Deleter: o.Deleter, Cases: o.Cases}
+		Store: o.Store, Deleter: o.Deleter, Commenter: o.Commenter, Cases: o.Cases}
 
 	mux := http.NewServeMux()
 	mux.Handle(ProxyPath+"/", http.StripPrefix(ProxyPath, api.Handler()))

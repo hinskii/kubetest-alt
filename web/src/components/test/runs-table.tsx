@@ -1,8 +1,9 @@
+import { Link } from "@tanstack/react-router";
+
 import type { RunRow } from "@/api/client";
 import { PhaseBadge } from "@/components/phase-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { duration, shortSha, when } from "@/lib/format";
-import { goPage } from "@/lib/paths";
 
 /** RunsTable is a Test's run history (one page). */
 export function RunsTable({ cluster, ns, runs }: { cluster: string; ns: string; runs: RunRow[] }) {
@@ -25,9 +26,13 @@ export function RunsTable({ cluster, ns, runs }: { cluster: string; ns: string; 
           {runs.map((r) => (
             <TableRow key={r.id}>
               <TableCell>
-                <a className="text-primary font-medium hover:underline" href={goPage.run(cluster, ns, r.id)}>
+                <Link
+                  to="/clusters/$cluster/runs/$ns/$id"
+                  params={{ cluster, ns, id: r.id }}
+                  className="text-primary font-medium hover:underline"
+                >
                   {r.name}
-                </a>
+                </Link>
               </TableCell>
               <TableCell>
                 <PhaseBadge phase={r.phase} />

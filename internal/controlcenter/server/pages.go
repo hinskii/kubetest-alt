@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
 	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
@@ -58,9 +57,6 @@ const (
 	inputText   = "text"
 )
 
-// formComment is the comment form's text field.
-const formComment = "text"
-
 // dispositionInline: the browser shows the file rather than saving it.
 const dispositionInline = "inline"
 
@@ -68,16 +64,6 @@ const dispositionInline = "inline"
 // scripts run in an opaque origin, and only Control Center's own pages
 // may frame it (the run page shows the report).
 const artifactCSP = "sandbox allow-scripts; frame-ancestors 'self'"
-
-// finalPhases are the phases a run never leaves.
-var finalPhases = map[string]bool{
-	string(testsv1alpha1.PhasePassed): true, string(testsv1alpha1.PhaseFailed): true,
-	string(testsv1alpha1.PhaseError): true, string(testsv1alpha1.PhaseAborted): true,
-}
-
-// maxLogPoll bounds one live-log poll response; the page asks again at
-// once while X-More says there is more.
-const maxLogPoll = 1 << 20
 
 // routes registers the cluster pages on mux. Mutations need a role.
 func (s *Server) routes(mux *http.ServeMux) {
@@ -97,15 +83,11 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.cleanupRuns)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
-	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}", s.runPage)
+	mux.Handle("GET /clusters/{cluster}/runs/{ns}/{id}", webui.Index())
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/compare", s.compareRuns)
-	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/log", s.runLogPoll)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/logs.txt", s.runLogDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}/artifacts/{path...}", s.runArtifact)
 	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/abort", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.abortRun)))
-	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/rerun", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.rerunRun)))
-	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/comment", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.commentRun)))
-	mux.Handle("POST /clusters/{cluster}/runs/{ns}/{id}/delete", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.deleteRun)))
 }
 
 // --- paths -------------------------------------------------------------------
@@ -221,218 +203,6 @@ func paramsOf(spec *testsv1alpha1.TestSpec) []param {
 	return out
 }
 
-// rerunRun starts the run's Test again with the parameters that run used
-// (its effective config from run history, so it works after the TestRun
-// left the cluster). Parameters the Test no longer has are dropped;
-// values equal to today's defaults are left to the default.
-func (s *Server) rerunRun(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	back := runPath(c.Name, ns, id)
-	client := api(r, c)
-	old, err := client.GetRun(r.Context(), ns, id)
-	if err != nil {
-		redirect(w, r, back, "Could not read the run: "+messageOf(err))
-		return
-	}
-	t, err := client.GetResolvedTest(r.Context(), ns, old.TestRef)
-	if err != nil {
-		if apiclient.IsNotFound(err) {
-			redirect(w, r, back, fmt.Sprintf("Test %s no longer exists.", old.TestRef))
-			return
-		}
-		redirect(w, r, back, "Could not read the Test: "+messageOf(err))
-		return
-	}
-	overrides := map[string]string{}
-	for _, p := range paramsOf(t.Spec) {
-		v, had := old.Config[p.Name]
-		switch {
-		case had && v != p.Default:
-			overrides[p.Name] = v
-		case !had && p.Required:
-			redirect(w, r, back, fmt.Sprintf("The Test now requires parameter %s — start it from the Test page.", p.Name))
-			return
-		}
-	}
-	run := &testsv1alpha1.TestRun{Spec: testsv1alpha1.TestRunSpec{TestRef: old.TestRef, Config: overrides}}
-	run.GenerateName = uiapi.GeneratePrefix(old.TestRef)
-	created, err := client.CreateRun(r.Context(), ns, run)
-	if err != nil {
-		redirect(w, r, back, "Could not start the run: "+messageOf(err))
-		return
-	}
-	redirect(w, r, runPath(c.Name, ns, created.Name), "Run started again with the parameters of "+old.Name+".")
-}
-
-// --- run page ----------------------------------------------------------------------
-
-type stepRow struct {
-	Key, Kind string
-	Step      apiclient.StepResult
-}
-
-type runData struct {
-	Cluster      string
-	Run          *apiclient.Run
-	Steps        []stepRow
-	Artifacts    []apiclient.Artifact
-	ArtifactsErr string
-	// FailedCases are the run's failed and errored JUnit test cases
-	// (finished runs that reached run history).
-	FailedCases []apiclient.TestCase
-	// Media are the screenshots and videos among the artifacts;
-	// MoreMedia counts those past the gallery's limit.
-	Media     []mediaItem
-	MoreMedia int
-	Live      bool
-	Path      string
-	// LiveViewURL is the tool's live UI (spec.liveView) while the run
-	// isn't finished, by signed link.
-	LiveViewURL string
-	// Events are Kubernetes events of the run's objects (about an hour
-	// back); Activity is the newest while the run isn't finished — why a
-	// queued run waits ("Pulling image …").
-	Events    []apiclient.RunEvent
-	EventsErr string
-	Activity  *apiclient.RunEvent
-	Warnings  int
-	// Children are a composite run's child runs.
-	Children []apiclient.Run
-}
-
-func stepKind(key string) string {
-	switch {
-	case strings.HasPrefix(key, "attempt-"):
-		return "Try"
-	case strings.HasPrefix(key, "worker-"):
-		return "Worker"
-	}
-	return "Step"
-}
-
-func (s *Server) runPage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	client := api(r, c)
-	run, err := client.GetRun(r.Context(), ns, id)
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	data := runData{Cluster: c.Name, Run: run, Live: !finished(run.Phase), Path: runPath(c.Name, ns, id)}
-	if run.LiveView != "" && !finished(run.Phase) {
-		data.LiveViewURL = s.liveURL(c.Name, ns, views.RunID(*run), run.LiveView, time.Now())
-	}
-	for _, key := range sortedStepKeys(run.Steps) {
-		data.Steps = append(data.Steps, stepRow{Key: key, Kind: stepKind(key), Step: run.Steps[key]})
-	}
-	if arts, err := client.ListArtifacts(r.Context(), ns, id); err != nil {
-		data.ArtifactsErr = messageOf(err)
-	} else {
-		data.Artifacts = arts
-		data.Media, data.MoreMedia = mediaOf(arts)
-	}
-	if events, err := client.RunEvents(r.Context(), ns, id); err != nil {
-		data.EventsErr = messageOf(err)
-	} else {
-		data.Events = events
-		for _, e := range events {
-			if e.Type == "Warning" {
-				data.Warnings++
-			}
-		}
-		if data.Live && len(events) > 0 {
-			data.Activity = &events[len(events)-1]
-		}
-	}
-	if isComposite(run) {
-		if page, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{
-			Namespace: ns, Parent: run.Name, Limit: maxChildren}); err == nil {
-			data.Children = page.Runs
-			slices.SortFunc(data.Children, func(a, b apiclient.Run) int { return views.NaturalCompare(a.Name, b.Name) })
-		}
-	}
-	if !data.Live && run.TestCounts != nil && run.TestCounts.Failed > 0 {
-		// Best effort: without run history there are only the counts.
-		data.FailedCases, _ = client.RunTestCases(r.Context(), ns, id, true)
-	}
-	crumbs := append(clusterCrumbs(c), views.Crumb{Label: run.TestRef, Href: testPath(c.Name, ns, run.TestRef)})
-	s.page(w, r, "run", run.Name, crumbs, data)
-}
-
-func finished(phase string) bool { return finalPhases[phase] }
-
-// maxChildren bounds a composite run's child list.
-const maxChildren = 200
-
-// isComposite: a composite run's status has per-step aggregates s0, s1, …
-func isComposite(run *apiclient.Run) bool {
-	for k := range run.Steps {
-		if len(k) > 1 && k[0] == 's' && strings.Trim(k[1:], "0123456789") == "" {
-			return true
-		}
-	}
-	return false
-}
-
-func sortedStepKeys(m map[string]apiclient.StepResult) []string {
-	keys := slices.Collect(maps.Keys(m))
-	slices.SortFunc(keys, views.NaturalCompare)
-	return keys
-}
-
-// runLogPoll serves the live log from ?offset on (at most maxLogPoll
-// bytes), with the run's phase so the page knows when to stop and reload.
-func (s *Server) runLogPoll(w http.ResponseWriter, r *http.Request) {
-	c := s.Clusters.Get(r.PathValue("cluster"))
-	if c == nil {
-		http.NotFound(w, r)
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	offset, err := strconv.ParseInt(r.URL.Query().Get("offset"), 10, 64)
-	if err != nil || offset < 0 {
-		offset = 0
-	}
-	client := api(r, c)
-	run, err := client.GetRun(r.Context(), ns, id)
-	if err != nil {
-		http.Error(w, messageOf(err), http.StatusBadGateway)
-		return
-	}
-	body, err := client.OpenLogsFrom(r.Context(), ns, id, offset)
-	if err != nil {
-		http.Error(w, messageOf(err), http.StatusBadGateway)
-		return
-	}
-	defer func() { _ = body.Close() }()
-	chunk, err := io.ReadAll(io.LimitReader(body, maxLogPoll+1))
-	if err != nil {
-		http.Error(w, "reading the log: "+err.Error(), http.StatusBadGateway)
-		return
-	}
-	more := len(chunk) > maxLogPoll
-	if more {
-		chunk = chunk[:maxLogPoll]
-	}
-	h := w.Header()
-	h.Set("Content-Type", "text/plain; charset=utf-8")
-	h.Set("Cache-Control", "no-store")
-	h.Set("X-Run-Phase", run.Phase)
-	h.Set("X-Next-Offset", strconv.FormatInt(offset+int64(len(chunk)), 10))
-	if more {
-		h.Set("X-More", "1")
-	}
-	_, _ = w.Write(chunk)
-}
-
 // runLogDownload streams the whole stored log as a file.
 func (s *Server) runLogDownload(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.cluster(w, r)
@@ -470,7 +240,7 @@ func (s *Server) runArtifact(w http.ResponseWriter, r *http.Request) {
 	ct := st.ContentType
 	if ct == "" || strings.HasPrefix(ct, "application/octet-stream") {
 		// A video recorded without a type would not play inline.
-		ct = cmp.Or(mediaTypes[strings.ToLower(pathpkg.Ext(path))], ct)
+		ct = cmp.Or(uiapi.MediaTypes[strings.ToLower(pathpkg.Ext(path))], ct)
 	}
 	h.Set("Content-Type", ct)
 	// Artifacts are test output: HTML reports (JMeter, Gatling,
@@ -525,47 +295,4 @@ func (s *Server) abortRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	redirect(w, r, back, "Abort requested.")
-}
-
-func (s *Server) commentRun(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	back := runPath(c.Name, ns, id)
-	client := api(r, c)
-	text := strings.TrimSpace(r.PostFormValue(formComment))
-	if text == "" {
-		if err := client.DeleteComment(r.Context(), ns, id); err != nil {
-			redirect(w, r, back, "Could not remove the comment: "+messageOf(err))
-			return
-		}
-		redirect(w, r, back, "Comment removed.")
-		return
-	}
-	if _, err := client.SetComment(r.Context(), ns, id, text); err != nil {
-		redirect(w, r, back, "Could not save the comment: "+messageOf(err))
-		return
-	}
-	redirect(w, r, back, "Comment saved.")
-}
-
-func (s *Server) deleteRun(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, id := r.PathValue("ns"), r.PathValue("id")
-	client := api(r, c)
-	run, err := client.GetRun(r.Context(), ns, id)
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	if err := client.DeleteRun(r.Context(), ns, id); err != nil {
-		redirect(w, r, runPath(c.Name, ns, id), "Could not delete: "+messageOf(err))
-		return
-	}
-	redirect(w, r, testPath(c.Name, ns, run.TestRef), "Run "+run.Name+" deleted.")
 }

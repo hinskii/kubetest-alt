@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
@@ -113,7 +114,7 @@ func parseCleanup(q func(string) string, now time.Time) (cleanupCriteria, string
 
 // matches reports whether a finished run falls inside the criteria.
 func (c cleanupCriteria) matches(run apiclient.Run) bool {
-	if !finished(run.Phase) || run.FinishedAt == nil {
+	if !uiapi.Finished(run.Phase) || run.FinishedAt == nil {
 		return false
 	}
 	t := *run.FinishedAt
@@ -271,7 +272,7 @@ func deleteFinishedRun(r *http.Request, client *apiclient.Client, ns, test, runN
 	if err != nil {
 		return err
 	}
-	if run.TestRef != test || !finished(run.Phase) {
+	if run.TestRef != test || !uiapi.Finished(run.Phase) {
 		return errNotThisTest
 	}
 	return client.DeleteRun(r.Context(), ns, views.RunID(*run))

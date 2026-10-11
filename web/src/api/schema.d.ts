@@ -21,6 +21,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A run with its steps, children, artifacts, events and failed cases. */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a finished run with its logs and artifacts.
+         * @description Requires the admin role.
+         */
+        delete: operations["deleteRun"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a run that hasn't finished to stop.
+         * @description Requires the developer role.
+         */
+        post: operations["abortRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/comment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set a finished run's comment.
+         * @description Requires the developer role.
+         */
+        put: operations["setComment"];
+        post?: never;
+        /**
+         * Remove a finished run's comment.
+         * @description Requires the developer role.
+         */
+        delete: operations["deleteComment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The run's log from offset on, as text. */
+        get: operations["getRunLog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/runs/{ns}/{id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the run's Test again with the parameters this run used.
+         * @description Requires the developer role.
+         */
+        post: operations["rerun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests": {
         parameters: {
             query?: never;
@@ -121,15 +223,42 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Abort: {
+            message?: string;
+            reason: string;
+            requestedBy?: string;
+        };
+        AbortRequest: {
+            message?: string;
+        };
+        Artifact: {
+            contentType?: string;
+            path: string;
+            /** Format: int64 */
+            sizeBytes?: number;
+        };
         Capabilities: {
             delete: boolean;
             run: boolean;
+        };
+        ChildRun: {
+            /** Format: int64 */
+            durationMs?: number;
+            id: string;
+            name: string;
+            phase: string;
+            /** Format: date-time */
+            startedAt?: null | string;
+            testRef: string;
         };
         Cluster: {
             displayName: string;
             error?: string;
             name: string;
             reachable: boolean;
+        };
+        CommentUpdate: {
+            text: string;
         };
         Commit: {
             sha: string;
@@ -138,11 +267,37 @@ export interface components {
         Error: {
             error: string;
         };
+        Event: {
+            /** Format: int32 */
+            count?: number;
+            message: string;
+            object: string;
+            reason: string;
+            /** Format: date-time */
+            time: string;
+            /** @enum {string} */
+            type: "Normal" | "Warning";
+        };
+        GitInfo: {
+            commit: components["schemas"]["Commit"];
+            repository?: string;
+            revision?: string;
+        };
         Me: {
             can: components["schemas"]["Capabilities"];
             email: string;
             /** @enum {string} */
             role: "viewer" | "developer" | "admin";
+        };
+        Media: {
+            path: string;
+            type: string;
+            video: boolean;
+        };
+        Metric: {
+            name: string;
+            /** Format: double */
+            value: number;
         };
         Param: {
             default?: string;
@@ -152,6 +307,55 @@ export interface components {
             required: boolean;
             /** @enum {string} */
             type: "string" | "integer" | "number" | "boolean";
+        };
+        RunComment: {
+            /** Format: date-time */
+            at: string;
+            by?: string;
+            text: string;
+        };
+        RunDetail: {
+            abort?: components["schemas"]["Abort"];
+            archived: boolean;
+            artifacts: components["schemas"]["Artifact"][];
+            artifactsError?: string;
+            children: components["schemas"]["ChildRun"][];
+            comment?: components["schemas"]["RunComment"];
+            config: {
+                [key: string]: string;
+            };
+            createdBy?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            events: components["schemas"]["Event"][];
+            eventsError?: string;
+            failedCases: components["schemas"]["TestCase"][];
+            finished: boolean;
+            /** Format: date-time */
+            finishedAt?: null | string;
+            git?: components["schemas"]["GitInfo"];
+            id: string;
+            liveView?: string;
+            media: components["schemas"]["Media"][];
+            message?: string;
+            metrics: components["schemas"]["Metric"][];
+            moreMedia?: number;
+            name: string;
+            namespace: string;
+            /** Format: date-time */
+            notBefore?: null | string;
+            parentRun?: string;
+            phase: string;
+            /** Format: date-time */
+            queuedAt?: null | string;
+            report?: string;
+            source?: string;
+            /** Format: date-time */
+            startedAt?: null | string;
+            steps: components["schemas"]["Step"][];
+            testCounts?: components["schemas"]["TestCounts"];
+            testRef: string;
+            tool?: string;
         };
         RunPage: {
             next?: string;
@@ -202,6 +406,34 @@ export interface components {
             /** Format: date-time */
             notBefore?: null | string;
         };
+        Step: {
+            /** Format: date-time */
+            finishedAt?: null | string;
+            key: string;
+            /** @enum {string} */
+            kind: "Try" | "Worker" | "Step";
+            message?: string;
+            phase?: string;
+            /** Format: date-time */
+            startedAt?: null | string;
+        };
+        TestCase: {
+            class?: string;
+            details?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            key: string;
+            message?: string;
+            name: string;
+            status: string;
+            suite?: string;
+        };
+        TestCounts: {
+            failed: number;
+            passed: number;
+            skipped: number;
+            total: number;
+        };
         TestDetail: {
             definition: string;
             locked: boolean;
@@ -249,6 +481,418 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Cluster"][];
+                };
+            };
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    abortRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AbortRequest"];
+            };
+        };
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CommentUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunComment"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRunLog: {
+        parameters: {
+            query?: {
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description 1: there is more right away; ask again at once. */
+                    "X-More"?: string;
+                    /** @description Where the next chunk starts. */
+                    "X-Next-Offset"?: number;
+                    /** @description The run's phase now. */
+                    "X-Run-Phase"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rerun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartedRun"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

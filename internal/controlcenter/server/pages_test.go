@@ -30,7 +30,6 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
@@ -42,7 +41,6 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
-	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -51,7 +49,7 @@ const (
 	proxyPath  = cctest.ProxyPath
 	developer  = cctest.Developer
 	admin      = cctest.Admin
-	runUID     = "11111111-2222-3333-4444-555555555555"
+	runUID     = cctest.RunUID
 	clusterURL = "/clusters/dev"
 )
 
@@ -73,7 +71,7 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 // TestRun is gone), when archive is non-nil.
 func newWorldWithArchive(t *testing.T, archive *archiveStore, objs ...client.Object) *world {
 	t.Helper()
-	o := cctest.Options{Cases: cannedCases{}}
+	o := cctest.Options{Cases: cctest.Cases{}}
 	if archive != nil {
 		o.Store, o.Deleter = archive, archive
 	}
@@ -144,62 +142,11 @@ func runOf(name string, phase testsv1alpha1.Phase) *testsv1alpha1.TestRun {
 	return r
 }
 
-func TestRunPage_FinishedRun(t *testing.T) {
-	w := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhaseFailed))
-	page := "/clusters/dev/runs/team-a/smoke-abcde"
-	body := w.get(t, page, admin).Body.String()
-
-	assert.Contains(t, body, "1 of 2 workers failed")
-	assert.Less(t, strings.Index(body, "worker-2"), strings.Index(body, "worker-10"), "natural order")
-	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html"`)
-	assert.Contains(t, body, `data-live="false"`)
-	assert.Contains(t, body, `action="/clusters/dev/runs/team-a/smoke-abcde/comment"`)
-	assert.Contains(t, body, "Delete run", "admins may delete finished runs")
-	assert.NotContains(t, body, "Abort run")
-
-	dev := w.get(t, page, developer).Body.String()
-	assert.NotContains(t, dev, "Delete run")
-	notice := w.get(t, page+"?notice=%3Cb%3Ehi%3C%2Fb%3E", "").Body.String()
-	assert.Contains(t, notice, "&lt;b&gt;hi&lt;/b&gt;", "notices are escaped")
-}
-
-func TestRunPage_LiveRunCanBeAborted(t *testing.T) {
-	w := newWorld(t, smokeTest(), runOf("smoke-live", testsv1alpha1.PhaseRunning))
-	page := "/clusters/dev/runs/team-a/smoke-live"
-	body := w.get(t, page, developer).Body.String()
-	assert.Contains(t, body, `data-live="true"`)
-	assert.Contains(t, body, "Abort run")
-	assert.Contains(t, body, "A comment can be added once the run has finished.")
-
-	rec := w.post(t, page+"/abort", developer, url.Values{"message": {"wrong env"}})
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, page+"?notice=Abort+requested.", rec.Header().Get("Location"))
-	var r testsv1alpha1.TestRun
-	require.NoError(t, w.k8s.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "smoke-live"}, &r))
-	require.NotNil(t, r.Spec.Abort)
-	assert.Equal(t, developer, r.Spec.Abort.RequestedBy)
-	assert.Equal(t, "wrong env", r.Spec.Abort.Message)
-
-	// A comment on a live run is refused by the API; the page says why.
-	rec = w.post(t, page+"/comment", developer, url.Values{"text": {"x"}})
-	assert.Contains(t, rec.Header().Get("Location"), "Could+not+save+the+comment")
-}
-
-func TestRunLogPoll_FromOffsetWithPhase(t *testing.T) {
+func TestRunLogDownload(t *testing.T) {
 	w := newWorld(t, smokeTest(), runOf("smoke-live", testsv1alpha1.PhaseRunning))
 	keys := storage.ForRun("team-a", runUID)
 	require.NoError(t, w.objects.Put(context.Background(), bucket, keys.LogChunk(0), bytes.NewReader([]byte("hello\n")), 6, "text/plain"))
 	require.NoError(t, w.objects.Put(context.Background(), bucket, keys.LogChunk(1), bytes.NewReader([]byte("world\n")), 6, "text/plain"))
-
-	rec := w.get(t, "/clusters/dev/runs/team-a/smoke-live/log?offset=0", "")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	assert.Equal(t, "hello\nworld\n", rec.Body.String())
-	assert.Equal(t, "running", rec.Header().Get("X-Run-Phase"))
-	assert.Equal(t, "12", rec.Header().Get("X-Next-Offset"))
-
-	rec = w.get(t, "/clusters/dev/runs/team-a/smoke-live/log?offset=6", "")
-	assert.Equal(t, "world\n", rec.Body.String())
-	assert.Equal(t, "12", rec.Header().Get("X-Next-Offset"))
 
 	dl := w.get(t, "/clusters/dev/runs/team-a/smoke-live/logs.txt", "")
 	assert.Equal(t, "hello\nworld\n", dl.Body.String())
@@ -225,30 +172,6 @@ func TestRunArtifact_SandboxedStream(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/missing", "").Code)
 }
 
-func TestDeleteRun_AdminOnly(t *testing.T) {
-	w := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhaseFailed))
-	page := "/clusters/dev/runs/team-a/smoke-abcde"
-	assert.Equal(t, http.StatusForbidden, w.post(t, page+"/delete", developer, url.Values{}).Code)
-
-	rec := w.post(t, page+"/delete", admin, url.Values{})
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Equal(t, "/clusters/dev/tests/team-a/smoke?notice=Run+smoke-abcde+deleted.", rec.Header().Get("Location"))
-	assert.Equal(t, http.StatusNotFound, w.get(t, page, "").Code)
-}
-
-func TestComment_SaveAndRemove(t *testing.T) {
-	w := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhaseFailed))
-	page := "/clusters/dev/runs/team-a/smoke-abcde"
-	// No run history store behind this API server: the API refuses, and
-	// the page reports it instead of failing.
-	rec := w.post(t, page+"/comment", developer, url.Values{"text": {"known flake"}})
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Contains(t, rec.Header().Get("Location"), "Could+not+save+the+comment")
-	rec = w.post(t, page+"/comment", developer, url.Values{"text": {"  "}})
-	assert.Contains(t, rec.Header().Get("Location"), "Could+not+remove+the+comment")
-	assert.Equal(t, http.StatusForbidden, w.post(t, page+"/comment", "", url.Values{"text": {"x"}}).Code)
-}
-
 func TestClusterUnreachable(t *testing.T) {
 	w := newWorld(t)
 	// Point the registry's only cluster at a closed port.
@@ -266,8 +189,8 @@ func TestClusterUnreachable(t *testing.T) {
 	rec := w.get(t, clusterURL+"/schedules", "")
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Cannot reach the kubetest API of dev")
-	assert.Equal(t, http.StatusBadGateway, w.get(t, "/clusters/dev/runs/a/b/log", "").Code)
-	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/nope/runs/a/b/log", "").Code)
+	assert.Equal(t, http.StatusBadGateway, w.get(t, "/clusters/dev/runs/a/b/logs.txt", "").Code)
+	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/nope/runs/a/b/logs.txt", "").Code)
 }
 
 func TestLogDownload_UnknownRunIs404(t *testing.T) {
@@ -281,137 +204,13 @@ func TestRedirectGuard(t *testing.T) {
 	assert.Equal(t, "/", rec.Header().Get("Location"))
 }
 
-func TestRunPage_ShowsCommit(t *testing.T) {
-	const sha = "0123456789abcdef0123456789abcdef01234567"
-	run := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
-	run.Status.ResolvedSpec = `{"content":{"git":{"uri":"https://bot:s3cret@github.com/acme/tests.git"}}}`
-	run.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "main", GitCommit: sha}
+func TestArtifact_VideoWithoutTypePlaysInline(t *testing.T) {
+	run := runOf("smoke-abcde", testsv1alpha1.PhaseFailed)
+	run.Status.ArtifactRefs = []testsv1alpha1.ArtifactRef{{Path: "cypress/videos/pay.mp4"}}
 	w := newWorld(t, smokeTest(), run)
-
-	body := w.get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
-	assert.Contains(t, body, `href="https://github.com/acme/tests/commit/`+sha+`"`)
-	assert.Contains(t, body, ">0123456</a>")
-	assert.Contains(t, body, "· main")
-	assert.NotContains(t, body, "s3cret")
-
-}
-
-func TestRunPage_OpenReport(t *testing.T) {
-	run := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
-	run.Status.ResolvedSpec = `{"artifacts":{"report":"report/index.html"}}`
-	body := newWorld(t, smokeTest(), run).get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
-	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html" target="_blank" rel="noopener">Open report</a>`)
-	assert.Contains(t, body, `<iframe class="live-view" src="/clusters/dev/runs/team-a/smoke-abcde/artifacts/report/index.html" sandbox="allow-scripts"`,
-		"a finished run shows its report on the page")
-	assert.Contains(t, body, `artifacts/report/index.html?download=1">Download</a>`)
-
-	live := runOf("smoke-live", testsv1alpha1.PhaseRunning)
-	live.Status.ResolvedSpec = run.Status.ResolvedSpec
-	livePage := newWorld(t, smokeTest(), live).get(t, "/clusters/dev/runs/team-a/smoke-live", "").Body.String()
-	assert.NotContains(t, livePage, "Report of", "not before the run ends")
-
-	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
-	assert.NotContains(t, plain.get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String(), "Open report")
-}
-
-func TestRunAgain(t *testing.T) {
-	old := runOf("smoke-abcde", testsv1alpha1.PhaseFailed)
-	old.Spec.Config = map[string]string{"vus": "50", "target": "http://shop", "gone": "x"}
-	w := newWorld(t, smokeTest(), old)
-	page := "/clusters/dev/runs/team-a/smoke-abcde"
-
-	assert.Contains(t, w.get(t, page, developer).Body.String(), `action="/clusters/dev/runs/team-a/smoke-abcde/rerun"`)
-	assert.NotContains(t, w.get(t, page, "").Body.String(), "Run again", "viewers can't start runs")
-	assert.Equal(t, http.StatusForbidden, w.post(t, page+"/rerun", "", nil).Code)
-
-	rec := w.post(t, page+"/rerun", developer, nil)
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Contains(t, rec.Header().Get("Location"), "Run+started+again+with+the+parameters+of+smoke-abcde")
-	var runs testsv1alpha1.TestRunList
-	require.NoError(t, w.k8s.List(context.Background(), &runs))
-	var again *testsv1alpha1.TestRun
-	for i := range runs.Items {
-		if runs.Items[i].Name != "smoke-abcde" {
-			again = &runs.Items[i]
-		}
-	}
-	require.NotNil(t, again, "a new run was created")
-	assert.Equal(t, "smoke", again.Spec.TestRef)
-	assert.Equal(t, map[string]string{"vus": "50", "target": "http://shop"}, again.Spec.Config,
-		"the old values; parameters the Test dropped are left out")
-	assert.Equal(t, developer, again.Spec.Tags["kubetest.io/created-by"])
-
-	orphan := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
-	orphan.Spec.TestRef = "deleted-test"
-	rec = newWorld(t, smokeTest(), orphan).post(t, page+"/rerun", developer, nil)
-	assert.Contains(t, rec.Header().Get("Location"), "no+longer+exists")
-}
-
-// Run again works from run history once the TestRun has left the cluster.
-func TestRunAgain_FromHistory(t *testing.T) {
-	archive := &archiveStore{rows: map[string]store.Row{runUID: {UID: runUID, Name: "smoke-old", Namespace: "team-a",
-		TestRef: "smoke", Phase: "passed", FinishedAt: time.Now().Add(-48 * time.Hour).UTC(),
-		Config: map[string]string{"vus": "10", "target": "http://shop"}}}}
-	w := newWorldWithArchive(t, archive, smokeTest())
-
-	rec := w.post(t, "/clusters/dev/runs/team-a/smoke-old/rerun", developer, nil)
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Contains(t, rec.Header().Get("Location"), "Run+started+again")
-	var runs testsv1alpha1.TestRunList
-	require.NoError(t, w.k8s.List(context.Background(), &runs))
-	require.Len(t, runs.Items, 1)
-	assert.Equal(t, map[string]string{"target": "http://shop"}, runs.Items[0].Spec.Config, "vus=10 is today's default")
-}
-
-func TestRunPage_EventsAndActivity(t *testing.T) {
-	at := func(m int) metav1.Time { return metav1.NewTime(time.Date(2026, 10, 7, 12, m, 0, 0, time.UTC)) }
-	ev := func(name, obj, typ, reason, msg string, m int) *corev1.Event {
-		return &corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "team-a"},
-			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: obj},
-			Type:           typ, Reason: reason, Message: msg, LastTimestamp: at(m), Count: 1}
-	}
-	live := runOf("smoke-live", testsv1alpha1.PhaseQueued)
-	live.Status.FinishedAt = nil
-	w := newWorld(t, smokeTest(), live,
-		ev("e1", "smoke-live-abc12", corev1.EventTypeNormal, "Scheduled", "Successfully assigned", 1),
-		ev("e2", "smoke-live-abc12", corev1.EventTypeWarning, "Failed", "ErrImagePull <b>", 2),
-		ev("e3", "smoke-live-abc12", corev1.EventTypeNormal, "Pulling", "Pulling image \"mcr/playwright\"", 3),
-		ev("e4", "other-xyz", corev1.EventTypeNormal, "Pulling", "not ours", 4))
-
-	body := w.get(t, "/clusters/dev/runs/team-a/smoke-live", "").Body.String()
-	assert.Contains(t, body, `data-phase="queued"`)
-	assert.Contains(t, body, "Now: <strong>Pulling</strong>", "the newest event is the activity")
-	assert.Contains(t, body, "Kubernetes events")
-	assert.Contains(t, body, "1 warning")
-	assert.Contains(t, body, "ErrImagePull &lt;b&gt;", "messages are escaped")
-	assert.NotContains(t, body, "not ours")
-	assert.Less(t, strings.Index(body, ">Scheduled<"), strings.Index(body, ">Failed<"), "oldest first")
-
-	done := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed)).
-		get(t, "/clusters/dev/runs/team-a/smoke-abcde", "").Body.String()
-	assert.NotContains(t, done, "Now:", "no activity on a finished run")
-	assert.NotContains(t, done, "Kubernetes events", "no panel without events")
-}
-
-func TestRunPage_CompositeChildren(t *testing.T) {
-	parent := runOf("suite-abcde", testsv1alpha1.PhasePassed)
-	parent.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "passed"}, "s1": {Phase: "passed"}}
-	child := func(name string) *testsv1alpha1.TestRun {
-		c := runOf(name, testsv1alpha1.PhasePassed)
-		c.UID = types.UID(name)
-		c.Labels = map[string]string{store.LabelParentRun: "suite-abcde"}
-		return c
-	}
-	stray := runOf("other-1", testsv1alpha1.PhasePassed)
-	stray.UID = "other-1"
-	w := newWorld(t, smokeTest(), parent, child("suite-abcde-s10"), child("suite-abcde-s2"), stray)
-
-	body := w.get(t, "/clusters/dev/runs/team-a/suite-abcde", "").Body.String()
-	assert.Contains(t, body, "Child runs")
-	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/suite-abcde-s2"`)
-	assert.Less(t, strings.Index(body, ">suite-abcde-s2<"), strings.Index(body, ">suite-abcde-s10<"), "natural order")
-	assert.NotContains(t, body, ">other-1<")
-
-	plain := w.get(t, "/clusters/dev/runs/team-a/other-1", "").Body.String()
-	assert.NotContains(t, plain, "Child runs", "not composite")
+	key := storage.ForRun("team-a", runUID).Artifact("cypress/videos/pay.mp4")
+	require.NoError(t, w.objects.Put(context.Background(), bucket, key, strings.NewReader("mp4"), 3, "application/octet-stream"))
+	rec := w.get(t, "/clusters/dev/runs/team-a/smoke-abcde/artifacts/cypress/videos/pay.mp4", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "video/mp4", rec.Header().Get("Content-Type"))
 }

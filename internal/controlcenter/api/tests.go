@@ -227,6 +227,15 @@ func (s *Server) apiError(w http.ResponseWriter, c *clusters.Cluster, err error)
 	}
 }
 
+// messageOf is the API's own message of err, else err's text.
+func messageOf(err error) string {
+	var apiErr *apiclient.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.Message
+	}
+	return err.Error()
+}
+
 // requireRole gates h on a role, answering 403 in JSON.
 func requireRole(min auth.Role, h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

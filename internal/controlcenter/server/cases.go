@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strconv"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/executor"
@@ -205,7 +206,7 @@ func (s *Server) compareRuns(w http.ResponseWriter, r *http.Request) {
 	recent, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{Namespace: ns, Test: run.TestRef, Limit: 30})
 	if err == nil {
 		for _, cand := range recent.Runs {
-			if cand.UID != run.UID && finished(cand.Phase) {
+			if cand.UID != run.UID && uiapi.Finished(cand.Phase) {
 				data.Candidates = append(data.Candidates, cand)
 			}
 		}

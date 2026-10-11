@@ -112,3 +112,27 @@
     @apply bg-background text-foreground font-sans antialiased;
   }
 }
+
+/* Tool frames (live view, report): the tool's own page, light. In the
+   dark theme it is inverted with the hue turned back, which keeps a
+   chart's series colours; "Original colors" shows it as the tool made it. */
+@layer components {
+  .tool-frame {
+    @apply overflow-hidden rounded-lg border bg-white;
+  }
+  .tool-frame iframe {
+    display: block;
+    width: 100%;
+    height: 75vh;
+    min-height: 480px;
+    border: 0;
+    background: #fff;
+    color-scheme: light;
+  }
+  [data-theme="dark"] .tool-frame:not([data-original]) {
+    background: #1d1f24;
+  }
+  [data-theme="dark"] .tool-frame:not([data-original]) iframe {
+    filter: invert(0.88) hue-rotate(180deg);
+  }
+}

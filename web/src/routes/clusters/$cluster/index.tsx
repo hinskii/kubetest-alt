@@ -147,9 +147,13 @@ function TestsTable({ cluster, tests }: { cluster: string; tests: TestSummary[] 
               <TableCell>
                 {t.latestRun ? (
                   <span className="flex items-center gap-2">
-                    <a href={goPage.run(cluster, t.namespace, t.latestRun.name)}>
+                    <Link
+                      to="/clusters/$cluster/runs/$ns/$id"
+                      params={{ cluster, ns: t.namespace, id: t.latestRun.name }}
+                      aria-label={`Latest run: ${t.latestRun.phase}`}
+                    >
                       <PhaseBadge phase={t.latestRun.phase} />
-                    </a>
+                    </Link>
                     <span className="text-muted-foreground text-xs">{when(t.latestRun.finishedAt)}</span>
                   </span>
                 ) : (

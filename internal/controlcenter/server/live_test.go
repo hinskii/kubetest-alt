@@ -18,11 +18,11 @@ package server
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -96,17 +96,26 @@ func liveRunFor(t *testing.T, upstream *httptest.Server, phase testsv1alpha1.Pha
 	return run
 }
 
-var liveSrc = regexp.MustCompile(`<iframe class="live-view" src="(/live/[^"]+)"`)
+// liveLink is the run's signed live-view link, as the UI's API gives it
+// ("" when the run has none).
+func liveLink(t *testing.T, w *world) string {
+	t.Helper()
+	rec := w.get(t, "/api/v1/clusters/dev/runs/team-a/load-1", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var run struct {
+		LiveView string `json:"liveView"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &run))
+	return run.LiveView
+}
 
 func TestLiveView_EndToEnd(t *testing.T) {
 	upstream := liveUpstream(t)
 	w := newWorld(t, smokeTest(), liveRunFor(t, upstream, testsv1alpha1.PhaseRunning))
 
-	page := w.get(t, "/clusters/dev/runs/team-a/load-1", "").Body.String()
-	m := liveSrc.FindStringSubmatch(page)
-	require.NotNil(t, m, "a running run with spec.liveView shows its live view:\n%s", page)
-	assert.Contains(t, page, `sandbox="allow-scripts"`)
-	src := strings.ReplaceAll(m[1], "&amp;", "&")
+	src := liveLink(t, w)
+	require.NotEmpty(t, src, "a running run with spec.liveView has a live view")
+	assert.True(t, strings.HasPrefix(src, "/live/"), src)
 	assert.True(t, strings.HasSuffix(src, "/ui/?endpoint=../"), src)
 
 	// No session needed (oauth2-proxy lets /live/ through): the link is it.
@@ -151,9 +160,9 @@ func TestLiveView_Messages(t *testing.T) {
 		return rec
 	}
 	link := func(w *world) string {
-		m := liveSrc.FindStringSubmatch(w.get(t, "/clusters/dev/runs/team-a/load-1", "").Body.String())
-		require.NotNil(t, m)
-		return strings.ReplaceAll(m[1], "&amp;", "&")
+		l := liveLink(t, w)
+		require.NotEmpty(t, l)
+		return l
 	}
 
 	queued := newWorld(t, smokeTest(), liveRunFor(t, upstream, testsv1alpha1.PhaseQueued))
@@ -162,8 +171,7 @@ func TestLiveView_Messages(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), `http-equiv="refresh"`)
 
 	finished := newWorld(t, smokeTest(), liveRunFor(t, upstream, testsv1alpha1.PhasePassed))
-	assert.NotContains(t, finished.get(t, "/clusters/dev/runs/team-a/load-1", "").Body.String(), "live-view",
-		"finished runs have no live view")
+	assert.Empty(t, liveLink(t, finished), "finished runs have no live view")
 
 	rec = get(finished, "/live/forged.token/ui/")
 	assert.Equal(t, http.StatusForbidden, rec.Code)

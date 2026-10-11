@@ -57,6 +57,28 @@ type testParams struct {
 	Name      string `path:"name"`
 }
 
+type runParams struct {
+	Cluster   string `path:"cluster"`
+	Namespace string `path:"ns"`
+	ID        string `path:"id"`
+}
+
+type logParams struct {
+	Cluster   string `path:"cluster"`
+	Namespace string `path:"ns"`
+	ID        string `path:"id"`
+	// Offset is where to read from (X-Next-Offset of the previous chunk).
+	Offset int64 `query:"offset"`
+}
+
+// LogChunk is the log text from offset on, with headers.
+type LogChunk struct {
+	Text  string `contentType:"text/plain"`
+	Phase string `header:"X-Run-Phase" description:"The run's phase now."`
+	Next  int64  `header:"X-Next-Offset" description:"Where the next chunk starts."`
+	More  string `header:"X-More" description:"1: there is more right away; ask again at once."`
+}
+
 type runsParams struct {
 	Cluster   string `path:"cluster"`
 	Namespace string `path:"ns"`
@@ -65,7 +87,10 @@ type runsParams struct {
 	After string `query:"after"`
 }
 
-const testPath = Prefix + "/clusters/{cluster}/tests/{ns}/{name}"
+const (
+	testPath = Prefix + "/clusters/{cluster}/tests/{ns}/{name}"
+	runPath  = Prefix + "/clusters/{cluster}/runs/{ns}/{id}"
+)
 
 func (s *Server) routes() []route {
 	h := func(min auth.Role, f http.HandlerFunc) http.HandlerFunc {
@@ -98,6 +123,27 @@ func (s *Server) routes() []route {
 		{Method: http.MethodPost, Path: testPath + "/runs", ID: "startRun", Role: auth.RoleDeveloper,
 			Summary: "Start a run of the Test, now or at notBefore.", In: []any{testParams{}, RunRequest{}},
 			Out: StartedRun{}, Status: http.StatusCreated, Errors: []int{400, 403, 404, 502}, handler: s.startRun},
+		{Method: http.MethodGet, Path: runPath, ID: "getRun",
+			Summary: "A run with its steps, children, artifacts, events and failed cases.", In: []any{runParams{}},
+			Out: RunDetail{}, Errors: []int{404, 502}, handler: s.getRun},
+		{Method: http.MethodGet, Path: runPath + "/log", ID: "getRunLog",
+			Summary: "The run's log from offset on, as text.",
+			In:      []any{logParams{}}, Out: LogChunk{}, Errors: []int{404, 502}, handler: s.runLog},
+		{Method: http.MethodPost, Path: runPath + "/abort", ID: "abortRun", Role: auth.RoleDeveloper,
+			Summary: "Ask a run that hasn't finished to stop.", In: []any{runParams{}, AbortRequest{}},
+			Status: http.StatusNoContent, Errors: []int{400, 403, 404, 409, 502}, handler: s.abortRun},
+		{Method: http.MethodPost, Path: runPath + "/rerun", ID: "rerun", Role: auth.RoleDeveloper,
+			Summary: "Start the run's Test again with the parameters this run used.", In: []any{runParams{}},
+			Out: StartedRun{}, Status: http.StatusCreated, Errors: []int{403, 404, 409, 502}, handler: s.rerun},
+		{Method: http.MethodPut, Path: runPath + "/comment", ID: "setComment", Role: auth.RoleDeveloper,
+			Summary: "Set a finished run's comment.", In: []any{runParams{}, CommentUpdate{}},
+			Out: RunComment{}, Errors: []int{400, 403, 404, 409, 502}, handler: s.setComment},
+		{Method: http.MethodDelete, Path: runPath + "/comment", ID: "deleteComment", Role: auth.RoleDeveloper,
+			Summary: "Remove a finished run's comment.", In: []any{runParams{}},
+			Status: http.StatusNoContent, Errors: []int{403, 404, 409, 502}, handler: s.deleteComment},
+		{Method: http.MethodDelete, Path: runPath, ID: "deleteRun", Role: auth.RoleAdmin,
+			Summary: "Delete a finished run with its logs and artifacts.", In: []any{runParams{}},
+			Status: http.StatusNoContent, Errors: []int{403, 404, 409, 502}, handler: s.deleteRun},
 	}
 	for i := range rs {
 		rs[i].handler = h(rs[i].Role, rs[i].handler)

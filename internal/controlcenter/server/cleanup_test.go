@@ -20,9 +20,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"slices"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/cctest"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/internal/store"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
@@ -150,60 +149,7 @@ func TestCleanup_PreviewAndDelete(t *testing.T) {
 	assert.Contains(t, none.Header().Get("Location"), "nothing+deleted")
 }
 
-// archiveStore is run history for the real API server: rows whose TestRun
-// is gone. Paging is not modelled (every row fits on one page).
-type archiveStore struct {
-	mu   sync.Mutex
-	rows map[string]store.Row
-}
-
-func (a *archiveStore) Get(_ context.Context, uid string) (*store.Row, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	r, ok := a.rows[uid]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	return &r, nil
-}
-
-func (a *archiveStore) GetByName(_ context.Context, namespace, name string) (*store.Row, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, r := range a.rows {
-		if r.Namespace == namespace && r.Name == name {
-			return &r, nil
-		}
-	}
-	return nil, store.ErrNotFound
-}
-
-func (a *archiveStore) List(_ context.Context, f store.Filter, p store.Page) ([]store.Row, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if p.After != "" {
-		return nil, nil
-	}
-	var out []store.Row
-	for _, r := range a.rows {
-		if (f.TestRef == "" || r.TestRef == f.TestRef) && (f.Namespace == "" || r.Namespace == f.Namespace) &&
-			(f.Phase == "" || r.Phase == f.Phase) && (f.ParentRun == "" || r.ParentRun == f.ParentRun) {
-			out = append(out, r)
-		}
-	}
-	slices.SortFunc(out, func(x, y store.Row) int { return y.FinishedAt.Compare(x.FinishedAt) })
-	return out, nil
-}
-
-func (a *archiveStore) Delete(_ context.Context, uid string) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if _, ok := a.rows[uid]; !ok {
-		return store.ErrNotFound
-	}
-	delete(a.rows, uid)
-	return nil
-}
+type archiveStore = cctest.Archive
 
 // The main case: old runs are usually only in run history. The API finds
 // those by UID, so the preview, the links and the delete must use it.
@@ -214,7 +160,7 @@ func TestCleanup_ArchivedRuns(t *testing.T) {
 			Source: "ui", FinishedAt: time.Now().Add(-age).UTC().Truncate(time.Second), DurationMs: 1000}
 	}
 	const uid = "00000000-0000-0000-0000-0000000000a9"
-	archive := &archiveStore{rows: map[string]store.Row{uid: archived("gone-1", uid, 50*day)}}
+	archive := &archiveStore{Rows: map[string]store.Row{uid: archived("gone-1", uid, 50*day)}}
 	w := newWorldWithArchive(t, archive, smokeTest())
 	page := "/clusters/dev/tests/team-a/smoke/cleanup"
 
@@ -226,7 +172,7 @@ func TestCleanup_ArchivedRuns(t *testing.T) {
 	loc, err := url.Parse(rec.Header().Get("Location"))
 	require.NoError(t, err)
 	assert.Equal(t, "Deleted 1 of 1 runs.", loc.Query().Get("notice"))
-	assert.Empty(t, archive.rows, "the history row is gone")
+	assert.Empty(t, archive.Rows, "the history row is gone")
 }
 
 func TestRunID(t *testing.T) {

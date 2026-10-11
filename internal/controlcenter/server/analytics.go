@@ -28,6 +28,7 @@ import (
 	"time"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
@@ -110,7 +111,7 @@ func (s *Server) testAnalyticsPage(w http.ResponseWriter, r *http.Request) {
 	data := analyticsData{Cluster: c.Name, Namespace: ns, Test: name, Window: window, Windows: analyticsWindows,
 		Selected: map[string]bool{}}
 	for _, run := range page.Runs {
-		if finished(run.Phase) {
+		if uiapi.Finished(run.Phase) {
 			data.Runs = append(data.Runs, run)
 		}
 	}

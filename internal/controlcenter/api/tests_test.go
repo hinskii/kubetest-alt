@@ -63,9 +63,11 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 	return &world{h: handler(env.Clusters), k8s: env.K8s}
 }
 
+func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
 func handler(reg *clusters.Registry) http.Handler {
 	mux := http.NewServeMux()
-	(&Server{Clusters: reg, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Register(mux)
+	(&Server{Clusters: reg, Log: discard()}).Register(mux)
 	return mux
 }
 

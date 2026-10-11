@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 
-import type { Cluster, Me, RunRow, TestDetail, TestSummary } from "@/api/client";
+import type { Cluster, Me, RunDetail, RunRow, TestDetail, TestSummary } from "@/api/client";
 
 // Default API answers for component tests; a test overrides with
 // server.use(...).
@@ -60,7 +60,55 @@ export const runs: RunRow[] = [
   { id: "uid-1", name: "smoke-old", phase: "failed", startedAt: "2026-10-07T12:00:00Z", durationMs: 184000 },
 ];
 
+export const finishedRun: RunDetail = {
+  id: "smoke-abcde",
+  name: "smoke-abcde",
+  namespace: "team-a",
+  testRef: "smoke",
+  phase: "failed",
+  finished: true,
+  archived: false,
+  tool: "k6",
+  message: "1 of 2 workers failed",
+  source: "ui",
+  createdBy: "dev@example.com",
+  startedAt: "2026-10-07T12:00:00Z",
+  finishedAt: "2026-10-07T12:00:05Z",
+  durationMs: 5600,
+  git: {
+    repository: "https://github.com/acme/tests.git",
+    revision: "main",
+    commit: { sha: "0123456789abcdef", url: "https://github.com/acme/tests/commit/0123456789abcdef" },
+  },
+  testCounts: { total: 5, passed: 3, failed: 2, skipped: 0 },
+  config: { vus: "50" },
+  metrics: [{ name: "p95_ms", value: 120.5678 }],
+  steps: [
+    { key: "worker-2", kind: "Worker", phase: "failed", message: "exit code 1" },
+    { key: "worker-10", kind: "Worker", phase: "passed" },
+  ],
+  children: [],
+  report: "report/index.html",
+  artifacts: [
+    { path: "report/index.html", contentType: "text/html" },
+    { path: "shots/pay (failed).png", contentType: "image/png" },
+  ],
+  media: [{ path: "shots/pay (failed).png", type: "image/png", video: false }],
+  events: [],
+  failedCases: [
+    {
+      key: "shop › checkout",
+      name: "checkout",
+      class: "shop",
+      status: "failed",
+      message: "timeout after 5s",
+      details: "at checkout",
+    },
+  ],
+};
+
 const T = "*/api/v1/clusters/dev/tests/team-a/smoke";
+const R = "*/api/v1/clusters/dev/runs/:ns/:id";
 
 export const server = setupServer(
   http.get("*/api/v1/me", () => HttpResponse.json(me)),
@@ -68,4 +116,8 @@ export const server = setupServer(
   http.get("*/api/v1/clusters/dev/tests", () => HttpResponse.json({ tests })),
   http.get(T, () => HttpResponse.json(smoke)),
   http.get(`${T}/runs`, () => HttpResponse.json({ runs })),
+  http.get(R, ({ params }) => HttpResponse.json({ ...finishedRun, id: params.id, name: params.id })),
+  http.get(`${R}/log`, () =>
+    HttpResponse.text("hello\nworld\n", { headers: { "X-Run-Phase": "failed", "X-Next-Offset": "12" } }),
+  ),
 );

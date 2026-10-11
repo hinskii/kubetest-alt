@@ -19,6 +19,8 @@ export type TestDetail = components["schemas"]["TestDetail"];
 export type Param = components["schemas"]["Param"];
 export type RunRow = components["schemas"]["RunRow"];
 export type Schedule = components["schemas"]["Schedule"];
+export type RunDetail = components["schemas"]["RunDetail"];
+export type RunEvent = components["schemas"]["Event"];
 
 /** ApiError carries the API's `{error}` message and the HTTP status. */
 export class ApiError extends Error {

@@ -132,7 +132,7 @@ func GeneratePrefix(test string) string {
 // exists, its UID once only run history has it (the API looks archived
 // runs up by UID).
 func RunID(r apiclient.Run) string {
-	if r.Origin == "archive" && r.UID != "" {
+	if r.Origin == apiclient.OriginArchive && r.UID != "" {
 		return r.UID
 	}
 	return r.Name
@@ -171,4 +171,35 @@ func CommitURL(repo, sha string) string {
 		return base + "/commits/" + url.PathEscape(sha)
 	}
 	return ""
+}
+
+// NaturalCompare orders strings with numbers by value: "worker-2" before
+// "worker-10".
+func NaturalCompare(a, b string) int {
+	for a != "" && b != "" {
+		da, db := digitsPrefix(a), digitsPrefix(b)
+		if da != "" && db != "" {
+			if len(da) != len(db) {
+				return len(da) - len(db)
+			}
+			if c := strings.Compare(da, db); c != 0 {
+				return c
+			}
+			a, b = a[len(da):], b[len(db):]
+			continue
+		}
+		if a[0] != b[0] {
+			return int(a[0]) - int(b[0])
+		}
+		a, b = a[1:], b[1:]
+	}
+	return len(a) - len(b)
+}
+
+func digitsPrefix(s string) string {
+	i := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+	}
+	return s[:i]
 }

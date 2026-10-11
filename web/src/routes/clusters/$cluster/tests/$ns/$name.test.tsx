@@ -47,9 +47,7 @@ describe("test page", () => {
         return HttpResponse.json({ name: "smoke-x1", namespace: "team-a" }, { status: 201 });
       }),
     );
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign, origin: window.location.origin });
-    renderRoute(page);
+    const { router } = renderRoute(page);
     const form = within(await screen.findByRole("form", { name: "Run" }));
     expect(form.getByLabelText(/vus/)).toHaveValue("10");
 
@@ -62,10 +60,9 @@ describe("test page", () => {
     await userEvent.clear(form.getByLabelText(/target/));
     await userEvent.type(form.getByLabelText(/target/), "https://shop");
     await userEvent.click(form.getByRole("button", { name: "Run test" }));
-    await waitFor(() => expect(assign).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.pathname).toBe("/clusters/dev/runs/team-a/smoke-x1"));
     expect(body).toEqual({ config: { env: "stage", target: "https://shop", vus: "10" } });
-    expect(assign).toHaveBeenCalledWith("/clusters/dev/runs/team-a/smoke-x1?notice=Run%20started.");
-    vi.unstubAllGlobals();
+    expect(await screen.findByText("Run started.")).toBeInTheDocument();
   });
 
   it("sends a start time as UTC", async () => {
@@ -79,17 +76,14 @@ describe("test page", () => {
         );
       }),
     );
-    const assign = vi.fn();
-    vi.stubGlobal("location", { ...window.location, assign, origin: window.location.origin });
-    renderRoute(page);
+    const { router } = renderRoute(page);
     const form = within(await screen.findByRole("form", { name: "Run" }));
     await userEvent.type(form.getByLabelText(/target/), "https://shop");
     await userEvent.type(form.getByLabelText(/Start at/), "2030-01-02T03:04");
     await userEvent.click(form.getByRole("button", { name: "Run test" }));
-    await waitFor(() => expect(assign).toHaveBeenCalled());
+    await waitFor(() => expect(router.state.location.pathname).toBe("/clusters/dev/runs/team-a/smoke-x2"));
     expect(body.notBefore).toBe("2030-01-02T03:04:00Z");
-    expect(assign.mock.calls[0]![0]).toContain("notice=Run%20scheduled%20for%202030-01-02%2003%3A04%20UTC.");
-    vi.unstubAllGlobals();
+    expect(await screen.findByText("Run scheduled for 2030-01-02 03:04 UTC.")).toBeInTheDocument();
   });
 
   it("shows the API's refusal to start", async () => {

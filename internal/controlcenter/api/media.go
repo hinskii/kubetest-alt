@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package server
+package api
 
 import (
 	"path"
@@ -27,18 +27,21 @@ import (
 // the run page by content type or extension, whichever tool wrote them
 // (Cypress cypress/screenshots + videos, Playwright test-results, …).
 
-// typePNG is the most common screenshot type.
-const typePNG = "image/png"
+// Common screenshot and video types.
+const (
+	typePNG = "image/png"
+	typeMP4 = "video/mp4"
+)
 
-// maxMedia bounds the gallery; the full list stays under Artifacts.
-const maxMedia = 24
+// MaxMedia bounds the gallery; the full list stays under Artifacts.
+const MaxMedia = 24
 
-// mediaTypes maps the extensions browsers show inline. Go's built-in MIME
+// MediaTypes maps the extensions browsers show inline. Go's built-in MIME
 // table lacks video types, and the type an artifact got recorded with
 // depends on the tool image's /etc/mime.types.
-var mediaTypes = map[string]string{
+var MediaTypes = map[string]string{
 	".png": typePNG, ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
-	".webp": "image/webp", ".mp4": "video/mp4", ".webm": "video/webm",
+	".webp": "image/webp", ".mp4": typeMP4, ".webm": "video/webm",
 }
 
 // mediaType is the inline type of an artifact: its recorded type when
@@ -47,28 +50,30 @@ func mediaType(p, recorded string) string {
 	if strings.HasPrefix(recorded, "image/") && recorded != "image/svg+xml" || strings.HasPrefix(recorded, "video/") {
 		return recorded
 	}
-	return mediaTypes[strings.ToLower(path.Ext(p))]
+	return MediaTypes[strings.ToLower(path.Ext(p))]
 }
 
-// mediaItem is one gallery entry.
-type mediaItem struct {
-	Path, Type string
-	Video      bool
+// Media is one gallery entry: a screenshot or a video.
+type Media struct {
+	Path  string `json:"path" required:"true"`
+	Type  string `json:"type" required:"true"`
+	Video bool   `json:"video" required:"true"`
 }
 
 // mediaOf picks the run's screenshots and videos (SVG excluded: it is a
 // document, not a picture, and is served sandboxed as an artifact).
-func mediaOf(arts []apiclient.Artifact) (items []mediaItem, more int) {
+func mediaOf(arts []apiclient.Artifact) (items []Media, more int) {
+	items = []Media{}
 	for _, a := range arts {
 		t := mediaType(a.Path, a.ContentType)
 		if t == "" {
 			continue
 		}
-		if len(items) == maxMedia {
+		if len(items) == MaxMedia {
 			more++
 			continue
 		}
-		items = append(items, mediaItem{Path: a.Path, Type: t, Video: strings.HasPrefix(t, "video/")})
+		items = append(items, Media{Path: a.Path, Type: t, Video: strings.HasPrefix(t, "video/")})
 	}
 	return items, more
 }

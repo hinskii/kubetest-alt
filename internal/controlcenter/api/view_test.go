@@ -17,6 +17,9 @@ limitations under the License.
 package api
 
 import (
+	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -90,4 +93,37 @@ func TestCommitURL(t *testing.T) {
 		assert.Equal(t, want, CommitURL(repo, sha), repo)
 	}
 	assert.Empty(t, CommitURL("https://github.com/acme/tests", ""), "no commit, no link")
+}
+
+func TestNaturalCompare(t *testing.T) {
+	keys := []string{"worker-10", "worker-2", "s1", "s10", "s2", "a", "worker-02"}
+	slices.SortFunc(keys, NaturalCompare)
+	assert.Equal(t, []string{"a", "s1", "s2", "s10", "worker-2", "worker-02", "worker-10"}, keys)
+}
+
+func TestMessageOf(t *testing.T) {
+	assert.Equal(t, "nope", messageOf(&apiclient.APIError{Status: 404, Message: "nope"}))
+	assert.Equal(t, "plain", messageOf(errors.New("plain")))
+}
+func TestMediaOf(t *testing.T) {
+	items, more := mediaOf([]apiclient.Artifact{
+		{Path: "results/junit.xml", ContentType: "application/xml"},
+		{Path: "cypress/screenshots/checkout.cy.js/pays (failed).png", ContentType: "image/png"},
+		{Path: "cypress/videos/checkout.cy.js.mp4", ContentType: "application/octet-stream"},
+		{Path: "test-results/login/video.webm"},
+		{Path: "report/logo.svg", ContentType: "image/svg+xml"},
+	})
+	assert.Zero(t, more)
+	require.Len(t, items, 3, "no XML, no SVG")
+	assert.Equal(t, Media{Path: "cypress/screenshots/checkout.cy.js/pays (failed).png", Type: "image/png"}, items[0])
+	assert.Equal(t, Media{Path: "cypress/videos/checkout.cy.js.mp4", Type: "video/mp4", Video: true}, items[1])
+	assert.True(t, items[2].Video)
+
+	many := make([]apiclient.Artifact, 0, MaxMedia+5)
+	for i := range MaxMedia + 5 {
+		many = append(many, apiclient.Artifact{Path: fmt.Sprintf("s/%d.png", i)})
+	}
+	items, more = mediaOf(many)
+	assert.Len(t, items, MaxMedia)
+	assert.Equal(t, 5, more)
 }

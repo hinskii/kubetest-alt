@@ -23,3 +23,9 @@ export function duration(ms?: number | null): string {
 export function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
+
+/** formatNumber renders a metric: integers as such, otherwise up to three decimals. */
+export function formatNumber(v: number): string {
+  if (Number.isInteger(v)) return String(v);
+  return String(Number(v.toFixed(3)));
+}

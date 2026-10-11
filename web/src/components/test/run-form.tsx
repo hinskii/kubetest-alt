@@ -1,5 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import { Controller, useForm, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -10,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { goPage, withNotice } from "@/lib/paths";
 
 const NOT_BEFORE = "__notBefore";
 
@@ -39,6 +39,7 @@ type Values = Record<string, string>;
 
 /** RunForm starts a run: parameters (defaults filled in) and an optional UTC start. */
 export function RunForm({ k, params }: { k: TestKey; params: Param[] }) {
+  const navigate = useNavigate();
   const form = useForm<Values>({
     // The schema is built at run time from the parameters: its static type is wide.
     resolver: zodResolver(schemaOf(params)) as unknown as Resolver<Values>,
@@ -54,11 +55,15 @@ export function RunForm({ k, params }: { k: TestKey; params: Param[] }) {
       return startRun(k, { config, notBefore: at ? `${at}:00Z` : undefined });
     },
     onSuccess: (started) => {
-      const notice = started.notBefore
-        ? `Run scheduled for ${started.notBefore.slice(0, 16).replace("T", " ")} UTC.`
-        : "Run started.";
-      // The run page is still server-rendered: it shows the notice.
-      window.location.assign(withNotice(goPage.run(k.cluster, started.namespace, started.name), notice));
+      toast.success(
+        started.notBefore
+          ? `Run scheduled for ${started.notBefore.slice(0, 16).replace("T", " ")} UTC.`
+          : "Run started.",
+      );
+      return navigate({
+        to: "/clusters/$cluster/runs/$ns/$id",
+        params: { cluster: k.cluster, ns: started.namespace, id: started.name },
+      });
     },
     onError: (e) => toast.error(`Could not start the run: ${e.message}`),
   });

@@ -28,7 +28,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -50,7 +49,22 @@ import (
 
 const ccDeveloper = "dev@e2e.test"
 
-var liveFrame = regexp.MustCompile(`<iframe class="live-view" src="(/live/[^"]+)"`)
+// ccRun is the run as the UI's API gives it (the fields checked here).
+type ccRun struct {
+	Phase    string `json:"phase"`
+	LiveView string `json:"liveView"`
+	Report   string `json:"report"`
+	Events   []struct {
+		Reason string `json:"reason"`
+	} `json:"events"`
+}
+
+func getCCRun(t *testing.T, rawURL string) ccRun {
+	t.Helper()
+	var r ccRun
+	require.NoError(t, json.Unmarshal([]byte(ccPage(t, rawURL, ccDeveloper)), &r))
+	return r
+}
 
 // noRedirect returns redirects as responses.
 var noRedirect = &http.Client{
@@ -181,17 +195,15 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	runName := started.Name
 	require.True(t, strings.HasPrefix(runName, "e2e-cc-k6-"), runName)
 	runPath := "/clusters/local/runs/" + workloadNS + "/" + runName
+	runAPI := ui + "/api/v1" + runPath
 
 	// 5. Live view, through the proxy without a session (signed link).
 	waitForPhase(t, ctx, c, runName, testsv1alpha1.PhaseRunning, 3*time.Minute)
 	var src string
 	require.Eventually(t, func() bool {
-		if m := liveFrame.FindStringSubmatch(ccPage(t, ui+runPath, ccDeveloper)); m != nil {
-			src = strings.ReplaceAll(m[1], "&amp;", "&")
-			return true
-		}
-		return false
-	}, time.Minute, 2*time.Second, "the run page shows the live view")
+		src = getCCRun(t, runAPI).LiveView
+		return src != ""
+	}, time.Minute, 2*time.Second, "the run has a live view")
 	var dashboard string
 	require.Eventually(t, func() bool {
 		resp := ccRequest(t, http.MethodGet, proxy+src, "", nil)
@@ -220,13 +232,17 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 
 	// 6. Finished: the run page shows the verdict and the stored log.
 	waitForPhase(t, ctx, c, runName, testsv1alpha1.PhasePassed, 3*time.Minute)
-	page := ccPage(t, ui+runPath, ccDeveloper)
-	assert.Contains(t, page, ">passed<")
-	assert.NotContains(t, page, "Live view of", "no live view once the run is over")
-	assert.Contains(t, page, "Report of "+runName, "the k6 report in its place")
+	done := getCCRun(t, runAPI)
+	assert.Equal(t, "passed", done.Phase)
+	assert.Empty(t, done.LiveView, "no live view once the run is over")
+	assert.NotEmpty(t, done.Report, "the k6 report in its place")
 	// The pod's Kubernetes events (the API server's events RBAC).
-	assert.Contains(t, page, "Kubernetes events")
-	assert.Contains(t, page, ">Scheduled<", "the scheduler's event for the run's pod")
+	reasons := make([]string, 0, len(done.Events))
+	for _, e := range done.Events {
+		reasons = append(reasons, e.Reason)
+	}
+	assert.Contains(t, reasons, "Scheduled", "the scheduler's event for the run's pod")
+	assert.Contains(t, ccPage(t, ui+runPath, ccDeveloper), `<div id="root">`, "the run page is the UI")
 	logs := ccPage(t, ui+runPath+"/logs.txt", ccDeveloper)
 	assert.Contains(t, logs, "live.js", "the run's log through Control Center")
 	history := ccPage(t, testAPI+"/runs", ccDeveloper)
@@ -241,7 +257,7 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	err = c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, &testsv1alpha1.Test{})
 	assert.True(t, apierrors.IsNotFound(err), "the Test is gone")
-	assert.Contains(t, ccPage(t, ui+runPath, ccDeveloper), ">passed<", "its run stays")
+	assert.Equal(t, "passed", getCCRun(t, runAPI).Phase, "its run stays")
 }
 
 func headerOf(t *testing.T, rawURL, header string) string {
