@@ -121,7 +121,7 @@ Expected: up to −2 min per Catalog job.
 
 These stay in the plan only if the measurement shows a real win.
 
-### F8 — Keep BuildKit's cache mounts between runs (added after R3)
+### F8 — Keep BuildKit's cache mounts between runs (added after R3) — measured, reverted
 
 **Problem.** After F1, an image build was fast only when no Go code changed. A Go change invalidated the build layer, and the Dockerfiles' cache mounts start empty on every runner, so the first Go image compiled every dependency again: ~2 min, and the images job took ~5 min instead of ~40 s.
 
@@ -133,7 +133,19 @@ These stay in the plan only if the measurement shows a real win.
 
 **First attempt.** The key covered only the dependencies. A run that compiled nothing then saved the still-empty mounts (0 MB), and every later run would have hit that key. Adding the Go sources to the key fixed it.
 
-**Measurement.** Still pending: it needs two consecutive commits that change Go code, which the first R4 commits are.
+**Measurement (R4a, R4b: two consecutive commits that change Go code).** It made the job slower.
+
+| images job, Go changed | Before F8 | With F8 |
+|---|---|---|
+| R4a (no saved mounts yet) | ~5 min | 7m 8s (E2E), 4m 50s (Catalog) |
+| R4b (mounts saved by R4a) | ~5 min | 8m 49s (E2E), 8m 24s (Catalog) |
+
+With R4a's mounts restored, the operator still took ~1 min (2m 13s cold), so compiling got about a minute faster. The cache cost more than that:
+- restoring the mounts and injecting them into the builder: ~1m 15s;
+- after the builds, extracting them from the builder: ~3m 15s;
+- saving them: ~30 s.
+
+The mounts are large, and the key changes on every Go commit, so every such commit pays both ways. Reverted: the workflow is back to the layer cache (F1), which already makes a run that changes no Go code fast.
 
 ## 3. Order
 
