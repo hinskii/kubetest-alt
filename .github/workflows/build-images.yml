@@ -34,15 +34,18 @@ jobs:
       # The Dockerfiles' cache mounts (Go modules, Go's build cache, pnpm's
       # store) live in the builder and start empty on every runner; the
       # first Go image then compiled every dependency (~2 min). They're
-      # kept in GitHub Actions' cache and injected into the builder. The
-      # key follows the dependencies: a hit restores them and skips saving
-      # (no upload); a new go.sum, lockfile or Dockerfile saves anew.
+      # kept in GitHub Actions' cache and injected into the builder.
+      # The key follows everything the builds compile: unchanged → a hit,
+      # nothing was compiled, saving is skipped; changed → the newest cache
+      # is restored (restore-keys), the build compiles only what changed,
+      # and the result is saved. What was injected comes back out with
+      # it, so a run that compiles nothing can't empty the cache.
       - name: Cache mounts
         id: mounts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: cache-mount
-          key: buildkit-mounts-${{ hashFiles('go.sum', 'web/pnpm-lock.yaml', 'Dockerfile', 'executors/content-fetcher/Dockerfile') }}
+          key: buildkit-mounts-${{ hashFiles('go.sum', '**/*.go', 'web/pnpm-lock.yaml', 'Dockerfile', 'executors/content-fetcher/Dockerfile') }}
           restore-keys: buildkit-mounts-
 
       - name: Inject the cache mounts into the builder
