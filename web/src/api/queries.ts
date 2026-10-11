@@ -137,3 +137,25 @@ export const deleteComment = async (k: RunKey) =>
 
 export const deleteRun = async (k: RunKey) =>
   noContent(await api.DELETE("/api/v1/clusters/{cluster}/runs/{ns}/{id}", { params: runParams(k) }));
+
+export type CleanupCriteria = { mode: "older" | "range"; days?: string; from?: string; to?: string };
+
+export const cleanupQuery = (k: TestKey, c: CleanupCriteria) =>
+  queryOptions({
+    queryKey: ["clusters", k.cluster, "tests", k.ns, k.name, "cleanup", c],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/clusters/{cluster}/tests/{ns}/{name}/cleanup", {
+          params: { ...testParams(k), query: c },
+        }),
+      ),
+    retry: false,
+  });
+
+export const cleanup = async (k: TestKey, runs: string[]) =>
+  unwrap(
+    await api.POST("/api/v1/clusters/{cluster}/tests/{ns}/{name}/cleanup", {
+      params: testParams(k),
+      body: { runs },
+    }),
+  );

@@ -9,6 +9,11 @@ import { server } from "./server";
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+};
 
 beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 afterEach(() => {

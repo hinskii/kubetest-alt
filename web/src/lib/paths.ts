@@ -23,5 +23,4 @@ export const goPage = {
   edit: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/edit`,
   cases: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/cases`,
   analytics: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/analytics`,
-  cleanup: (c: string, ns: string, name: string) => `${goPage.test(c, ns, name)}/cleanup`,
 };

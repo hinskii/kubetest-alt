@@ -67,6 +67,9 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 	return newWorldWithArchive(t, nil, objs...)
 }
 
+// archiveStore is run history for the real API server (cctest.Archive).
+type archiveStore = cctest.Archive
+
 // newWorldWithArchive also gives the API server a run history (runs whose
 // TestRun is gone), when archive is non-nil.
 func newWorldWithArchive(t *testing.T, archive *archiveStore, objs ...client.Object) *world {

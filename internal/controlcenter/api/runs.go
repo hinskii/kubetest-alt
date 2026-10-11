@@ -48,6 +48,7 @@ type RunRow struct {
 	// StartedAt, or NotBefore while it waits for its start time.
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	NotBefore  *time.Time `json:"notBefore,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	DurationMs int64      `json:"durationMs,omitempty"`
 	Commit     *Commit    `json:"commit,omitempty"`
 	Source     string     `json:"source,omitempty"`
@@ -99,16 +100,7 @@ func (s *Server) listTestRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	out := RunPage{Runs: make([]RunRow, 0, len(page.Runs)), Next: page.NextCursor}
 	for _, run := range page.Runs {
-		row := RunRow{ID: RunID(run), Name: run.Name, Phase: run.Phase, StartedAt: utc(run.StartedAt),
-			NotBefore: utc(run.NotBefore), DurationMs: run.DurationMs, Source: run.Source,
-			CreatedBy: run.Tags[TagCreatedBy]}
-		if run.Git != nil && run.Git.Commit != "" {
-			row.Commit = &Commit{SHA: run.Git.Commit, URL: CommitURL(run.Git.URI, run.Git.Commit)}
-		}
-		if run.Comment != nil {
-			row.Comment = run.Comment.Text
-		}
-		out.Runs = append(out.Runs, row)
+		out.Runs = append(out.Runs, runRow(run))
 	}
 	writeJSON(w, http.StatusOK, out)
 }

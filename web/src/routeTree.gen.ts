@@ -14,6 +14,7 @@ import { Route as ClustersClusterIndexRouteImport } from './routes/clusters/$clu
 import { Route as ClustersClusterSchedulesRouteImport } from './routes/clusters/$cluster/schedules'
 import { Route as ClustersClusterRunsNsIdRouteImport } from './routes/clusters/$cluster/runs/$ns/$id'
 import { Route as ClustersClusterTestsNsNameRouteImport } from './routes/clusters/$cluster/tests/$ns/$name'
+import { Route as ClustersClusterTestsNsNameCleanupRouteImport } from './routes/clusters/$cluster/tests/$ns/$name_.cleanup'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -42,6 +43,12 @@ const ClustersClusterTestsNsNameRoute =
     path: '/clusters/$cluster/tests/$ns/$name',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ClustersClusterTestsNsNameCleanupRoute =
+  ClustersClusterTestsNsNameCleanupRouteImport.update({
+    id: '/clusters/$cluster/tests/$ns/$name_/cleanup',
+    path: '/clusters/$cluster/tests/$ns/$name/cleanup',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -49,6 +56,7 @@ export interface FileRoutesByFullPath {
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/tests/$ns/$name/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -56,6 +64,7 @@ export interface FileRoutesByTo {
   '/clusters/$cluster': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/tests/$ns/$name/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -64,6 +73,7 @@ export interface FileRoutesById {
   '/clusters/$cluster/': typeof ClustersClusterIndexRoute
   '/clusters/$cluster/runs/$ns/$id': typeof ClustersClusterRunsNsIdRoute
   '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
+  '/clusters/$cluster/tests/$ns/$name_/cleanup': typeof ClustersClusterTestsNsNameCleanupRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -73,6 +83,7 @@ export interface FileRouteTypes {
     | '/clusters/$cluster/'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/tests/$ns/$name/cleanup'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -80,6 +91,7 @@ export interface FileRouteTypes {
     | '/clusters/$cluster'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/tests/$ns/$name/cleanup'
   id:
     | '__root__'
     | '/'
@@ -87,6 +99,7 @@ export interface FileRouteTypes {
     | '/clusters/$cluster/'
     | '/clusters/$cluster/runs/$ns/$id'
     | '/clusters/$cluster/tests/$ns/$name'
+    | '/clusters/$cluster/tests/$ns/$name_/cleanup'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -95,6 +108,7 @@ export interface RootRouteChildren {
   ClustersClusterIndexRoute: typeof ClustersClusterIndexRoute
   ClustersClusterRunsNsIdRoute: typeof ClustersClusterRunsNsIdRoute
   ClustersClusterTestsNsNameRoute: typeof ClustersClusterTestsNsNameRoute
+  ClustersClusterTestsNsNameCleanupRoute: typeof ClustersClusterTestsNsNameCleanupRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -134,6 +148,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ClustersClusterTestsNsNameRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/clusters/$cluster/tests/$ns/$name_/cleanup': {
+      id: '/clusters/$cluster/tests/$ns/$name_/cleanup'
+      path: '/clusters/$cluster/tests/$ns/$name/cleanup'
+      fullPath: '/clusters/$cluster/tests/$ns/$name/cleanup'
+      preLoaderRoute: typeof ClustersClusterTestsNsNameCleanupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -143,6 +164,8 @@ const rootRouteChildren: RootRouteChildren = {
   ClustersClusterIndexRoute: ClustersClusterIndexRoute,
   ClustersClusterRunsNsIdRoute: ClustersClusterRunsNsIdRoute,
   ClustersClusterTestsNsNameRoute: ClustersClusterTestsNsNameRoute,
+  ClustersClusterTestsNsNameCleanupRoute:
+    ClustersClusterTestsNsNameCleanupRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

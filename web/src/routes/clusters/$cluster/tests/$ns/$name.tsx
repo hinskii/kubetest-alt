@@ -168,7 +168,9 @@ function TestPage() {
             </Button>
             {canRun && (
               <Button variant="outline" size="sm" asChild>
-                <a href={goPage.cleanup(k.cluster, k.ns, k.name)}>Clean up runs</a>
+                <Link to="/clusters/$cluster/tests/$ns/$name/cleanup" params={k}>
+                  Clean up runs
+                </Link>
               </Button>
             )}
           </>

@@ -178,6 +178,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The finished runs a cleanup by age (mode=older) or date range (mode=range) would delete, oldest first.
+         * @description Requires the developer role.
+         */
+        get: operations["previewCleanup"];
+        put?: never;
+        /**
+         * Delete these finished runs of the Test (a preview's matches) with their logs and artifacts.
+         * @description Requires the admin role.
+         */
+        post: operations["cleanup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/runs": {
         parameters: {
             query?: never;
@@ -267,6 +291,27 @@ export interface components {
             /** Format: date-time */
             startedAt?: null | string;
             testRef: string;
+        };
+        CleanupPreview: {
+            days?: number;
+            from?: string;
+            matches: components["schemas"]["RunRow"][];
+            max: number;
+            /** @enum {string} */
+            mode: "older" | "range";
+            more?: number;
+            note?: string;
+            scanCapped?: boolean;
+            scanned: number;
+            to?: string;
+        };
+        CleanupRequest: {
+            runs: string[];
+        };
+        CleanupResult: {
+            deleted: number;
+            failures: string[];
+            requested: number;
         };
         Cluster: {
             displayName: string;
@@ -405,6 +450,8 @@ export interface components {
             createdBy?: string;
             /** Format: int64 */
             durationMs?: number;
+            /** Format: date-time */
+            finishedAt?: null | string;
             id: string;
             name: string;
             /** Format: date-time */
@@ -1098,6 +1145,135 @@ export interface operations {
             };
             /** @description Conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    previewCleanup: {
+        parameters: {
+            query?: {
+                mode?: "older" | "range";
+                days?: string;
+                from?: string;
+                to?: string;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CleanupPreview"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    cleanup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CleanupRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CleanupResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

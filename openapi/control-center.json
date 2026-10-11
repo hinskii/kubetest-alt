@@ -94,6 +94,91 @@
         ],
         "type": "object"
       },
+      "CleanupPreview": {
+        "properties": {
+          "days": {
+            "type": "integer"
+          },
+          "from": {
+            "type": "string"
+          },
+          "matches": {
+            "items": {
+              "$ref": "#/components/schemas/RunRow"
+            },
+            "type": "array"
+          },
+          "max": {
+            "type": "integer"
+          },
+          "mode": {
+            "enum": [
+              "older",
+              "range"
+            ],
+            "type": "string"
+          },
+          "more": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          },
+          "scanCapped": {
+            "type": "boolean"
+          },
+          "scanned": {
+            "type": "integer"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "matches",
+          "scanned",
+          "max"
+        ],
+        "type": "object"
+      },
+      "CleanupRequest": {
+        "properties": {
+          "runs": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 200,
+            "type": "array"
+          }
+        },
+        "required": [
+          "runs"
+        ],
+        "type": "object"
+      },
+      "CleanupResult": {
+        "properties": {
+          "deleted": {
+            "type": "integer"
+          },
+          "failures": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "requested": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted",
+          "requested",
+          "failures"
+        ],
+        "type": "object"
+      },
       "Cluster": {
         "properties": {
           "displayName": {
@@ -587,6 +672,13 @@
           "durationMs": {
             "format": "int64",
             "type": "integer"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "id": {
             "type": "string"
@@ -1793,6 +1885,215 @@
           }
         },
         "summary": "A Test with its templates merged: parameters, schedule, definition."
+      }
+    },
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/cleanup": {
+      "get": {
+        "description": "Requires the developer role.",
+        "operationId": "previewCleanup",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "mode",
+            "schema": {
+              "enum": [
+                "older",
+                "range"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "days",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupPreview"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "The finished runs a cleanup by age (mode=older) or date range (mode=range) would delete, oldest first."
+      },
+      "post": {
+        "description": "Requires the admin role.",
+        "operationId": "cleanup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "cluster",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "ns",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CleanupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleanupResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          }
+        },
+        "summary": "Delete these finished runs of the Test (a preview's matches) with their logs and artifacts."
       }
     },
     "/api/v1/clusters/{cluster}/tests/{ns}/{name}/runs": {
