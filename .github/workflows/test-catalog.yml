@@ -77,11 +77,13 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Free disk space
+      # Runners have a 145 GB disk with ~75 GB free; the biggest tool image
+      # (cypress, zap) needs a few GB. Deleting preinstalled SDKs took
+      # 1.5 min per job and is no longer needed (step 21 F6); the free
+      # space is logged so a shortage shows.
+      - name: Disk space
         if: steps.want.outputs.run == 'true'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
-          df -h /
+        run: df -h /
 
       - name: Checkout
         if: steps.want.outputs.run == 'true'
