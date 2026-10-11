@@ -106,9 +106,8 @@ func TestEditor_MovedToTheUI(t *testing.T) {
 	rec := w.get(t, clusterURL+"/tests/team-a/smoke/edit", developer)
 	assert.Equal(t, http.StatusMovedPermanently, rec.Code)
 	assert.Equal(t, clusterURL+"/tests/team-a/smoke?tab=settings", rec.Header().Get("Location"))
-	page := w.get(t, clusterURL+"/tests/new", "someone@example.com")
-	assert.Equal(t, http.StatusOK, page.Code)
-	assert.Contains(t, page.Body.String(), `<div id="root">`)
+	// The UI's page (webui's tests cover what it serves, built or not).
+	assert.Equal(t, http.StatusOK, w.get(t, clusterURL+"/tests/new", "someone@example.com").Code)
 }
 
 func smokeTest() *testsv1alpha1.Test {
