@@ -11,4 +11,5 @@ export default tseslint.config(
   reactHooks.configs.flat.recommended,
   jsxA11y.flatConfigs.recommended,
   { files: ["scripts/**"], languageOptions: { globals: globals.node } },
+  { files: ["public/**/*.js"], languageOptions: { globals: globals.browser } },
 );

@@ -9,6 +9,25 @@ Kubernetes RBAC on that one Service. `X-Kubetest-User` (run creator,
 abort requester, audit actor) is attribution, not authentication: anyone
 who can reach the Service can set it.
 
+## Control Center's pages and API
+
+- One page, the React app: `index.html` and content-hashed assets, all
+  from Control Center. Its `Content-Security-Policy` allows scripts from
+  Control Center only (no inline script, no CDN). It allows inline
+  *styles*, because the component libraries inject `<style>` elements;
+  styles can restyle the page but not run code. Everything else Control
+  Center answers keeps `default-src 'self'`.
+- The app's data is Control Center's own JSON API under `/api/v1`
+  (`openapi/control-center.json`), behind the same sign-in as the page:
+  oauth2-proxy in front sets the user, and roles are checked per route.
+  Control Center calls each cluster's kubetest API through the Kubernetes
+  service proxy, acting for that user (above). It keeps no state of its
+  own.
+- Requests that change something (run, abort, save, delete) must come
+  from the page itself: Go's `CrossOriginProtection` rejects cross-site
+  non-GET requests (`Sec-Fetch-Site` / `Origin`), CSRF protection with no
+  tokens to keep.
+
 ## Artifacts in Control Center
 
 Artifacts are test output written by test code, so Control Center never

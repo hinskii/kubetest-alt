@@ -76,6 +76,24 @@ func Assets() http.Handler {
 	})
 }
 
+// ThemePath is the script that sets the theme before first paint (web/
+// public/theme.js): not content-hashed, so revalidated like index.html.
+const ThemePath = "/theme.js"
+
+// Theme serves ThemePath.
+func Theme() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		b, err := fs.ReadFile(sub(), strings.TrimPrefix(ThemePath, "/"))
+		if err != nil {
+			w.WriteHeader(http.StatusNoContent) // not built: no theme, no error
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write(b)
+	})
+}
+
 // Index serves the UI's index.html for a route the UI owns; the browser
 // router takes it from there. Never cached, so a new build shows at once.
 func Index() http.Handler { return page(http.StatusOK) }

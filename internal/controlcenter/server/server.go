@@ -32,9 +32,7 @@ import (
 	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 )
 
 // defaultProbeTimeout bounds one cluster health probe on the home page.
@@ -44,7 +42,6 @@ const defaultProbeTimeout = 3 * time.Second
 type Server struct {
 	Clusters *clusters.Registry
 	Auth     *auth.Resolver
-	Views    *views.Views
 	Log      *slog.Logger
 	// ProbeTimeout bounds a cluster health probe. Default 3s.
 	ProbeTimeout time.Duration
@@ -76,8 +73,8 @@ func (s *Server) Handler() http.Handler {
 
 	mux := http.NewServeMux()
 	// The React UI (step 20R): its pages are index.html plus /assets/*,
-	// its data the JSON API. Routes move to it page by page; the ones
-	// still server-rendered are registered below (s.routes).
+	// its data the JSON API. What stays here (s.routes) are files: a run's
+	// log and artifacts, and the tool's live view.
 	mux.Handle("GET /{$}", webui.Index())
 	mux.Handle("GET "+webui.AssetsPrefix, webui.Assets())
 	(&uiapi.Server{
@@ -93,15 +90,7 @@ func (s *Server) Handler() http.Handler {
 			s.clusterUp.WithLabelValues(cluster).Set(v)
 		},
 	}).Register(mux)
-	mux.Handle("GET /static/", views.Static())
-	// Highlighting styles, generated from Chroma's github / github-dark.
-	highlightCSS := []byte(yamlview.CSS())
-	mux.HandleFunc("GET /static/highlight.css", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		// The page links it with ?v=<hash of the content>: cache it long.
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		_, _ = w.Write(highlightCSS)
-	})
+	mux.Handle("GET "+webui.ThemePath, webui.Theme())
 	mux.HandleFunc("GET /healthz", ok)
 	// Local readiness only: one unreachable cluster must not take the
 	// whole UI out of the Service. Cluster health is on the home page
@@ -183,16 +172,9 @@ func (s *Server) notFound(w http.ResponseWriter, r *http.Request) {
 	s.renderError(w, r, http.StatusNotFound, "There is nothing at "+r.URL.Path+".")
 }
 
-func (s *Server) renderError(w http.ResponseWriter, r *http.Request, status int, msg string) {
-	s.render(w, r, status, "error", http.StatusText(status), views.ErrorData{
-		Status: status, StatusText: http.StatusText(status), Message: msg,
-	})
-}
-
-func (s *Server) render(w http.ResponseWriter, r *http.Request, status int, page, title string, data any) {
-	err := s.Views.Render(w, status, page, views.Page{Title: title, User: auth.FromContext(r.Context()), Data: data})
-	if err != nil {
-		s.Log.Error("render failed", "page", page, "err", err)
-		http.Error(w, "internal error", http.StatusInternalServerError)
-	}
+// renderError answers a request this server handles itself (a download, a
+// live view) that failed: the reason as plain text — the pages are the
+// UI's, and it shows its own errors.
+func (s *Server) renderError(w http.ResponseWriter, _ *http.Request, status int, msg string) {
+	http.Error(w, msg, status)
 }

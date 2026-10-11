@@ -73,3 +73,15 @@ func TestAssets_OnlyFilesUnderAssets(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, serve(Assets(), p).Code, p)
 	}
 }
+
+func TestTheme_RevalidatedScript(t *testing.T) {
+	rec := serve(Theme(), ThemePath)
+	if !Built() {
+		assert.Equal(t, http.StatusNoContent, rec.Code, "no build: nothing to run, no error")
+		return
+	}
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+	assert.Equal(t, "text/javascript; charset=utf-8", rec.Header().Get("Content-Type"))
+	assert.Contains(t, rec.Body.String(), `localStorage.getItem("theme")`)
+}

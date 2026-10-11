@@ -39,7 +39,6 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/cctest"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/pkg/storage"
 )
 
@@ -80,9 +79,7 @@ func newWorldWithArchive(t *testing.T, archive *archiveStore, objs ...client.Obj
 	env := cctest.New(t, o, objs...)
 	res, err := auth.NewResolver(&config.Config{Environment: config.EnvProduction, RBAC: env.RBAC}, "")
 	require.NoError(t, err)
-	v, err := views.New()
-	require.NoError(t, err)
-	s := &Server{Clusters: env.Clusters, Auth: res, Views: v, ProbeTimeout: time.Second,
+	s := &Server{Clusters: env.Clusters, Auth: res, ProbeTimeout: time.Second,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return &world{h: s.Handler(), k8s: env.K8s, objects: env.Objects}
 }
@@ -181,11 +178,9 @@ func TestClusterUnreachable(t *testing.T) {
 		APIServer: config.APIServerRef{Namespace: "x", Service: "y", Port: 1},
 	}}, clusters.Options{InClusterConfig: func() (*rest.Config, error) { return &rest.Config{}, nil }})
 	require.NoError(t, err)
-	v, err := views.New()
-	require.NoError(t, err)
 	res, err := auth.NewResolver(&config.Config{Environment: config.EnvProduction}, "")
 	require.NoError(t, err)
-	w.h = (&Server{Clusters: reg, Auth: res, Views: v, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler()
+	w.h = (&Server{Clusters: reg, Auth: res, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler()
 
 	rec := w.get(t, "/clusters/dev/runs/a/b/logs.txt", "")
 	assert.Equal(t, http.StatusBadGateway, rec.Code)

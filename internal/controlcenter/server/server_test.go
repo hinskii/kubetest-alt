@@ -34,7 +34,6 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
 )
 
@@ -75,9 +74,7 @@ func mkServer(t *testing.T, hosts map[string]string) http.Handler {
 	require.NoError(t, err)
 	res, err := auth.NewResolver(cfg, "")
 	require.NoError(t, err)
-	v, err := views.New()
-	require.NoError(t, err)
-	s := &Server{Clusters: reg, Auth: res, Views: v, ProbeTimeout: time.Second,
+	s := &Server{Clusters: reg, Auth: res, ProbeTimeout: time.Second,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	return s.Handler()
 }
@@ -179,15 +176,16 @@ func TestCrossSitePostIsRejected(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, do(t, h, req).Code, "same-origin passes the CSRF check")
 }
 
-func TestNotFoundAndStatic(t *testing.T) {
+func TestNotFoundAndTheme(t *testing.T) {
 	h := mkServer(t, map[string]string{"deploy-dev": fakeCluster(t, http.StatusOK)})
 	rec := do(t, h, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Body.String(), "There is nothing at /nope.")
+	assert.Equal(t, "There is nothing at /nope.\n", rec.Body.String(), "plain text: the pages are the UI's")
+	assert.Equal(t, http.StatusNotFound, do(t, h, httptest.NewRequest(http.MethodGet, "/static/app.css", nil)).Code,
+		"no server-rendered assets any more")
 
-	rec = do(t, h, httptest.NewRequest(http.MethodGet, "/static/app.css", nil))
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), "--primary")
+	rec = do(t, h, httptest.NewRequest(http.MethodGet, "/theme.js", nil))
+	assert.Contains(t, []int{http.StatusOK, http.StatusNoContent}, rec.Code, "the UI's pre-paint script (204 unbuilt)")
 }
 
 func TestOpsHandler_ProbesAndMetricsOnly(t *testing.T) {

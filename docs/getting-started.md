@@ -53,8 +53,9 @@ Playwright and ZAP are big).
 
 ## Write your own Test
 
-The quickest way: Control Center → **New test**, a wizard over the tool
-catalog (docs/control-center.md) — it shows the Test's YAML at the end.
+The quickest way: Control Center → **New test**: pick k6, paste a
+script, create — three screens, with the Test's YAML building beside
+them (docs/control-center.md).
 By hand: a Test is an image + a command (CLAUDE.md §10). Smallest one — a
 k6 script inline, with a parameter:
 
@@ -106,7 +107,8 @@ Things to try next, all in Control Center afterwards:
 
 Tests you `kubectl apply` are managed in "Git" as far as Control Center is
 concerned (read-only there, runs allowed); **Duplicate** on such a Test's
-page makes an editable copy. Tests made with the wizard are editable.
+page makes an editable copy. Tests made with the wizard are edited in
+their page's **Settings** tab.
 
 ## Look under the hood
 

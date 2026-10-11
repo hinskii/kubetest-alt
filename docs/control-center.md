@@ -150,49 +150,49 @@ links to open it in a new tab or download it.
 
 ## Creating and editing Tests
 
-**New test** on a cluster's page opens a wizard that writes the Test CRD:
+**New test** on a cluster's page opens a wizard of three short steps. The
+Test's YAML builds beside it as you type: the same build Create runs, so
+what you see is what is written. Problems show beside the field they
+belong to.
 
-1. **Basics** — namespace, name, and the tool: a TestTemplate of that
-   namespace's catalog (k6, Cypress, JMeter, …) or an own image.
-2. **Source** — where the code comes from, one of: a **git repository**,
-   **inline files** (typed in, for single-file tools — k6, JMeter, newman,
-   Locust, Artillery, kubepug, SoapUI), or **none** (an own image that
-   needs no files). Tools that run a project (Playwright, Cypress, Gradle,
-   Maven, pytest, Cucumber, Gatling) take git only. With git, **Path in
-   the repository** is required: where the tests are, a file or a
-   directory (`perf/checkout.js`, `e2e/web`; `.` for all of it). It fills
-   the template's main path parameter and the sparse checkout (the
-   directory, or a file's directory); *Sparse paths* (advanced) override
-   the latter, and the review warns when the main path falls outside
-   them. Inline files sit below `/data/repo/`, and need no path at all:
-   the first file is the test. **Test data** — ConfigMaps and Secrets
-   mounted as files, with any source — is set in the same step
-   (docs/test-data.md).
-3. **Parameters & container** — the template's parameters (a Test keeps
-   only those that differ from the template's defaults; a run can still
-   override them), image, command, arguments, environment, CPU/memory.
-   The template's main path parameter — the one its container puts after
-   `/data/repo/` (k6's `script`, JMeter's `plan`, newman's `collection`,
-   …) — has no default: it follows the path in the repository, or with
-   inline files the first file, unless you set it. Pick k6, paste a
-   script, create.
-4. **Pod & schedule** — pod annotations and labels (e.g.
-   `sidecar.istio.io/inject=false`), service account, timeout, cron.
-5. **Review** — the Test's YAML and the API's verdict on it: a server-side
-   dry run through the same admission webhooks and pod policy a real write
-   meets, so nothing is created until it would be accepted. Then **Create
-   test** (in the cluster, `managed-by: ui`), **Download YAML** /
-   **Copy YAML** (for Git, without the GUI's `managed-by` label — commit
-   it and ArgoCD owns it), or **Edit as YAML** for what the form doesn't
-   cover (composite steps, services, parallel workers, volumes, verdict).
+1. **What do you test?** — name, namespace (picked or typed; the tool
+   list follows it), and the tool: a TestTemplate of that namespace's
+   catalog (k6, Cypress, JMeter, …) or **Own image**, last. Then where the
+   code comes from, as the tool allows: tools that run a project
+   (Playwright, Cypress, Gradle, Maven, pytest, Cucumber, Gatling) take
+   **git** only; single-file tools (k6, JMeter, newman, Locust, Artillery,
+   kubepug, SoapUI) a **pasted script** or git; an own image either, or
+   **none**.
+2. **Where is the test?** — paste the script (the editor highlights it by
+   file name; the first file is the test, no path to type), or the git
+   repository, **Path in the repository** (a file or a directory; `.` for
+   all of it) and branch. A private repository's token Secret is behind
+   *Private repository?*. An own image asks for its image and command.
+3. **Parameters** — the template's parameters; a Test keeps only those
+   that differ from the defaults, and a run can still override them.
 
-**Edit** on a GUI-managed Test opens the same wizard. Fields the form
-doesn't show are kept as they are; composite Tests and Tests using more
-than one template open as YAML. Saving is conditional on the version the
-editor opened: if someone changed the Test meanwhile, nothing is
-overwritten and the page says so. Tests applied from Git can't be edited
-here (CLAUDE.md §7) — **Duplicate** makes a GUI-managed copy instead.
-Admins can **delete** a GUI-managed Test; its run history stays.
+**Create test** writes it (`managed-by: ui`). **Check** asks the API
+whether it would admit the Test: a server-side dry run through the same
+admission webhooks and pod policy, nothing created. **Download YAML** is
+the Test for Git, without the GUI's `managed-by` label: commit it and
+ArgoCD owns it. **Edit as YAML** writes what the form doesn't cover
+(composite steps, services, parallel workers, volumes, verdict); the
+server's errors mark their lines.
+
+Everything else is in the Test's **Settings** tab (**Edit** opens it):
+General, Source, Test data (docs/test-data.md), Parameters, Container,
+Resources, Pod (annotations such as `sidecar.istio.io/inject=false`,
+labels, service account), Schedule and Timeout. Each section saves on its
+own, and the others keep what you typed. A save is conditional on the
+version the page showed: if someone changed the Test meanwhile, nothing
+is overwritten, and the section offers to reload. Beside the sections is
+the Test's YAML with your unsaved changes; **Edit YAML** turns it into
+the editor for the whole Test. Tests the form can't show (composite
+Tests, Tests using more than one template) open there directly.
+
+Tests applied from Git are read-only here (CLAUDE.md §7): **Duplicate**
+makes a GUI-managed copy instead. Admins can **delete** a GUI-managed
+Test; its run history stays.
 
 ### "Not ready to run"
 
@@ -237,9 +237,10 @@ lists its child runs, each linked.
 
 ## Developing the UI
 
-The UI is a React app in `web/` (step 20R moves the pages to it one by
-one; the rest are still server-rendered). It is built into the
-Control Center binary, so the image is still the only thing to deploy.
+Every page is the React app in `web/`. It is built into the Control
+Center binary, so the image is still the only thing to deploy. The Go
+server serves the app, the JSON API, and files: a run's log and
+artifacts, and the tool's live view.
 Its data comes from Control Center's JSON API under `/api/v1`, described
 by `openapi/control-center.json`.
 
@@ -247,8 +248,9 @@ by `openapi/control-center.json`.
   once; the pnpm version comes from `web/package.json`.
 - `make web-install`, then `make dev-ui` (Control Center of the dev
   cluster on :8090) and `make web-dev` (hot reload on :5173; it proxies the
-  API and the old pages to :8090).
-- Gates: `make web-typecheck web-lint web-test web-build web-size`;
+  API, downloads and live views to :8090).
+- Gates: `make web-typecheck web-lint web-test web-build web-size`
+  (`web-test` fails under 80% of lines covered);
   Playwright against a running Control Center: `make web-e2e`.
 - After changing the API: `make web-gen-api` regenerates the spec and the
   UI's types.

@@ -85,24 +85,3 @@ func TestFormat_SpecRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "{}\n", out, "an empty spec stays an object")
 }
-
-func TestHighlight(t *testing.T) {
-	html := string(Highlight("name: <b>x</b>\nvus: 5\n"))
-	assert.Contains(t, html, `class="chroma"`)
-	assert.Contains(t, html, `<span class="ln">1</span>`, "line numbers")
-	assert.Contains(t, html, `&lt;b&gt;`, "escaped")
-	assert.NotContains(t, html, "<b>")
-	assert.Contains(t, string(HighlightAs("export default function () {}", "load.js")), `class="kd"`, "JavaScript by file name")
-}
-
-func TestCSS_LightAndDark(t *testing.T) {
-	css := CSS()
-	assert.Contains(t, css, `:root:not([data-theme="dark"]) .chroma .nt {`)
-	assert.Contains(t, css, `:root[data-theme="dark"] .chroma .nt {`)
-	assert.Contains(t, css, "background-color: transparent !important")
-}
-
-func TestCSSVersion_FollowsTheContent(t *testing.T) {
-	assert.Len(t, CSSVersion(), 12)
-	assert.Equal(t, CSSVersion(), CSSVersion(), "stable for the same styles")
-}

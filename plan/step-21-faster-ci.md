@@ -145,7 +145,7 @@ With R4a's mounts restored, the operator still took ~1 min (2m 13s cold), so com
 - after the builds, extracting them from the builder: ~3m 15s;
 - saving them: ~30 s.
 
-The mounts are large, and the key changes on every Go commit, so every such commit pays both ways. Reverted: the workflow is back to the layer cache (F1), which already makes a run that changes no Go code fast.
+The mounts are large, and the key changes on every Go commit, so every such commit pays both ways. Reverted: the workflow is back to the layer cache (F1), which already makes a run that changes no Go code fast. After the revert, a commit changing Go code (2d5939c) built the images in 4m 19s.
 
 ## 3. Order
 

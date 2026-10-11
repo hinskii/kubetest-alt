@@ -9,7 +9,7 @@ import { defineConfig } from "vitest/config";
 // build lands in internal/controlcenter/webui/dist. In dev, Vite serves the
 // UI and proxies everything the Go server still owns to `make dev-ui`.
 const backend = process.env.KUBETEST_CC_URL ?? "http://localhost:8090";
-const goOwned = ["/api", "/live", "/static", "/clusters", "/healthz", "/metrics"];
+const goOwned = ["/api", "/live", "/clusters", "/healthz", "/metrics"];
 
 export default defineConfig({
   plugins: [
@@ -47,5 +47,20 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
+    coverage: {
+      provider: "v8",
+      include: ["src/**"],
+      // Generated code, shadcn's copied primitives and test helpers.
+      exclude: [
+        "src/**/*.test.{ts,tsx}",
+        "src/test/**",
+        "src/routeTree.gen.ts",
+        "src/api/schema.d.ts",
+        "src/components/ui/**",
+        "src/main.tsx",
+      ],
+      reporter: ["text-summary"],
+      thresholds: { lines: 80 },
+    },
   },
 });

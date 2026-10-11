@@ -576,7 +576,7 @@ kubetest-alt/
 │   ├── store/                    # Postgres run history, test cases, audit (+ migrations)
 │   ├── retention/                # leader-elected history/object expiry
 │   ├── apiserver/                # REST handlers + OpenAPI
-│   ├── controlcenter/            # UI: server, views (html/template), auth, clusters, config
+│   ├── controlcenter/            # UI backend: api (JSON for web/), server (files, live view), webui (embedded build), auth, clusters, config
 │   ├── cli/                      # kubectl-kubetest commands + discovery (service proxy, token)
 │   ├── podpolicy/                # what test pods may ask for (service accounts, volumes, privileges)
 │   ├── webhook/                  # admission webhooks
@@ -588,6 +588,8 @@ kubetest-alt/
 │   ├── report/                   # tool report parsers -> shared metric vocabulary
 │   ├── storage/                  # S3 / GCS object storage, run key layout
 │   └── verdict/                  # verdictFrom processors (junit, jtl)
+├── web/                          # Control Center's UI: React + TypeScript (Vite, TanStack, shadcn), embedded in the binary
+├── openapi/                      # API specs: openapi.json (apiserver), control-center.json (the UI's API)
 ├── executors/                    # platform images: content-fetcher (+ gatling, soapui, kubepug)
 ├── config/                       # kustomize: crd/ rbac/ webhook/; templates/ (tool catalog); samples/
 ├── charts/kubetest-alt/          # Helm: operator, apiserver, Control Center (+ oauth2-proxy sidecar)

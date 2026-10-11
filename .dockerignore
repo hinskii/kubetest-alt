@@ -25,12 +25,8 @@
 #   grep -rn "go:embed" internal/ pkg/ cmd/
 !**/*.sql
 
-# Control Center's UI (internal/controlcenter/views: //go:embed templates/*.html
-# and static). test/dockerignore_test.go fails when an embed isn't listed.
-!internal/controlcenter/views/templates/*.html
-!internal/controlcenter/views/static/**
-
 # Control Center's React UI (internal/controlcenter/webui: //go:embed all:dist).
+# test/dockerignore_test.go fails when an embed isn't listed.
 # The Dockerfile's web stage builds dist from web/; the context carries
 # only the placeholder that keeps the embed valid when the stage is off.
 !internal/controlcenter/webui/dist/.gitkeep

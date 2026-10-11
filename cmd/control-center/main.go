@@ -35,7 +35,6 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/server"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
 )
 
 func main() {
@@ -81,11 +80,7 @@ func run(ctx context.Context, log *slog.Logger, configPath, listen, opsListen, e
 	if err != nil {
 		return err
 	}
-	v, err := views.New()
-	if err != nil {
-		return err
-	}
-	cc := &server.Server{Clusters: reg, Auth: resolver, Views: v, Log: log,
+	cc := &server.Server{Clusters: reg, Auth: resolver, Log: log,
 		LiveViewKey: []byte(os.Getenv("CC_LIVE_VIEW_KEY"))}
 	srv := &http.Server{Addr: listen, Handler: cc.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	servers := []*http.Server{srv}

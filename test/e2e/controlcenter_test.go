@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -72,18 +71,11 @@ var noRedirect = &http.Client{
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
-func ccRequest(t *testing.T, method, rawURL, user string, form url.Values) *http.Response {
+// ccGet requests rawURL as user (none: anonymous), following no redirect.
+func ccGet(t *testing.T, rawURL, user string) *http.Response {
 	t.Helper()
-	var body io.Reader
-	if form != nil {
-		body = strings.NewReader(form.Encode())
-	}
-	req, err := http.NewRequest(method, rawURL, body)
+	req, err := http.NewRequest(http.MethodGet, rawURL, nil)
 	require.NoError(t, err)
-	if form != nil {
-		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		req.Header.Set("Sec-Fetch-Site", "same-origin")
-	}
 	if user != "" {
 		req.Header.Set("X-Forwarded-Email", user)
 	}
@@ -113,7 +105,7 @@ func ccJSON(t *testing.T, method, rawURL, user string, body any) *http.Response 
 
 func ccPage(t *testing.T, rawURL, user string) string {
 	t.Helper()
-	resp := ccRequest(t, http.MethodGet, rawURL, user, nil)
+	resp := ccGet(t, rawURL, user)
 	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	require.Equal(t, http.StatusOK, resp.StatusCode, "%s: %s", rawURL, b)
@@ -128,7 +120,7 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 
 	// 1. Sign-in: without a Google session the proxy sends people to
 	//    Google, a forged email header changes nothing.
-	resp := ccRequest(t, http.MethodGet, proxy+"/clusters/local", "admin@e2e.test", nil)
+	resp := ccGet(t, proxy+"/clusters/local", "admin@e2e.test")
 	_ = resp.Body.Close()
 	require.Equal(t, http.StatusFound, resp.StatusCode)
 	assert.True(t, strings.HasPrefix(resp.Header.Get("Location"), "https://accounts.google.com/"), resp.Header.Get("Location"))
@@ -207,7 +199,7 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	}, time.Minute, 2*time.Second, "the run has a live view")
 	var dashboard string
 	require.Eventually(t, func() bool {
-		resp := ccRequest(t, http.MethodGet, proxy+src, "", nil)
+		resp := ccGet(t, proxy+src, "")
 		defer func() { _ = resp.Body.Close() }()
 		b, _ := io.ReadAll(resp.Body)
 		dashboard = string(b)
