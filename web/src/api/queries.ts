@@ -90,7 +90,8 @@ export async function runLogChunk(k: RunKey, offset: number, signal?: AbortSigna
     parseAs: "text",
     signal,
   });
-  const text = unwrap(r);
+  // An empty chunk (nothing new yet) has no body, so no data: still a success.
+  const text = r.response.ok ? (r.data ?? "") : unwrap(r);
   const h = r.response.headers;
   return {
     text,

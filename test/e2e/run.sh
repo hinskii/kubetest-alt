@@ -388,6 +388,13 @@ if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   phase_start "web_e2e"
   # Its own namespace: the Go scenarios delete kubetest-e2e when they end.
   kubectl create namespace kubetest-ui-e2e --dry-run=client -o yaml | kubectl apply -f -
+  if [ "$E2E_STORAGE" = "s3" ]; then
+    # The wrapper reads the S3 credentials in every namespace that runs tests.
+    kubectl -n kubetest-ui-e2e create secret generic s3-creds \
+      --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+      --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin \
+      --dry-run=client -o yaml | kubectl apply -f -
+  fi
   # The fixture's image, loaded like the platform's: the run must not
   # depend on the node pulling from a registry mid-test.
   fixture_img="$(grep -h 'image:' web/e2e/fixtures/ui-smoke.yaml | head -1 | awk '{print $2}')"

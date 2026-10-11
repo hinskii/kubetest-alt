@@ -226,6 +226,21 @@ describe("run page", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("waits for output when a live run hasn't logged anything yet", async () => {
+    server.use(
+      http.get(R, () =>
+        HttpResponse.json({ ...finishedRun, phase: "queued", finished: false, failedCases: [] }),
+      ),
+      http.get(
+        `${R}/log`,
+        () => new HttpResponse(null, { headers: { "X-Run-Phase": "queued", "X-Next-Offset": "0" } }),
+      ),
+    );
+    renderRoute(page);
+    expect(await screen.findByText("Waiting for output…")).toBeInTheDocument();
+    expect(screen.queryByText(/Log unavailable/)).not.toBeInTheDocument();
+  });
+
   it("renders the API's 404", async () => {
     server.use(
       http.get(R, () => HttpResponse.json({ error: 'run "smoke-abcde" not found' }, { status: 404 })),
