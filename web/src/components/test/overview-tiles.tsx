@@ -47,6 +47,7 @@ function Tile({
   tone,
   hint,
   at,
+  period,
   onAt,
 }: {
   label: string;
@@ -57,6 +58,8 @@ function Tile({
   hint?: string;
   /** at is the picked bucket, shared by every tile; onAt picks one. */
   at?: number;
+  /** period names the picked bucket, beside the value (while hovering). */
+  period?: string;
   onAt: (i: number) => void;
 }) {
   const values = points.map((p) => p.value);
@@ -81,8 +84,15 @@ function Tile({
     <div className="bg-card flex flex-col rounded-xl border" data-testid="overview-tile">
       <div className="p-4 pb-2">
         <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">{label}</div>
-        <div className="mt-1 text-3xl font-semibold tabular-nums" data-testid="tile-value">
-          {value}
+        <div className="mt-1 flex items-baseline gap-2">
+          <span className="text-3xl font-semibold tabular-nums" data-testid="tile-value">
+            {value}
+          </span>
+          {period && (
+            <span className="text-muted-foreground text-sm" data-testid="tile-period">
+              {period}
+            </span>
+          )}
         </div>
         <div className="text-muted-foreground mt-1 min-h-4 text-xs">{hint}</div>
       </div>
@@ -182,8 +192,7 @@ export function OverviewTiles({
     <section aria-label="Insights for the range" className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-muted-foreground mr-auto text-xs font-medium tracking-wide uppercase">
-          Test runs ·{" "}
-          {b ? bucketLabel(b.start, range) : ranges.find((r) => r.id === range)?.label.toLowerCase()}
+          Test runs · {ranges.find((r) => r.id === range)?.label.toLowerCase()}
         </h2>
         <div role="group" aria-label="Range" className="flex rounded-lg border p-0.5">
           {ranges.map((r) => (
@@ -231,6 +240,7 @@ export function OverviewTiles({
             max={100}
             tone="success"
             at={at}
+            period={b && bucketLabel(b.start, range)}
             onAt={setAt}
           />
           <Tile
@@ -245,6 +255,7 @@ export function OverviewTiles({
             }))}
             tone="danger"
             at={at}
+            period={b && bucketLabel(b.start, range)}
             onAt={setAt}
           />
           <Tile
@@ -257,6 +268,7 @@ export function OverviewTiles({
             }))}
             tone="primary"
             at={at}
+            period={b && bucketLabel(b.start, range)}
             onAt={setAt}
           />
           <Tile
@@ -269,6 +281,7 @@ export function OverviewTiles({
             }))}
             tone="muted"
             at={at}
+            period={b && bucketLabel(b.start, range)}
             onAt={setAt}
           />
         </div>

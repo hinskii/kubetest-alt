@@ -76,12 +76,15 @@ describe("test page", () => {
         "5.6s",
       ]),
     );
-    expect(screen.getByRole("heading", { name: /Test runs · Oct 6/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId("tile-period").map((p) => p.textContent)).toEqual([
+      "Oct 6",
+      "Oct 6",
+      "Oct 6",
+      "Oct 6",
+    ]);
     expect(failed).toHaveAttribute("aria-valuetext", "Oct 6: 3 failed of 12");
     act(() => failed.blur());
-    await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /Test runs · last week/ })).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.queryAllByTestId("tile-period")).toHaveLength(0));
     await userEvent.click(screen.getByRole("button", { name: "30d" }));
     await waitFor(() => expect(router.state.location.search).toEqual({ range: "30d" }));
     expect(await screen.findByText("the newest 500 counted")).toBeInTheDocument();
