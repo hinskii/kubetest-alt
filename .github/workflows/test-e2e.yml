@@ -97,6 +97,17 @@ jobs:
           echo "== timings summary =="
           cat /tmp/e2e-timings.txt
 
+      - name: Upload Playwright results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.storage }}
+          path: |
+            web/test-results/
+            web/playwright-report/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Upload e2e log artifact
         if: always()
         uses: actions/upload-artifact@v4

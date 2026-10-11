@@ -388,6 +388,11 @@ if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   phase_start "web_e2e"
   # Its own namespace: the Go scenarios delete kubetest-e2e when they end.
   kubectl create namespace kubetest-ui-e2e --dry-run=client -o yaml | kubectl apply -f -
+  # The fixture's image, loaded like the platform's: the run must not
+  # depend on the node pulling from a registry mid-test.
+  fixture_img="$(grep -h 'image:' web/e2e/fixtures/ui-smoke.yaml | head -1 | awk '{print $2}')"
+  docker pull "$fixture_img"
+  kind load docker-image "$fixture_img" --name "$KIND_CLUSTER"
   kubectl -n kubetest-ui-e2e apply -f web/e2e/fixtures/ui-smoke.yaml
   CC_USER="dev@e2e.test" E2E_TEST_NS=kubetest-ui-e2e make web-e2e
   phase_end "web_e2e"
