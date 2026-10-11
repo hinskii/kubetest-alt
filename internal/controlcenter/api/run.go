@@ -22,6 +22,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -139,6 +140,15 @@ type Step struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	Message    string     `json:"message,omitempty"`
+	// Stages and Params: a parallel worker's own course and its matrix
+	// and shard values.
+	Stages []Stage           `json:"stages,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
+	// LiveView is a parallel worker's live UI by signed link, until the
+	// worker finishes (a parallel run has no live view of its own).
+	LiveView string `json:"liveView,omitempty"`
+	// Report is a parallel worker's own report (its artifact path).
+	Report string `json:"report,omitempty"`
 }
 
 // Stage is one part of a leaf run's course.
@@ -270,14 +280,24 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		st := run.Steps[k]
 		out.Steps = append(out.Steps, Step{Key: k, Kind: stepKind(k), Phase: st.Phase,
-			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message})
+			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message,
+			Stages: stagesOut(st.Stages), Params: st.Params, Report: st.Report})
 	}
-	for _, st := range run.Stages {
-		out.Stages = append(out.Stages, Stage{Kind: st.Kind, Name: st.Name, Phase: cmp.Or(st.Phase, "queued"),
-			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message})
-	}
+	out.Stages = append(out.Stages, stagesOut(run.Stages)...)
 	if run.LiveView != "" && !out.Finished && s.LiveURL != nil {
-		out.LiveView = s.LiveURL(c.Name, ns, out.ID, run.LiveView)
+		parallel := false
+		for i, st := range out.Steps {
+			if st.Kind != "Worker" {
+				continue
+			}
+			parallel = true
+			if !Finished(st.Phase) {
+				out.Steps[i].LiveView = s.LiveURL(c.Name, ns, out.ID, strings.TrimPrefix(st.Key, "worker-"), run.LiveView)
+			}
+		}
+		if !parallel {
+			out.LiveView = s.LiveURL(c.Name, ns, out.ID, "", run.LiveView)
+		}
 	}
 	if arts, err := client.ListArtifacts(r.Context(), ns, id); err != nil {
 		out.ArtifactsError = messageOf(err)
@@ -316,6 +336,9 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// stageLog names a stage with a log of its own: the fetch, a worker.
+var stageLog = regexp.MustCompile(`^(fetch|worker-[0-9]+(/fetch)?)$`)
+
 // runLog serves the run's log from ?offset= on (at most MaxLogChunk
 // bytes), with the run's phase, so the UI knows when to stop polling.
 func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
@@ -334,8 +357,8 @@ func (s *Server) runLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stage := r.URL.Query().Get("stage")
-	if stage != "" && stage != "fetch" {
-		writeError(w, http.StatusBadRequest, "stage: only fetch has a log of its own")
+	if stage != "" && !stageLog.MatchString(stage) {
+		writeError(w, http.StatusBadRequest, "stage: fetch, worker-N or worker-N/fetch")
 		return
 	}
 	body, err := client.OpenStageLogsFrom(r.Context(), ns, id, stage, offset)
@@ -470,4 +493,17 @@ func (s *Server) deleteRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// stagesOut is a run's or a worker's stages for the UI.
+func stagesOut(stages []apiclient.Stage) []Stage {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]Stage, 0, len(stages))
+	for _, st := range stages {
+		out = append(out, Stage{Kind: st.Kind, Name: st.Name, Phase: cmp.Or(st.Phase, "queued"),
+			StartedAt: utc(st.StartedAt), FinishedAt: utc(st.FinishedAt), Message: st.Message})
+	}
+	return out
 }

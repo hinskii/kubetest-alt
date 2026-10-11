@@ -394,6 +394,17 @@ type StepResult struct {
 	// (e.g. "step timeout exceeded").
 	// +optional
 	Message string `json:"message,omitempty"`
+	// Stages are a parallel worker's own course — queued, fetch, run,
+	// collect — as a leaf run's (step 20a).
+	// +optional
+	Stages []Stage `json:"stages,omitempty"`
+	// Params are a parallel worker's matrix and shard values.
+	// +optional
+	Params map[string]string `json:"params,omitempty"`
+	// PodIP is a running parallel worker's pod IP — where the API server
+	// reaches that worker's spec.liveView.
+	// +optional
+	PodIP string `json:"podIP,omitempty"`
 }
 
 // StepPhase is the enum for StepResult.Phase. Kept as a separate type

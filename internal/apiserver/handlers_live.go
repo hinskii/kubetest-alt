@@ -42,6 +42,9 @@ import (
 // it at running until the Job's deadline. Browsers' EventSource reconnects
 // by itself, and the tool sends its state again on a new connection.
 //
+// A parallel run has no pod of its own: ?worker=N is worker N's live view,
+// at that worker's pod IP (status.steps[worker-N].podIP).
+//
 // Callers never pass credentials through: cookies, Authorization and the
 // attribution header are dropped, and the UI's cookies are not returned.
 // liveStreamMax bounds one proxied live-view request (see liveView).
@@ -69,7 +72,26 @@ func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, ReasonNotFound, "this run's Test declares no live view (spec.liveView)")
 		return
 	}
-	if run.Status.Phase != testsv1alpha1.PhaseRunning || run.Status.PodIP == "" {
+	podIP := run.Status.PodIP
+	if wq := r.URL.Query().Get(QueryWorker); wq != "" {
+		n, err := strconv.Atoi(wq)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, ReasonBadRequest, "worker: a worker's index (0, 1, …)")
+			return
+		}
+		step, ok := run.Status.Steps[controller.WorkerStepKey(n)]
+		if !ok && spec.Parallel == nil {
+			writeError(w, http.StatusNotFound, ReasonNotFound, "this run has no workers")
+			return
+		}
+		if controller.IsTerminalPhase(testsv1alpha1.Phase(step.Phase)) {
+			writeError(w, http.StatusGone, apiclient.ReasonGone,
+				"the worker has finished — its live view is gone; see the run's report and artifacts")
+			return
+		}
+		podIP = step.PodIP
+	}
+	if run.Status.Phase != testsv1alpha1.PhaseRunning || podIP == "" {
 		w.Header().Set("Retry-After", "2")
 		writeError(w, http.StatusServiceUnavailable, ReasonServiceUnavail, "the run hasn't started yet")
 		return
@@ -77,13 +99,14 @@ func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), liveStreamMax)
 	defer cancel()
 	r = r.WithContext(ctx)
-	target := net.JoinHostPort(run.Status.PodIP, strconv.Itoa(int(spec.LiveView.Port)))
+	target := net.JoinHostPort(podIP, strconv.Itoa(int(spec.LiveView.Port)))
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host = "http", target
 			pr.Out.URL.Path, pr.Out.URL.RawPath = "/"+r.PathValue("path"), ""
 			q := pr.In.URL.Query()
 			q.Del(QueryNamespace) // ours, not the UI's
+			q.Del(QueryWorker)
 			pr.Out.URL.RawQuery = q.Encode()
 			pr.Out.Host = target
 			for _, h := range []string{"Cookie", "Authorization", "Proxy-Authorization", HeaderUser} {

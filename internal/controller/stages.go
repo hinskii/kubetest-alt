@@ -19,7 +19,10 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +40,9 @@ import (
 //	fetch    the content-fetcher init container (only with content)
 //	run      the wrapper starts → the tool exits (result's toolFinishedAt)
 //	collect  the tool exits → the wrapper exits (scrape, uploads)
+
+// stageQueuedName names the queue stage.
+const stageQueuedName = "Queued"
 
 // Names of the fetch stage, by the run's content.
 const (
@@ -150,7 +156,7 @@ func deriveStages(in stageInputs) []testsv1alpha1.Stage {
 	if in.fetchName != "" && fetchStart != nil {
 		queueEnd = fetchStart
 	}
-	out := []testsv1alpha1.Stage{stage(testsv1alpha1.StageQueue, "Queued", in.queuedAt, queueEnd)}
+	out := []testsv1alpha1.Stage{stage(testsv1alpha1.StageQueue, stageQueuedName, in.queuedAt, queueEnd)}
 
 	if in.fetchName != "" {
 		f := stage(testsv1alpha1.StageFetch, in.fetchName, fetchStart, fetchEnd)
@@ -248,10 +254,12 @@ func (r *TestRunReconciler) stagesNow(run *testsv1alpha1.TestRun, pod *corev1.Po
 // log, stored under the run's stages/fetch/).
 func fetchTailerID(run *testsv1alpha1.TestRun) string { return tailerID(run) + "/fetch" }
 
-// ensureFetchTailer starts tailing the content fetcher's log once its
-// container has started — while the pod is still Pending — so the fetch
-// stage has a log of its own, live. Best-effort, like the run's log.
-func (r *TestRunReconciler) ensureFetchTailer(ctx context.Context, run *testsv1alpha1.TestRun, pod *corev1.Pod) {
+// ensureFetchTailer starts tailing a pod's content-fetcher log, into keys,
+// once its container has started — while the pod is still Pending — so
+// the fetch stage has a log of its own, live. Best-effort, like the run's
+// log. id keys the tailer.
+func (r *TestRunReconciler) ensureFetchTailer(ctx context.Context, run *testsv1alpha1.TestRun, pod *corev1.Pod,
+	id string, keys storage.RunKeys) {
 	if r.LogRegistry == nil || pod == nil || fetchNameOf(run) == "" {
 		return
 	}
@@ -259,9 +267,41 @@ func (r *TestRunReconciler) ensureFetchTailer(ctx context.Context, run *testsv1a
 	if start == nil {
 		return
 	}
-	keys := storage.ForRun(run.Namespace, string(run.UID)).Stage(string(testsv1alpha1.StageFetch))
-	if err := r.LogRegistry.EnsureContainerTailer(ctx, fetchTailerID(run), keys, pod.Namespace, pod.Name,
+	if err := r.LogRegistry.EnsureContainerTailer(ctx, id, keys, pod.Namespace, pod.Name,
 		compiler.ContainerContentFetcher); err != nil {
-		log.FromContext(ctx).Error(err, "EnsureContainerTailer (content fetcher) failed", "run", run.Name)
+		log.FromContext(ctx).Error(err, "EnsureContainerTailer (content fetcher) failed", "run", run.Name, "tailer", id)
 	}
+}
+
+// waitingStages is the course of a run held back before it has a pod — by
+// its Test's concurrencyPolicy (Forbid) or its notBefore: a queue stage
+// that runs, with why. The rest of its course follows once it starts.
+func waitingStages(queuedAt *metav1.Time, why string) []testsv1alpha1.Stage {
+	return []testsv1alpha1.Stage{{Kind: testsv1alpha1.StageQueue, Name: stageQueuedName,
+		Phase: testsv1alpha1.StepPhaseRunning, StartedAt: queuedAt, Message: why}}
+}
+
+// activePriorNames are the names of the runs a Forbid run waits for.
+func activePriorNames(prior []testsv1alpha1.TestRun, self *testsv1alpha1.TestRun) []string {
+	var out []string
+	for i := range prior {
+		p := &prior[i]
+		if p.UID != self.UID && !IsTerminalPhase(p.Status.Phase) {
+			out = append(out, p.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// forbidMessage says which runs a Forbid run waits for.
+func forbidMessage(names []string) string {
+	switch {
+	case len(names) == 0:
+		return "waiting: a previous run of this Test is still going (concurrencyPolicy: Forbid)"
+	case len(names) > 3:
+		return fmt.Sprintf("waiting for %s and %d more to finish (concurrencyPolicy: Forbid)",
+			strings.Join(names[:3], ", "), len(names)-3)
+	}
+	return "waiting for " + strings.Join(names, ", ") + " to finish (concurrencyPolicy: Forbid)"
 }

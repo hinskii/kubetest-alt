@@ -9,8 +9,17 @@ import { PageHeader, type Crumb } from "@/components/page-header";
 import { Chip, PhaseBadge } from "@/components/phase-badge";
 import { Comment } from "@/components/run/comment-form";
 import { AbortRun, DeleteRun, RunAgain } from "@/components/run/run-actions";
-import { RunFlow } from "@/components/run/run-flow";
-import { LogDownload, RunLog } from "@/components/run/run-log";
+import {
+  ChildrenFlow,
+  RunFlow,
+  WorkerPicker,
+  WorkersFlow,
+  workerLabel,
+  workerName,
+  workerSteps,
+} from "@/components/run/run-flow";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { LogDownload, logOf, RunLog } from "@/components/run/run-log";
 import {
   Activity,
   Artifacts,
@@ -38,12 +47,16 @@ export const Route = createFileRoute("/clusters/$cluster/runs/$ns/$id")({
       .enum(["log", "live", "report", "tests", "artifacts", "steps", "details", "events"])
       .optional()
       .catch(undefined),
-    stage: z.enum(["queue", "fetch", "run", "collect"]).optional().catch(undefined),
+    stage: z
+      .string()
+      .regex(/^((worker-\d+\/)?(queue|fetch|run|collect)|worker-\d+)$/)
+      .optional()
+      .catch(undefined),
   }),
   component: RunPage,
 });
 
-type StageKind = "queue" | "fetch" | "run" | "collect";
+type StageKind = string;
 type Tab = "log" | "live" | "report" | "tests" | "artifacts" | "steps" | "details" | "events";
 
 function RunPage() {
@@ -54,10 +67,12 @@ function RunPage() {
   const me = useQuery(meQuery);
   const clusters = useQuery(clustersQuery);
   const frames = useFrameColors();
-  // The live link is signed anew on every refresh: keep the first, or
-  // the frame would reload each time.
-  const [liveView, setLiveView] = useState<string>();
-  if (!liveView && run.data?.liveView) setLiveView(run.data.liveView);
+  // Live links — the run's (key ""), or each parallel worker's — are
+  // signed anew on every refresh: keep the first, or the frame would
+  // reload each time.
+  const [liveLinks, setLiveLinks] = useState<Record<string, string>>({});
+  const offered = liveViewsOf(run.data);
+  if (Object.keys(offered).some((key) => !liveLinks[key])) setLiveLinks((l) => ({ ...offered, ...l }));
 
   const clusterTitle = clusters.data?.find((c) => c.name === k.cluster)?.displayName ?? k.cluster;
   const crumbs: Crumb[] = [
@@ -86,14 +101,42 @@ function RunPage() {
   if (!run.data) return <Skeleton className="h-64 w-full" />;
   const r = run.data;
   const canRun = !!me.data?.can.run;
-  const report = r.report ? artifactUrl(k.cluster, k.ns, r.id, r.report) : undefined;
   const activity = !r.finished ? r.events.at(-1) : undefined;
-  // The stage whose log is shown: picked, else the one running, else the tool's.
+  // The stage whose log is shown: picked, else the one running, else the
+  // tool's; a parallel run's: a worker's (the one running, else the
+  // first), its running stage, else its tool's.
+  const workers = workerSteps(r.steps);
+  const worker = workers.find((w) => w.phase === "running") ?? workers[0];
   const stage: StageKind | undefined =
-    r.stages.length === 0
-      ? undefined
-      : (picked ?? (r.stages.find((s) => s.phase === "running")?.kind as StageKind | undefined) ?? "run");
-  const shownStage = r.stages.find((s) => s.kind === stage);
+    picked ??
+    (r.stages.length > 0
+      ? (r.stages.find((s) => s.phase === "running")?.kind ?? "run")
+      : worker
+        ? worker.stages?.length
+          ? `${worker.key}/${worker.stages.find((s) => s.phase === "running")?.kind ?? "run"}`
+          : worker.key
+        : undefined);
+  const [stageWorker, stageKind] = stage?.startsWith("worker-") ? stage.split("/") : [undefined, stage];
+  const shownWorker = workers.find((w) => w.key === stageWorker);
+  const shownStage = (shownWorker ? (shownWorker.stages ?? []) : r.stages).find((s) => s.kind === stageKind);
+  const shownName = [stageWorker && workerName(stageWorker), shownStage?.name].filter(Boolean).join(" · ");
+  const shownLog = logOf(stage);
+  // A parallel run's tabs show one worker at a time — the one whose log
+  // is shown (?stage=worker-N/…), else the first that has what the tab
+  // shows. Picking a worker in any tab picks it for all.
+  const pickWorker = (key: string) => {
+    const kinds = workers.find((w) => w.key === key)?.stages?.map((s) => s.kind);
+    go({ stage: kinds?.length ? `${key}/${kinds.find((x) => x === stageKind) ?? "run"}` : key });
+  };
+  // The live view shown: the run's own, or that worker's.
+  const liveKeys = Object.keys(offered);
+  const liveKey = [stageWorker, liveKeys[0]].find((key) => key !== undefined && key in offered);
+  const liveView = liveKey !== undefined ? liveLinks[liveKey] : undefined;
+  // The report shown: the run's, or that worker's (each has its own).
+  const reportWorkers = workers.filter((w) => w.report);
+  const reportWorker = reportWorkers.find((w) => w.key === stageWorker) ?? reportWorkers[0];
+  const reportPath = reportWorker?.report ?? r.report;
+  const report = reportPath ? artifactUrl(k.cluster, k.ns, r.id, reportPath) : undefined;
 
   // Tabs worth showing for this run, with counts; the address keeps the
   // open one (?tab=).
@@ -146,12 +189,22 @@ function RunPage() {
           </span>
         }
       >
-        {report && (
-          <Button asChild>
-            <a href={report} target="_blank" rel="noopener noreferrer">
-              Open report
-            </a>
-          </Button>
+        {reportWorkers.length > 1 ? (
+          <OpenWorkerReport
+            items={reportWorkers.map((w) => ({
+              key: w.key,
+              label: workerLabel(w),
+              href: artifactUrl(k.cluster, k.ns, r.id, w.report!),
+            }))}
+          />
+        ) : (
+          report && (
+            <Button asChild>
+              <a href={report} target="_blank" rel="noopener noreferrer">
+                Open report
+              </a>
+            </Button>
+          )
         )}
         {r.finished && (
           <Button variant="outline" asChild>
@@ -173,6 +226,12 @@ function RunPage() {
         selected={tab === "log" ? stage : undefined}
         onSelect={(s) => go({ tab: "log", stage: s })}
       />
+      <WorkersFlow
+        steps={r.steps}
+        selected={tab === "log" ? stage : undefined}
+        onSelect={(s) => go({ tab: "log", stage: s })}
+      />
+      <ChildrenFlow cluster={k.cluster} ns={k.ns} items={r.children} />
 
       <Tabs value={tab} onValueChange={(v) => go({ tab: v as Tab })}>
         <TabsList variant="line" className="h-auto w-full flex-wrap justify-start gap-2 border-b">
@@ -194,21 +253,18 @@ function RunPage() {
         </TabsList>
 
         <TabsContent value="log" className="pt-4">
-          <Panel
-            id="log"
-            title={shownStage ? `Log · ${shownStage.name}` : "Log"}
-            actions={<LogDownload k={k} />}
-          >
-            {stage === "queue" ? (
-              <QueueLog run={r} />
+          <Panel id="log" title={shownName ? `Log · ${shownName}` : "Log"} actions={<LogDownload k={k} />}>
+            <WorkerPicker workers={workers} selected={stageWorker} onSelect={pickWorker} />
+            {shownLog.queue ? (
+              <QueueLog run={r} why={shownStage?.message} />
             ) : (
               <RunLog
                 key={stage ?? "all"}
                 k={k}
                 live={!r.finished}
                 phase={r.phase}
-                stage={stage === "fetch" ? "fetch" : undefined}
-                part={stage === "run" ? "tool" : stage === "collect" ? "collect" : undefined}
+                stage={shownLog.stage}
+                part={shownLog.part}
               />
             )}
           </Panel>
@@ -234,7 +290,17 @@ function RunPage() {
                 The tool&apos;s own dashboard, live while the run is going. It runs isolated from Control
                 Center.
               </p>
-              <ToolFrame src={liveView} title={`Live view of ${r.name}`} original={frames.original} />
+              <WorkerPicker
+                workers={workers.filter((w) => w.key in offered)}
+                selected={liveKey}
+                onSelect={pickWorker}
+              />
+              <ToolFrame
+                key={liveKey}
+                src={liveView}
+                title={`Live view of ${liveKey ? `${r.name}, ${workerName(liveKey).toLowerCase()}` : r.name}`}
+                original={frames.original}
+              />
             </Panel>
           </TabsContent>
         )}
@@ -253,7 +319,7 @@ function RunPage() {
                     </a>
                   </Button>
                   <Button variant="outline" size="sm" asChild>
-                    <a href={artifactUrl(k.cluster, k.ns, r.id, r.report!, true)}>Download</a>
+                    <a href={artifactUrl(k.cluster, k.ns, r.id, reportPath!, true)}>Download</a>
                   </Button>
                 </>
               }
@@ -261,7 +327,13 @@ function RunPage() {
               <p className="text-muted-foreground text-sm">
                 The tool&apos;s report of this run. It runs isolated from Control Center.
               </p>
-              <ToolFrame src={report} title={`Report of ${r.name}`} original={frames.original} />
+              <WorkerPicker workers={reportWorkers} selected={reportWorker?.key} onSelect={pickWorker} />
+              <ToolFrame
+                key={reportPath}
+                src={report}
+                title={`Report of ${reportWorker ? `${r.name}, ${workerName(reportWorker.key).toLowerCase()}` : r.name}`}
+                original={frames.original}
+              />
             </Panel>
           </TabsContent>
         )}
@@ -344,8 +416,8 @@ function RunPage() {
 }
 
 /** QueueLog is the queue stage's "log": what Kubernetes said about the pod. */
-function QueueLog({ run }: { run: RunDetail }) {
-  const lines = run.events.map((e) => `${e.time}  ${e.reason}  ${e.message}`);
+function QueueLog({ run, why }: { run: RunDetail; why?: string }) {
+  const lines = [...(why ? [why, ""] : []), ...run.events.map((e) => `${e.time}  ${e.reason}  ${e.message}`)];
   return (
     <pre
       data-testid="run-log"
@@ -356,5 +428,40 @@ function QueueLog({ run }: { run: RunDetail }) {
         ? lines.join("\n")
         : (run.eventsError ?? "No Kubernetes events: the pod was scheduled and started without a word.")}
     </pre>
+  );
+}
+
+/** liveViewsOf are a run's live links: its own (key ""), or each running worker's. */
+function liveViewsOf(run?: RunDetail): Record<string, string> {
+  if (!run || run.finished) return {};
+  const out: Record<string, string> = run.liveView ? { "": run.liveView } : {};
+  for (const s of run.steps) if (s.liveView) out[s.key] = s.liveView;
+  return out;
+}
+
+/** OpenWorkerReport opens one of a parallel run's reports: each worker has its own. */
+function OpenWorkerReport({ items }: { items: { key: string; label: string; href: string }[] }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button>Open report</Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-auto p-1">
+        <ul aria-label="Reports" className="flex flex-col">
+          {items.map((i) => (
+            <li key={i.key}>
+              <a
+                href={i.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:bg-muted block rounded-md px-3 py-1.5 text-sm"
+              >
+                {i.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -91,6 +91,7 @@ func liveRunFor(t *testing.T, upstream *httptest.Server, phase testsv1alpha1.Pha
 	host, port, err := net.SplitHostPort(strings.TrimPrefix(upstream.URL, "http://"))
 	require.NoError(t, err)
 	run := runOf("load-1", phase)
+	run.Status.Steps = nil // a leaf run: the live view is its own
 	run.Status.PodIP = host
 	run.Status.ResolvedSpec = `{"liveView":{"port":` + port + `,"path":"/ui/?endpoint=../"}}`
 	return run
@@ -177,4 +178,41 @@ func TestLiveView_Messages(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "invalid or has expired")
 	assert.Equal(t, liveCSP, rec.Header().Get("Content-Security-Policy"), "messages are sandboxed too")
+}
+
+// A parallel run's worker has its own link; the worker rides in the token,
+// so a ?worker= the page adds can't reach another one.
+func TestLiveView_ParallelWorker(t *testing.T) {
+	upstream := liveUpstream(t)
+	run := liveRunFor(t, upstream, testsv1alpha1.PhaseRunning)
+	host := run.Status.PodIP
+	run.Status.PodIP = ""
+	run.Status.ResolvedSpec = strings.Replace(run.Status.ResolvedSpec, "{", `{"parallel":{"count":2},`, 1)
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{
+		"worker-0": {Phase: "passed"}, "worker-1": {Phase: "running", PodIP: host},
+	}
+	w := newWorld(t, smokeTest(), run)
+
+	rec := w.get(t, "/api/v1/clusters/dev/runs/team-a/load-1", "")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var got struct {
+		LiveView string `json:"liveView"`
+		Steps    []struct {
+			Key      string `json:"key"`
+			LiveView string `json:"liveView"`
+		} `json:"steps"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Empty(t, got.LiveView, "the run itself has no pod")
+	require.Len(t, got.Steps, 2)
+	assert.Empty(t, got.Steps[0].LiveView, "worker 0 has finished")
+	src := got.Steps[1].LiveView
+	require.NotEmpty(t, src)
+
+	for _, path := range []string{src, src + "&worker=0"} {
+		rec = httptest.NewRecorder()
+		w.h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		assert.Contains(t, rec.Body.String(), `dashboard /ui/?endpoint=..%2F cookie=""`, path)
+	}
 }

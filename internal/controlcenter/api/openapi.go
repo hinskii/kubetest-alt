@@ -71,8 +71,9 @@ type logParams struct {
 	ID        string `path:"id"`
 	// Offset is where to read from (X-Next-Offset of the previous chunk).
 	Offset int64 `query:"offset"`
-	// Stage fetch reads the content fetcher's log instead of the run's.
-	Stage string `query:"stage" enum:"fetch"`
+	// Stage fetch reads the content fetcher's log, worker-N a parallel
+	// run's worker's, instead of the run's.
+	Stage string `query:"stage" pattern:"^(fetch|worker-[0-9]+(/fetch)?)$"`
 }
 
 // LogChunk is the log text from offset on, with headers.

@@ -3485,6 +3485,12 @@ spec:
                         Message explains a step-level verdict the children alone don't
                         (e.g. "step timeout exceeded").
                       type: string
+                    params:
+                      additionalProperties:
+                        type: string
+                      description: Params are a parallel worker's matrix and shard
+                        values.
+                      type: object
                     phase:
                       description: |-
                         Phase carries the step-level state. Its type is StepPhase (a
@@ -3505,9 +3511,63 @@ spec:
                       - error
                       - skipped
                       type: string
+                    podIP:
+                      description: |-
+                        PodIP is a running parallel worker's pod IP — where the API server
+                        reaches that worker's spec.liveView.
+                      type: string
                     queuedAt:
                       format: date-time
                       type: string
+                    stages:
+                      description: |-
+                        Stages are a parallel worker's own course — queued, fetch, run,
+                        collect — as a leaf run's (step 20a).
+                      items:
+                        description: Stage is one part of a leaf run's course (TestRunStatus.Stages).
+                        properties:
+                          finishedAt:
+                            format: date-time
+                            type: string
+                          kind:
+                            description: StageKind is what a stage of a run does.
+                            enum:
+                            - queue
+                            - fetch
+                            - run
+                            - collect
+                            type: string
+                          message:
+                            description: Message says why a stage failed.
+                            type: string
+                          name:
+                            description: 'Name is what the UI shows: "Clone git repository",
+                              "Run k6", …'
+                            type: string
+                          phase:
+                            description: |-
+                              StepPhase is the enum for StepResult.Phase. Kept as a separate type
+                              so we can add "skipped" without widening the run-level Phase enum
+                              on TestRun.status.phase (that field's CRD schema stays untouched
+                              across step 17 per plan). Values mirror Phase 1:1 plus "skipped".
+                            enum:
+                            - queued
+                            - running
+                            - paused
+                            - passed
+                            - failed
+                            - aborted
+                            - error
+                            - skipped
+                            type: string
+                          startedAt:
+                            format: date-time
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        type: object
+                      type: array
                     startedAt:
                       format: date-time
                       type: string

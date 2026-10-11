@@ -54,6 +54,9 @@ type RunRow struct {
 	Source     string     `json:"source,omitempty"`
 	CreatedBy  string     `json:"createdBy,omitempty"`
 	Comment    string     `json:"comment,omitempty"`
+	// Waiting says why a queued run hasn't started yet (concurrencyPolicy
+	// Forbid: the runs it waits for; a scheduled one: its start).
+	Waiting string `json:"waiting,omitempty"`
 }
 
 // Commit is the git commit a run checked out.

@@ -1,0 +1,50 @@
+# Sample parallel k6 Test — one worker per matrix value, each its own pod
+# with its own stages (queued → write files → run k6 → collect) and log.
+# Needs the k6 template (config/templates/) and the `target` service from
+# tools/target/target.yaml in the namespace. Load at 2, 5 and
+# 10 virtual users for ~30s; expected phase: passed (all 3 workers).
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: k6-parallel
+spec:
+  config:
+    script:
+      default: load.js
+      type: string
+  container:
+    env:
+      - name: VUS
+        value: "{{ matrix.vus }}"
+  parallel:
+    matrix:
+      vus: ["2", "5", "10"]
+  content:
+    files:
+      - path: load.js
+        content: |
+          import http from 'k6/http';
+          import { check, sleep } from 'k6';
+
+          const BASE = __ENV.BASE_URL || 'http://target:8000';
+          const VUS = Number(__ENV.VUS || 2);
+
+          export const options = {
+            stages: [
+              { duration: '5s', target: VUS },
+              { duration: '20s', target: VUS },
+              { duration: '5s', target: 0 },
+            ],
+            thresholds: {
+              http_req_failed: ['rate<0.01'],
+              checks: ['rate>0.99'],
+            },
+          };
+
+          export default function () {
+            const r = http.get(`${BASE}/`);
+            check(r, { 'status 200': (res) => res.status === 200 });
+            sleep(1);
+          }
+  use:
+    - k6

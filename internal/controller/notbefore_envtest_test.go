@@ -54,6 +54,8 @@ func TestReconcile_NotBefore_WaitsThenStarts(t *testing.T) {
 
 	waiting := waitForPhase(t, ctx, key, testsv1alpha1.PhaseQueued, 3*time.Second)
 	assert.Contains(t, waiting.Status.Message, "scheduled: starts at ")
+	require.Len(t, waiting.Status.Stages, 1, "the queue stage, saying when it starts")
+	assert.Equal(t, waiting.Status.Message, waiting.Status.Stages[0].Message)
 	assert.Empty(t, waiting.Status.ResolvedSpec, "the Test is resolved when the run starts, not when it is scheduled")
 	assert.NotNil(t, waiting.Status.QueuedAt)
 	assert.False(t, hasJob(ctx, key))

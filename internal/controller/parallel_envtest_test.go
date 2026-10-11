@@ -26,6 +26,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
@@ -79,6 +80,15 @@ func TestReconcile_Parallel_WorkersAndAggregate(t *testing.T) {
 	assert.Equal(t, "1 of 2 workers failed", final.Status.Message)
 	assert.Equal(t, testsv1alpha1.StepPhase("passed"), final.Status.Steps["worker-0"].Phase)
 	assert.Equal(t, "exit code 1", final.Status.Steps["worker-1"].Message)
+	assert.Equal(t, map[string]string{"browser": "firefox"}, final.Status.Steps["worker-1"].Params, "a worker's matrix values")
+	for _, w := range []string{"worker-0", "worker-1"} {
+		stages := final.Status.Steps[w].Stages
+		require.NotEmpty(t, stages, "%s keeps its own stages", w)
+		assert.Equal(t, testsv1alpha1.StageQueue, stages[0].Kind, w)
+		for _, st := range stages {
+			assert.NotEqual(t, testsv1alpha1.StepPhase("running"), st.Phase, "%s: %s closed with the worker", w, st.Name)
+		}
+	}
 	assert.Equal(t, &testsv1alpha1.TestCounts{Total: 6, Passed: 5, Failed: 1}, final.Status.TestCounts)
 	assert.Equal(t, []testsv1alpha1.ArtifactRef{{Path: "workers/0/artifacts/report.html"}}, final.Status.ArtifactRefs)
 	assert.Eventually(t, func() bool {
@@ -124,4 +134,43 @@ func TestReconcile_Parallel_AbortStopsWorkers(t *testing.T) {
 			return apierrors.IsNotFound(err) || j.DeletionTimestamp != nil
 		}, 5*time.Second, 50*time.Millisecond, "worker %d stopped", i)
 	}
+}
+
+// A running worker's pod IP is where the API server reaches its live view;
+// it goes once the worker finishes.
+func TestReconcile_Parallel_WorkerPodIP(t *testing.T) {
+	fakeResults.Reset()
+	ctx := context.Background()
+	ns := uniqueNamespace(t)
+	require.NoError(t, k8sClient.Create(ctx, parallelTest(ns, "matrix")))
+	run := newRunFixture(ns, "par-ip", "matrix")
+	require.NoError(t, k8sClient.Create(ctx, run))
+	runKey := client.ObjectKey{Namespace: ns, Name: run.Name}
+	waitForJob(t, ctx, client.ObjectKey{Namespace: ns, Name: compiler.WorkerJobName(run, 0)}, 5*time.Second)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "par-ip-w0", Namespace: ns,
+			Labels: map[string]string{compiler.LabelRunID: run.Name, compiler.LabelWorker: "0"}},
+		Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{{Name: "wrapper", Image: "test/wrapper:v0"}}},
+	}
+	require.NoError(t, k8sClient.Create(ctx, pod))
+	pod.Status.Phase = corev1.PodRunning
+	pod.Status.PodIP = "10.1.2.4"
+	pod.Status.PodIPs = []corev1.PodIP{{IP: "10.1.2.4"}}
+	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "wrapper",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}
+	require.NoError(t, k8sClient.Status().Update(ctx, pod))
+
+	assert.Eventually(t, func() bool {
+		var got testsv1alpha1.TestRun
+		return k8sClient.Get(ctx, runKey, &got) == nil && got.Status.Steps["worker-0"].PodIP == "10.1.2.4"
+	}, 5*time.Second, 50*time.Millisecond, "worker 0's pod IP is recorded")
+
+	fakeResults.Set(run.Name+"/w0", &RunResult{Phase: testsv1alpha1.PhasePassed})
+	fakeResults.Set(run.Name+"/w1", &RunResult{Phase: testsv1alpha1.PhasePassed})
+	completeJob(t, ctx, ns, compiler.WorkerJobName(run, 0))
+	completeJob(t, ctx, ns, compiler.WorkerJobName(run, 1))
+	final := waitForPhase(t, ctx, runKey, testsv1alpha1.PhasePassed, 10*time.Second)
+	assert.Empty(t, final.Status.Steps["worker-0"].PodIP, "a finished worker's live view is gone")
 }

@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -163,11 +164,14 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// ?stage=fetch is the content fetcher's own log (step 20a); none is
-	// the run's (the tool's and the wrapper's).
+	// ?stage=fetch is the content fetcher's own log, ?stage=worker-N a
+	// parallel run's worker's (step 20a); none is the run's (the tool's
+	// and the wrapper's).
 	stage := r.URL.Query().Get("stage")
-	if stage != "" && stage != string(testsv1alpha1.StageFetch) {
-		writeError(w, http.StatusBadRequest, ReasonBadRequest, "stage: only fetch has a log of its own")
+	workerStage, workerFetch := strings.CutSuffix(stage, "/fetch")
+	worker, isWorker := workerOfStage(workerStage)
+	if stage != "" && stage != string(testsv1alpha1.StageFetch) && !isWorker {
+		writeError(w, http.StatusBadRequest, ReasonBadRequest, "stage: fetch, worker-N or worker-N/fetch")
 		return
 	}
 	ref, err := s.findRun(r.Context(), ns, r.PathValue("id"))
@@ -176,7 +180,12 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := ref.keys().Logs()
-	if stage != "" {
+	switch {
+	case isWorker && workerFetch:
+		prefix = ref.keys().Worker(worker).Stage(string(testsv1alpha1.StageFetch)).Logs()
+	case isWorker:
+		prefix = ref.keys().Worker(worker).Logs()
+	case stage != "":
 		prefix = ref.keys().Stage(stage).Logs()
 	}
 	h := w.Header()
@@ -216,4 +225,14 @@ func (s *Server) getRunLogsText(w http.ResponseWriter, r *http.Request) {
 	if !wroteHeader {
 		w.WriteHeader(http.StatusOK) // no chunks yet: empty log, not an error
 	}
+}
+
+// workerOfStage reads "worker-N" (a parallel run's worker N's log).
+func workerOfStage(stage string) (int, bool) {
+	n, ok := strings.CutPrefix(stage, "worker-")
+	if !ok {
+		return 0, false
+	}
+	i, err := strconv.Atoi(n)
+	return i, err == nil && i >= 0 && i < 10000
 }

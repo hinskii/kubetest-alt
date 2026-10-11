@@ -687,6 +687,14 @@ func TestReconcile_Concurrency_Forbid(t *testing.T) {
 		return r.Status.Phase == testsv1alpha1.PhaseQueued &&
 			strings.Contains(r.Status.Message, "waiting")
 	}, 3*time.Second, 50*time.Millisecond)
+	// It says which run it waits for, as its queue stage too.
+	var waiting testsv1alpha1.TestRun
+	require.NoError(t, k8sClient.Get(ctx, run2Key, &waiting))
+	assert.Equal(t, "waiting for forbid-run-1 to finish (concurrencyPolicy: Forbid)", waiting.Status.Message)
+	require.Len(t, waiting.Status.Stages, 1)
+	assert.Equal(t, testsv1alpha1.StageQueue, waiting.Status.Stages[0].Kind)
+	assert.Equal(t, testsv1alpha1.StepPhaseRunning, waiting.Status.Stages[0].Phase)
+	assert.Equal(t, waiting.Status.Message, waiting.Status.Stages[0].Message)
 
 	// No Job for run2 while it's waiting.
 	require.True(t, apierrors.IsNotFound(k8sClient.Get(ctx,

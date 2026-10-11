@@ -297,7 +297,7 @@ func OpenAPISpec() map[string]any {
 						"flushed so far, no follow). ?download=1 adds Content-Disposition: attachment. " +
 						"?offset=N skips the first N bytes, for clients following a live run.",
 					"parameters": []any{queryParam("offset", "Bytes to skip (default 0)."),
-						queryParam("stage", "fetch: the content fetcher's log instead of the run's.")},
+						queryParam("stage", "fetch: the content fetcher's log; worker-N: a parallel run's worker N's.")},
 					"responses": map[string]any{
 						"200": map[string]any{"description": "Log text.", "content": map[string]any{
 							"text/plain": map[string]any{"schema": map[string]any{"type": "string"}}}},
@@ -460,6 +460,9 @@ func OpenAPISpec() map[string]any {
 								"startedAt":  map[string]any{"type": "string", "format": "date-time"},
 								"finishedAt": map[string]any{"type": "string", "format": "date-time"},
 								"message":    map[string]any{"type": "string"},
+								"stages":     map[string]any{"type": "array", "items": map[string]any{"type": "object"}},
+								"params":     map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+								"report":     map[string]any{"type": "string", "description": "a parallel worker's own report (artifact path)"},
 							},
 						}},
 						"stages": map[string]any{"type": "array", "items": map[string]any{

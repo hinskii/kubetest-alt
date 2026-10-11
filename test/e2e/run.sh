@@ -407,6 +407,7 @@ if [ "$E2E_SUITE" = "e2e" ] || [ "$E2E_SUITE" = "all" ]; then
   docker pull "$fixture_img"
   kind load docker-image "$fixture_img" --name "$KIND_CLUSTER"
   kubectl -n kubetest-ui-e2e apply -f web/e2e/fixtures/ui-smoke.yaml
+  kubectl -n kubetest-ui-e2e apply -f web/e2e/fixtures/ui-flows.yaml
   # The wizard's tools (web/e2e/editor.spec.ts).
   kubectl -n kubetest-ui-e2e apply -f config/templates/k6.yaml -f config/templates/playwright.yaml
   CC_USER="dev@e2e.test" E2E_TEST_NS=kubetest-ui-e2e make web-e2e

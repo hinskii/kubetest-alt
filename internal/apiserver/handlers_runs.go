@@ -397,6 +397,8 @@ func decodeRunCursor(s string) (*runCursor, error) {
 }
 
 func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
+	var reportPattern string // spec.artifacts.report, for the workers' own
+	var reportPaths []string
 	e := runEnvelope{
 		UID:        string(cr.UID),
 		Name:       cr.Name,
@@ -432,6 +434,7 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 					paths[i] = a.Path
 				}
 				e.Report = reportArtifact(spec.Artifacts.Report, paths)
+				reportPattern, reportPaths = spec.Artifacts.Report, paths
 			}
 		}
 	} else {
@@ -451,7 +454,8 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 	if len(cr.Status.Steps) > 0 {
 		e.Steps = make(map[string]stepResult, len(cr.Status.Steps))
 		for k, sr := range cr.Status.Steps {
-			out := stepResult{Phase: string(sr.Phase), Message: sr.Message}
+			out := stepResult{Phase: string(sr.Phase), Message: sr.Message, Params: sr.Params,
+				Stages: apiStages(sr.Stages)}
 			if sr.StartedAt != nil {
 				t := sr.StartedAt.UTC()
 				out.StartedAt = &t
@@ -462,19 +466,9 @@ func runEnvelopeFromCR(cr *testsv1alpha1.TestRun) runEnvelope {
 			}
 			e.Steps[k] = out
 		}
+		workerReports(e.Steps, reportPattern, reportPaths)
 	}
-	for _, st := range cr.Status.Stages {
-		out := apiclient.Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
-		if st.StartedAt != nil {
-			t := st.StartedAt.UTC()
-			out.StartedAt = &t
-		}
-		if st.FinishedAt != nil {
-			t := st.FinishedAt.UTC()
-			out.FinishedAt = &t
-		}
-		e.Stages = append(e.Stages, out)
-	}
+	e.Stages = apiStages(cr.Status.Stages)
 	if cr.Status.QueuedAt != nil {
 		t := cr.Status.QueuedAt.UTC()
 		e.QueuedAt = &t
@@ -533,8 +527,35 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 		if b, err := json.Marshal(row.Steps); err == nil {
 			_ = json.Unmarshal(b, &e.Steps)
 		}
+		pattern, _ := nested(row.ResolvedSpec, "artifacts", "report").(string)
+		paths := make([]string, len(row.ArtifactRefs))
+		for i, a := range row.ArtifactRefs {
+			paths[i] = a.Path
+		}
+		workerReports(e.Steps, pattern, paths)
 	}
 	return e
+}
+
+// workerReports gives each parallel worker its own report: the first of
+// its artifacts (workers/<i>/artifacts/…) that pattern matches.
+func workerReports(steps map[string]stepResult, pattern string, paths []string) {
+	for k, st := range steps {
+		i, ok := strings.CutPrefix(k, "worker-")
+		if !ok {
+			continue
+		}
+		prefix := "workers/" + i + "/"
+		var own []string
+		for _, p := range paths {
+			if strings.HasPrefix(p, prefix) {
+				own = append(own, p)
+			}
+		}
+		if st.Report = reportArtifact(pattern, own); st.Report != "" {
+			steps[k] = st
+		}
+	}
 }
 
 // reportArtifact returns the first artifact path (sorted) that pattern
@@ -618,4 +639,25 @@ func storeCounts(tc *store.TestCounts) *apiclient.TestCounts {
 		return nil
 	}
 	return &apiclient.TestCounts{Total: tc.Total, Passed: tc.Passed, Failed: tc.Failed, Skipped: tc.Skipped}
+}
+
+// apiStages is a run's or a worker's stages on the wire, in UTC.
+func apiStages(stages []testsv1alpha1.Stage) []apiclient.Stage {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]apiclient.Stage, 0, len(stages))
+	for _, st := range stages {
+		s := apiclient.Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
+		if st.StartedAt != nil {
+			t := st.StartedAt.UTC()
+			s.StartedAt = &t
+		}
+		if st.FinishedAt != nil {
+			t := st.FinishedAt.UTC()
+			s.FinishedAt = &t
+		}
+		out = append(out, s)
+	}
+	return out
 }

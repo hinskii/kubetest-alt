@@ -1208,6 +1208,9 @@
               "null",
               "string"
             ]
+          },
+          "waiting": {
+            "type": "string"
           }
         },
         "required": [
@@ -1420,11 +1423,29 @@
             ],
             "type": "string"
           },
+          "liveView": {
+            "type": "string"
+          },
           "message": {
             "type": "string"
           },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
           "phase": {
             "type": "string"
+          },
+          "report": {
+            "type": "string"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/Stage"
+            },
+            "type": "array"
           },
           "startedAt": {
             "format": "date-time",
@@ -2519,9 +2540,7 @@
             "in": "query",
             "name": "stage",
             "schema": {
-              "enum": [
-                "fetch"
-              ],
+              "pattern": "^(fetch|worker-[0-9]+(/fetch)?)$",
               "type": "string"
             }
           },

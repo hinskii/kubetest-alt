@@ -187,3 +187,18 @@ func TestFetchNameOf(t *testing.T) {
 		assert.Equal(t, want, fetchNameOf(run), spec)
 	}
 }
+
+func TestForbidMessage_NamesTheRunsItWaitsFor(t *testing.T) {
+	assert.Equal(t, "waiting for a to finish (concurrencyPolicy: Forbid)", forbidMessage([]string{"a"}))
+	assert.Equal(t, "waiting for a, b to finish (concurrencyPolicy: Forbid)", forbidMessage([]string{"a", "b"}))
+	assert.Equal(t, "waiting for a, b, c and 2 more to finish (concurrencyPolicy: Forbid)",
+		forbidMessage([]string{"a", "b", "c", "d", "e"}))
+	assert.Contains(t, forbidMessage(nil), "a previous run")
+	self := testsv1alpha1.TestRun{ObjectMeta: metav1.ObjectMeta{Name: "me", UID: "3"}}
+	assert.Equal(t, []string{"a", "c"}, activePriorNames([]testsv1alpha1.TestRun{
+		{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: "1"}, Status: testsv1alpha1.TestRunStatus{Phase: "running"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: "2"}, Status: testsv1alpha1.TestRunStatus{Phase: "passed"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: "4"}, Status: testsv1alpha1.TestRunStatus{Phase: "queued"}},
+		self,
+	}, &self))
+}

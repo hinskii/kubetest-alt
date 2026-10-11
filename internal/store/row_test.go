@@ -183,9 +183,18 @@ func TestRowFromRun_StepsRoundTrip(t *testing.T) {
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{
 		"setup": {Phase: testsv1alpha1.StepPhasePassed, StartedAt: &stepStart, FinishedAt: &stepEnd},
 		"run":   {Phase: testsv1alpha1.StepPhasePassed},
+		"worker-0": {Phase: testsv1alpha1.StepPhasePassed, Params: map[string]string{"greeting": "hi"},
+			Stages: []testsv1alpha1.Stage{{Kind: testsv1alpha1.StageRun, Name: "Run k6", Phase: "passed", StartedAt: &stepStart}}},
 	}
 	row, err := RowFromRun(run, nil)
 	require.NoError(t, err)
+
+	worker := row.Steps["worker-0"].(map[string]any)
+	assert.Equal(t, map[string]string{"greeting": "hi"}, worker["params"], "a worker's matrix values are kept")
+	stages := worker["stages"].([]Stage)
+	require.Len(t, stages, 1, "a worker's stages are kept")
+	assert.Equal(t, "Run k6", stages[0].Name)
+	assert.True(t, stages[0].StartedAt.Equal(fixedTime(t, "2026-08-18T10:00:10Z")))
 
 	require.Contains(t, row.Steps, "setup")
 	setup := row.Steps["setup"].(map[string]any)

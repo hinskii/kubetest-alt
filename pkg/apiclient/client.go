@@ -464,13 +464,18 @@ func (c *Client) OpenArtifact(ctx context.Context, namespace, id, path string) (
 // OpenLiveView opens GET /runs/{id}/live/{path}?{rawQuery}: the run's live
 // web UI (spec.liveView), passed through as is — HTML, assets or an event
 // stream. The caller reads and closes the body. A run that hasn't started
-// is a 503, a finished one a 410 (ReasonGone).
-func (c *Client) OpenLiveView(ctx context.Context, namespace, id, path, rawQuery string) (*http.Response, error) {
+// is a 503, a finished one a 410 (ReasonGone). worker, when not "", is a
+// parallel run's worker (its index): that worker's live view.
+func (c *Client) OpenLiveView(ctx context.Context, namespace, id, worker, path, rawQuery string) (*http.Response, error) {
 	q, err := url.ParseQuery(rawQuery)
 	if err != nil {
 		return nil, fmt.Errorf("apiclient: live view query: %w", err)
 	}
 	maps.Copy(q, ns(namespace))
+	q.Del(QueryWorker)
+	if worker != "" {
+		q.Set(QueryWorker, worker)
+	}
 	segs := strings.Split(path, "/")
 	for i, seg := range segs {
 		segs[i] = url.PathEscape(seg)

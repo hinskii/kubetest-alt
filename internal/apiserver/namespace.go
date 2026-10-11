@@ -36,6 +36,9 @@ import (
 // server runs cluster-wide.
 const QueryNamespace = apiclient.QueryNamespace
 
+// QueryWorker picks a parallel run's worker (live view).
+const QueryWorker = apiclient.QueryWorker
+
 // errBadRequest is a client error from request parsing (namespace
 // resolution, query parameters) — always 400.
 type errBadRequest struct{ msg string }

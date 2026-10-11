@@ -317,8 +317,24 @@
                 "message": {
                   "type": "string"
                 },
+                "params": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
                 "phase": {
                   "type": "string"
+                },
+                "report": {
+                  "description": "a parallel worker's own report (artifact path)",
+                  "type": "string"
+                },
+                "stages": {
+                  "items": {
+                    "type": "object"
+                  },
+                  "type": "array"
                 },
                 "startedAt": {
                   "format": "date-time",
@@ -1448,7 +1464,7 @@
             }
           },
           {
-            "description": "fetch: the content fetcher's log instead of the run's.",
+            "description": "fetch: the content fetcher's log; worker-N: a parallel run's worker N's.",
             "in": "query",
             "name": "stage",
             "required": false,

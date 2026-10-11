@@ -170,3 +170,36 @@ func TestLiveView_OnlyWhileRunning(t *testing.T) {
 	assert.Equal(t, "/ui/?endpoint=../", runEnvelopeFromCR(pod.runningRun(t, "x")).LiveView)
 	assert.Empty(t, runEnvelopeFromCR(done).LiveView, "finished runs have none")
 }
+
+// A parallel run has no pod of its own: ?worker=N reaches worker N's pod.
+func TestLiveView_ParallelWorker(t *testing.T) {
+	pod := newLivePod(t)
+	run := pod.runningRun(t, "par")
+	host := run.Status.PodIP
+	run.Status.PodIP = ""
+	run.Status.ResolvedSpec = strings.Replace(run.Status.ResolvedSpec, "{", `{"parallel":{"count":3},`, 1)
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{
+		"worker-0": {Phase: "passed"},
+		"worker-1": {Phase: "running", PodIP: host},
+		"worker-2": {Phase: "queued"},
+	}
+	s, _, _ := mkStorageServer(t, nil, run)
+	h := s.Handler()
+	get := func(q string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/runs/par/live/ui/?endpoint=../"+q, nil))
+		return rec
+	}
+
+	rec := get("&worker=1")
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Equal(t, "<html>dashboard</html>", rec.Body.String())
+	assert.Equal(t, "endpoint=..%2F", pod.gotQuery, "the worker is ours, not the UI's")
+	assert.Equal(t, http.StatusServiceUnavailable, get("&worker=2").Code, "not started yet")
+	assert.Equal(t, http.StatusServiceUnavailable, get("&worker=7").Code, "not created yet")
+	assert.Equal(t, http.StatusGone, get("&worker=0").Code, "finished")
+	assert.Equal(t, http.StatusServiceUnavailable, get("").Code, "the run itself has no pod")
+	for _, bad := range []string{"&worker=x", "&worker=-1"} {
+		assert.Equal(t, http.StatusBadRequest, get(bad).Code, bad)
+	}
+}

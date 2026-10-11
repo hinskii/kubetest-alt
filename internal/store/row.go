@@ -132,22 +132,17 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 			if s.Message != "" {
 				m["message"] = s.Message
 			}
+			if len(s.Stages) > 0 {
+				m["stages"] = stagesOf(s.Stages)
+			}
+			if len(s.Params) > 0 {
+				m["params"] = s.Params
+			}
 			steps[name] = m
 		}
 		r.Steps = steps
 	}
-	for _, st := range run.Status.Stages {
-		s := Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
-		if st.StartedAt != nil {
-			t := st.StartedAt.UTC()
-			s.StartedAt = &t
-		}
-		if st.FinishedAt != nil {
-			t := st.FinishedAt.UTC()
-			s.FinishedAt = &t
-		}
-		r.Stages = append(r.Stages, s)
-	}
+	r.Stages = stagesOf(run.Status.Stages)
 	if run.Status.ResolvedSpec != "" {
 		// ResolvedSpec is a JSON snapshot of Test.Spec captured at start.
 		// Round-trip through generic map so it lands in a JSONB column
@@ -242,6 +237,27 @@ func EffectiveConfig(declared map[string]testsv1alpha1.Parameter, overrides map[
 	maps.Copy(out, overrides)
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// stagesOf is a run's (or a worker's) stages as history keeps them, in UTC.
+func stagesOf(stages []testsv1alpha1.Stage) []Stage {
+	if len(stages) == 0 {
+		return nil
+	}
+	out := make([]Stage, 0, len(stages))
+	for _, st := range stages {
+		s := Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
+		if st.StartedAt != nil {
+			t := st.StartedAt.UTC()
+			s.StartedAt = &t
+		}
+		if st.FinishedAt != nil {
+			t := st.FinishedAt.UTC()
+			s.FinishedAt = &t
+		}
+		out = append(out, s)
 	}
 	return out
 }

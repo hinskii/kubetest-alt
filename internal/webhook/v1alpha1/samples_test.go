@@ -28,7 +28,7 @@ import (
 )
 
 // TestAcceptance_SamplesApply is the step-02 acceptance gate:
-// `kubectl apply` of the four sample manifests in config/samples/ must
+// `kubectl apply` of the sample manifests in config/samples/ must
 // succeed against envtest with webhooks live. We use unstructured so this
 // test would catch a sample that references a field the typed API doesn't
 // carry (which a typed decoder would silently drop).
@@ -41,6 +41,7 @@ func TestAcceptance_SamplesApply(t *testing.T) {
 		"tests_v1alpha1_testrun.yaml",
 		"tests_v1alpha1_testtemplate.yaml",
 		"tests_v1alpha1_testtrigger.yaml",
+		"k6-parallel.yaml",
 	}
 
 	ctx := context.Background()

@@ -412,6 +412,7 @@ func (r *TestRunReconciler) waitForNotBefore(ctx context.Context, run *testsv1al
 		if run.Status.QueuedAt == nil {
 			run.Status.QueuedAt = &now
 		}
+		run.Status.Stages = waitingStages(run.Status.QueuedAt, msg)
 		if err := r.Status().Update(ctx, run); err != nil {
 			return ctrl.Result{}, true, err
 		}
@@ -546,19 +547,7 @@ func (r *TestRunReconciler) setup(ctx context.Context, logger interface{ Info(st
 
 	switch action {
 	case ConcurrencyWait:
-		if run.Status.Phase != testsv1alpha1.PhaseQueued {
-			run.Status.Phase = testsv1alpha1.PhaseQueued
-			run.Status.Message = "waiting: prior active TestRun for this Test (concurrencyPolicy=Forbid)"
-			if run.Status.QueuedAt == nil {
-				now := r.Now()
-				run.Status.QueuedAt = &now
-			}
-			if err := r.Status().Update(ctx, run); err != nil {
-				return ctrl.Result{}, err
-			}
-			logger.Info("TestRun waiting on prior active runs", "count", len(priors))
-		}
-		return ctrl.Result{RequeueAfter: r.ConcurrencyWaitInterval}, nil
+		return r.waitForPriors(ctx, logger, run, priors)
 
 	case ConcurrencyReplacePrior:
 		for _, prior := range SelectPriorsToAbort(priors, run) {
@@ -751,7 +740,8 @@ func (r *TestRunReconciler) inspectJob(ctx context.Context, run *testsv1alpha1.T
 	// for ImagePullBackOff / OOMKilled since Job status alone doesn't
 	// surface those.
 	pod, _ := r.findPodForJob(ctx, job)
-	r.ensureFetchTailer(ctx, run, pod)
+	r.ensureFetchTailer(ctx, run, pod, fetchTailerID(run),
+		storage.ForRun(run.Namespace, string(run.UID)).Stage(string(testsv1alpha1.StageFetch)))
 	if infra := AnalyzePod(pod, r.Now().Time, r.unschedulableTimeout()); infra.Reason != "" {
 		run.Status.Stages = r.stagesNow(run, pod, nil)
 		return r.terminalAndDeleteJob(ctx, run, testsv1alpha1.PhaseError,
@@ -1312,4 +1302,26 @@ func (r *TestRunReconciler) toolFor(test *testsv1alpha1.Test) string {
 		return test.Labels[compiler.LabelKubetestTool]
 	}
 	return tool
+}
+
+// waitForPriors keeps a run queued while earlier runs of its Test are
+// active (concurrencyPolicy: Forbid). It says which runs it waits for,
+// kept current as they change, and shows it as the run's queue stage.
+func (r *TestRunReconciler) waitForPriors(ctx context.Context, logger interface{ Info(string, ...any) },
+	run *testsv1alpha1.TestRun, priors []testsv1alpha1.TestRun) (ctrl.Result, error) {
+	msg := forbidMessage(activePriorNames(priors, run))
+	if run.Status.Phase != testsv1alpha1.PhaseQueued || run.Status.Message != msg || len(run.Status.Stages) == 0 {
+		run.Status.Phase = testsv1alpha1.PhaseQueued
+		run.Status.Message = msg
+		if run.Status.QueuedAt == nil {
+			now := r.Now()
+			run.Status.QueuedAt = &now
+		}
+		run.Status.Stages = waitingStages(run.Status.QueuedAt, msg)
+		if err := r.Status().Update(ctx, run); err != nil {
+			return ctrl.Result{}, err
+		}
+		logger.Info("TestRun waiting on prior active runs", "count", len(priors))
+	}
+	return ctrl.Result{RequeueAfter: r.ConcurrencyWaitInterval}, nil
 }

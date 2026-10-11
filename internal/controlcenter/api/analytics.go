@@ -41,6 +41,7 @@ const MaxCompared = 10
 // Run phases as the API spells them.
 const (
 	phasePassed  = string(testsv1alpha1.PhasePassed)
+	phaseQueued  = string(testsv1alpha1.PhaseQueued)
 	phaseFailed  = string(testsv1alpha1.PhaseFailed)
 	phaseError   = string(testsv1alpha1.PhaseError)
 	phaseAborted = string(testsv1alpha1.PhaseAborted)

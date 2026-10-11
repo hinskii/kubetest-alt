@@ -58,11 +58,13 @@ const liveCSP = "sandbox allow-scripts; frame-ancestors 'self'"
 
 var errBadLiveToken = errors.New("invalid or expired live-view link")
 
-// liveClaims is what a token grants: one run's live view, until Exp.
+// liveClaims is what a token grants: one run's live view (or one of its
+// parallel workers', W), until Exp.
 type liveClaims struct {
 	Cluster   string `json:"c"`
 	Namespace string `json:"n"`
 	Run       string `json:"r"`
+	Worker    string `json:"w,omitempty"`
 	Exp       int64  `json:"e"`
 }
 
@@ -110,9 +112,12 @@ func (s *liveSigner) verify(token string, now time.Time) (liveClaims, error) {
 	return c, nil
 }
 
-// liveURL is the live view's entry URL for a run, valid for liveTokenTTL.
-func (s *Server) liveURL(cluster, ns, run, entry string, now time.Time) string {
-	tok := s.live.sign(liveClaims{Cluster: cluster, Namespace: ns, Run: run, Exp: now.Add(liveTokenTTL).Unix()})
+// liveURL is the live view's entry URL for a run (or its worker, when not
+// ""), valid for liveTokenTTL. The worker rides in the token, so the UI's
+// own relative requests keep it.
+func (s *Server) liveURL(cluster, ns, run, worker, entry string, now time.Time) string {
+	tok := s.live.sign(liveClaims{Cluster: cluster, Namespace: ns, Run: run, Worker: worker,
+		Exp: now.Add(liveTokenTTL).Unix()})
 	return "/live/" + tok + "/" + strings.TrimPrefix(entry, "/")
 }
 
@@ -141,7 +146,8 @@ func (s *Server) liveView(w http.ResponseWriter, r *http.Request) {
 		livePage(w, http.StatusNotFound, "The cluster of this run is no longer configured.", false)
 		return
 	}
-	resp, err := c.API.OpenLiveView(r.Context(), claims.Namespace, claims.Run, r.PathValue("path"), r.URL.RawQuery)
+	resp, err := c.API.OpenLiveView(r.Context(), claims.Namespace, claims.Run, claims.Worker,
+		r.PathValue("path"), r.URL.RawQuery)
 	if err != nil {
 		var apiErr *apiclient.APIError
 		switch {

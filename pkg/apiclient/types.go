@@ -32,6 +32,8 @@ const (
 	// QueryNamespace selects the namespace; required for single-object
 	// requests on a cluster-wide server.
 	QueryNamespace = "namespace"
+	// QueryWorker picks a parallel run's worker (its index) for its live view.
+	QueryWorker = "worker"
 	// HeaderToken carries the API token (the API server's
 	// --auth-token-file). Holding it is what lets a client in.
 	HeaderToken = "X-Kubetest-Token" // #nosec G101 -- a header name, not a credential
@@ -249,6 +251,11 @@ type StepResult struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	Message    string     `json:"message,omitempty"`
+	// Stages and Params: a parallel worker's course and matrix/shard values.
+	Stages []Stage           `json:"stages,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
+	// Report is a parallel worker's own report (its artifact path).
+	Report string `json:"report,omitempty"`
 }
 
 // Stage is one part of a leaf run's course (TestRun.status.stages).

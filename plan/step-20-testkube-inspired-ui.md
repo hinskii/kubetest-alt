@@ -133,8 +133,40 @@ a `stages` JSONB column, migration) and Control Center's `RunDetail`
   Control Center's API, computed from the range's newest 500 runs (it
   says so when capped). 20b's SQL stats can replace that later.
 
-**Left:**
-- the flow of composite and parallel runs.
+**Done (closing 20a):**
+- **the queue, visible**: a run held back gets a `queue` stage with why,
+  kept current by the operator — `concurrencyPolicy: Forbid` names the
+  run(s) it waits for, a scheduled run says when it starts. Today such a
+  run has no stages and a one-line message only. The Test's run list
+  shows the reason beside queued runs;
+- **a parallel run's flow**: one row per worker — its matrix and shard
+  values (`status.steps[worker-N].params`) and its own stages (queued →
+  fetch → run → collect, `status.steps[worker-N].stages`), derived from
+  the worker's pod like a run's and kept in run history. A stage shows
+  that worker's log of it (`?stage=worker-N/<stage>`): the worker's
+  content-fetcher log is tailed to `workers/<i>/stages/fetch/`, the tool
+  and collect parts are split from `workers/<i>/logs/` at the collect
+  marker. Runs from before keep one tile per worker (`?stage=worker-N`);
+- **a parallel run's live view**: a worker's own dashboard (k6's), picked
+  in the Live view tab. The operator records each running worker's pod IP
+  (`status.steps[worker-N].podIP`), the API reaches it with `?worker=N`,
+  and Control Center signs the worker into the live link (it rides in the
+  path, so the dashboard's own requests keep it). Before, a parallel run's
+  live view waited forever: the run itself has no pod;
+- **one worker for every tab**: the Log, Live view and Report tabs share a
+  worker picker (the worker in `?stage=`; the log keeps its stage). Each
+  worker has its own report (`steps[worker-N].report`, matched in its own
+  artifacts); **Open report** lists them all;
+- **a composite run's flow**: its child runs as tiles in order, each a
+  link to the child run;
+- tested: Go (stages for waiting runs, worker logs by stage), Vitest
+  (the three flows), Playwright on the e2e cluster (a Forbid run waits
+  with its reason, a parallel run's three workers each with its stages,
+  passed, and their logs by stage).
+
+Not done here: queues beyond one Test (a per-namespace or cluster limit,
+priorities). CLAUDE.md §15.6 leaves that to a ResourceQuota and then
+Kueue, not a queue of our own; wiring Kueue in is a step of its own.
 
 ---
 

@@ -143,6 +143,12 @@ the pieces it needs: oauth2-proxy lets `GET /live/` through
 (`controlCenter.liveView.existingSecret` to bring your own), shared by all
 replicas.
 
+A parallel run (`spec.parallel`) has no pod of its own: each worker runs
+the tool, so each running worker has its own dashboard, log and report.
+The Log, Live view and Report tabs pick a worker — "Worker 1 · vus=5" —
+one picked for all three (`?stage=worker-1/…`); **Open report** lists
+every worker's report. A worker rides in its signed live link.
+
 When the run ends, the page reloads and shows the tool's report
 (`spec.artifacts.report`: k6's dashboard export, JMeter's, Gatling's,
 Playwright's HTML report) in its place — sandboxed like any artifact, with

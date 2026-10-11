@@ -779,6 +779,7 @@ export interface components {
             source?: string;
             /** Format: date-time */
             startedAt?: null | string;
+            waiting?: string;
         };
         SavedTest: {
             dryRun: boolean;
@@ -834,8 +835,14 @@ export interface components {
             key: string;
             /** @enum {string} */
             kind: "Try" | "Worker" | "Step";
+            liveView?: string;
             message?: string;
+            params?: {
+                [key: string]: string;
+            };
             phase?: string;
+            report?: string;
+            stages?: components["schemas"]["Stage"][];
             /** Format: date-time */
             startedAt?: null | string;
         };
@@ -1393,7 +1400,7 @@ export interface operations {
         parameters: {
             query?: {
                 offset?: number;
-                stage?: "fetch";
+                stage?: string;
             };
             header?: never;
             path: {

@@ -21,11 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -176,6 +178,15 @@ func (r *TestRunReconciler) reconcileWorker(ctx context.Context, run *testsv1alp
 	}
 
 	pod, _ := r.findPodForJob(ctx, &job)
+	r.ensureFetchTailer(ctx, run, pod, workerFetchTailerID(run, w.Index),
+		storage.ForRun(run.Namespace, string(run.UID)).Worker(w.Index).Stage(string(testsv1alpha1.StageFetch)))
+	// The worker's own course, live, from its pod (step 20a).
+	if pod != nil {
+		if stages := r.workerStages(run, step, pod, nil); !sameStages(stages, step.Stages) {
+			step.Stages = stages
+			run.Status.Steps[key] = step
+		}
+	}
 	if infra := AnalyzePod(pod, r.Now().Time, r.unschedulableTimeout()); infra.Reason != "" {
 		r.endWorker(run, w.Index, &RunResult{Phase: testsv1alpha1.PhaseError,
 			ErrorMessage: infra.Reason + ": " + infra.Message})
@@ -187,6 +198,8 @@ func (r *TestRunReconciler) reconcileWorker(ctx context.Context, run *testsv1alp
 		if err != nil {
 			return false, nil, err
 		}
+		step.Stages = r.workerStages(run, step, pod, result)
+		run.Status.Steps[key] = step
 		r.endWorker(run, w.Index, result)
 		return true, &job, nil
 	}
@@ -201,6 +214,11 @@ func (r *TestRunReconciler) reconcileWorker(ctx context.Context, run *testsv1alp
 			now := r.Now()
 			step.Phase = testsv1alpha1.StepPhase(testsv1alpha1.PhaseRunning)
 			step.StartedAt = &now
+			run.Status.Steps[key] = step
+		}
+		// The worker's pod IP is where the API server reaches its live view.
+		if pod.Status.PodIP != "" && pod.Status.PodIP != step.PodIP {
+			step.PodIP = pod.Status.PodIP
 			run.Status.Steps[key] = step
 		}
 	}
@@ -228,9 +246,15 @@ func (r *TestRunReconciler) createWorker(ctx context.Context, run *testsv1alpha1
 		return fmt.Errorf("create worker %d Job: %w", w.Index, err)
 	}
 	now := r.Now()
-	run.Status.Steps[WorkerStepKey(w.Index)] = testsv1alpha1.StepResult{
-		Phase: testsv1alpha1.StepPhase(testsv1alpha1.PhaseQueued), QueuedAt: &now,
+	params := map[string]string{}
+	maps.Copy(params, w.Matrix)
+	maps.Copy(params, w.Shard)
+	step := testsv1alpha1.StepResult{Phase: testsv1alpha1.StepPhase(testsv1alpha1.PhaseQueued), QueuedAt: &now}
+	if len(params) > 0 {
+		step.Params = params
 	}
+	step.Stages = r.workerStages(run, step, nil, nil)
+	run.Status.Steps[WorkerStepKey(w.Index)] = step
 	return nil
 }
 
@@ -264,6 +288,7 @@ func (r *TestRunReconciler) endWorker(run *testsv1alpha1.TestRun, i int, result 
 	r.finishWorker(run, i, result)
 	if r.LogRegistry != nil {
 		r.LogRegistry.StopTailer(workerTailerID(run, i))
+		r.LogRegistry.StopTailer(workerFetchTailerID(run, i))
 	}
 }
 
@@ -276,8 +301,12 @@ func (r *TestRunReconciler) finishWorker(run *testsv1alpha1.TestRun, i int, res 
 	step.Phase = testsv1alpha1.StepPhaseFromPhase(res.Phase)
 	step.Message = res.ErrorMessage
 	step.FinishedAt = &now
+	step.PodIP = "" // its live view ends with it
 	if step.StartedAt == nil {
 		step.StartedAt = &now
+	}
+	if len(step.Stages) > 0 {
+		step.Stages = finishStages(step.Stages, res.Phase, res.ErrorMessage, now)
 	}
 	run.Status.Steps[key] = step
 	// Workers check out the same revision; the first one's commit stands.
@@ -326,6 +355,26 @@ func workerTailerID(run *testsv1alpha1.TestRun, i int) string {
 	return fmt.Sprintf("%s/workers/%d", tailerID(run), i)
 }
 
+// workerFetchTailerID keys worker i's content-fetcher log tailer.
+func workerFetchTailerID(run *testsv1alpha1.TestRun, i int) string {
+	return workerTailerID(run, i) + "/fetch"
+}
+
+// workerStages is worker step's course from its pod (and result, once it
+// has one), queued from when the worker was created.
+func (r *TestRunReconciler) workerStages(run *testsv1alpha1.TestRun, step testsv1alpha1.StepResult,
+	pod *corev1.Pod, result *RunResult) []testsv1alpha1.Stage {
+	in := stageInputs{queuedAt: step.QueuedAt, pod: pod, fetchName: fetchNameOf(run), tool: toolOf(pod)}
+	if result != nil {
+		in.toolPhase = result.Phase
+		if result.ToolFinishedAt != nil {
+			t := metav1.NewTime(*result.ToolFinishedAt)
+			in.toolFinishedAt = &t
+		}
+	}
+	return deriveStages(in)
+}
+
 // stopWorkers deletes a parallel run's worker Jobs and stops their log
 // tailers (abort, deletion). Best effort.
 func (r *TestRunReconciler) stopWorkers(ctx context.Context, run *testsv1alpha1.TestRun) {
@@ -336,6 +385,7 @@ func (r *TestRunReconciler) stopWorkers(ctx context.Context, run *testsv1alpha1.
 	for _, w := range compiler.ParallelWorkers(spec.Parallel) {
 		if r.LogRegistry != nil {
 			r.LogRegistry.StopTailer(workerTailerID(run, w.Index))
+			r.LogRegistry.StopTailer(workerFetchTailerID(run, w.Index))
 		}
 		var job batchv1.Job
 		err := r.Get(ctx, types.NamespacedName{Namespace: run.Namespace, Name: compiler.WorkerJobName(run, w.Index)}, &job)

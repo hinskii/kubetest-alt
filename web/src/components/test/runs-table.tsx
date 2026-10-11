@@ -62,8 +62,8 @@ export function RunsTable({ cluster, ns, runs }: { cluster: string; ns: string; 
               <TableCell className="text-muted-foreground">
                 {[r.source, r.createdBy].filter(Boolean).join(" · ")}
               </TableCell>
-              <TableCell className="max-w-xs truncate" title={r.comment}>
-                {r.comment}
+              <TableCell className="max-w-xs truncate" title={r.waiting ?? r.comment}>
+                {r.waiting ? <span className="text-muted-foreground italic">{r.waiting}</span> : r.comment}
               </TableCell>
             </TableRow>
           ))}

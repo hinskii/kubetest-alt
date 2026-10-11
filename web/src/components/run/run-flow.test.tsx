@@ -1,7 +1,12 @@
 import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { http, HttpResponse } from "msw";
 
 import type { RunDetail } from "@/api/client";
-import { RunFlow, stageMs, stageTime } from "@/components/run/run-flow";
+import { RunFlow, stageMs, stageTime, WorkersFlow } from "@/components/run/run-flow";
+import { logOf } from "@/components/run/run-log";
+import { renderRoute } from "@/test/render";
+import { finishedRun, server } from "@/test/server";
 
 type Stage = RunDetail["stages"][number];
 
@@ -50,10 +55,8 @@ describe("RunFlow", () => {
   });
 
   it("measures a stage only once it has started", () => {
-    expect(stageMs({ kind: "queue", name: "Queued", phase: "queued" }, 0)).toBeUndefined();
-    expect(stageMs({ kind: "run", name: "Run", phase: "passed", startedAt: t(1), finishedAt: t(4) }, 0)).toBe(
-      3000,
-    );
+    expect(stageMs({ phase: "queued" }, 0)).toBeUndefined();
+    expect(stageMs({ phase: "passed", startedAt: t(1), finishedAt: t(4) }, 0)).toBe(3000);
   });
 });
 
@@ -63,5 +66,121 @@ describe("stageTime", () => {
     expect(stageTime(34_270)).toBe("34.27s");
     expect(stageTime(65_300)).toBe("1m 05.3s");
     expect(stageTime(3_720_000)).toBe("1h 02m");
+  });
+});
+
+describe("WorkersFlow", () => {
+  it("fans a parallel run's workers out, each picking its log", async () => {
+    const picked: string[] = [];
+    render(
+      <WorkersFlow
+        steps={[
+          { key: "worker-0", kind: "Worker", phase: "passed", startedAt: t(0), finishedAt: t(4) },
+          { key: "worker-1", kind: "Worker", phase: "failed", message: "exit code 1" },
+          { key: "attempt-1", kind: "Try", phase: "failed" },
+        ]}
+        selected="worker-1"
+        onSelect={(k) => picked.push(k)}
+      />,
+    );
+    expect(screen.getByRole("region", { name: "Workers" })).toHaveTextContent("Workers · 1 of 2 passed");
+    expect(screen.getAllByTestId("stage")).toHaveLength(2);
+    expect(screen.getByText("exit code 1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show the log of worker 1" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Show the log of worker 0" }));
+    expect(picked).toEqual(["worker-0"]);
+  });
+
+  it("draws each worker's own stages, with its matrix values", async () => {
+    const picked: string[] = [];
+    render(
+      <WorkersFlow
+        steps={[
+          {
+            key: "worker-0",
+            kind: "Worker",
+            phase: "running",
+            startedAt: t(0),
+            params: { shard: "1", browser: "chrome" },
+            stages: [
+              { kind: "queue", name: "Queued", phase: "passed", startedAt: t(0), finishedAt: t(1) },
+              { kind: "run", name: "Run k6", phase: "running", startedAt: t(1) },
+            ],
+          },
+        ]}
+        selected="worker-0/run"
+        onSelect={(k) => picked.push(k)}
+      />,
+    );
+    expect(screen.getByTestId("worker")).toHaveTextContent("Worker 0browser=chrome, shard=1· running");
+    const row = within(screen.getByRole("list", { name: "Worker 0 stages" }));
+    expect(row.getAllByTestId("stage").map((s) => s.getAttribute("data-phase"))).toEqual([
+      "passed",
+      "running",
+    ]);
+    expect(row.getByRole("button", { name: "Show the log of worker 0: Run k6" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await userEvent.click(row.getByRole("button", { name: "Show the log of worker 0: Queued" }));
+    expect(picked).toEqual(["worker-0/queue"]);
+  });
+
+  it("draws nothing for a run without workers", () => {
+    const { container } = render(<WorkersFlow steps={[{ key: "s0", kind: "Step", phase: "passed" }]} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
+
+describe("ChildrenFlow", () => {
+  it("draws a composite run's child runs in order, each a link to it", async () => {
+    server.use(
+      http.get("*/api/v1/clusters/dev/runs/team-a/suite-1", () =>
+        HttpResponse.json({
+          ...finishedRun,
+          id: "suite-1",
+          name: "suite-1",
+          stages: [],
+          steps: [],
+          children: [
+            {
+              id: "suite-1-login",
+              name: "suite-1-login",
+              testRef: "login",
+              phase: "passed",
+              durationMs: 2100,
+            },
+            { id: "suite-1-pay", name: "suite-1-pay", testRef: "pay", phase: "running", startedAt: t(0) },
+          ],
+        }),
+      ),
+    );
+    renderRoute("/clusters/dev/runs/team-a/suite-1");
+    const flow = within(await screen.findByRole("list", { name: "Child runs" }));
+    expect(flow.getAllByTestId("stage").map((s) => s.getAttribute("data-phase"))).toEqual([
+      "passed",
+      "running",
+    ]);
+    expect(flow.getByRole("link", { name: "Open suite-1-login (login, passed)" })).toHaveAttribute(
+      "href",
+      "/clusters/dev/runs/team-a/suite-1-login",
+    );
+    expect(flow.getByText("2.10s")).toBeInTheDocument();
+  });
+});
+
+describe("logOf", () => {
+  it("finds a stage's log, a worker's too", () => {
+    expect(logOf()).toEqual({ stage: undefined, part: undefined });
+    expect(logOf("fetch")).toEqual({ stage: "fetch" });
+    expect(logOf("run")).toEqual({ stage: undefined, part: "tool" });
+    expect(logOf("queue")).toEqual({ queue: true });
+    expect(logOf("worker-2")).toEqual({ stage: "worker-2", part: undefined });
+    expect(logOf("worker-2/fetch")).toEqual({ stage: "worker-2/fetch" });
+    expect(logOf("worker-2/collect")).toEqual({ stage: "worker-2", part: "collect" });
+    expect(logOf("worker-2/queue")).toEqual({ queue: true });
   });
 });

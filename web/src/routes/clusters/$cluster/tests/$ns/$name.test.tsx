@@ -127,6 +127,27 @@ describe("test page", () => {
     await waitFor(() => expect(asked).toContain("failed"));
   });
 
+  it("says why a queued run waits", async () => {
+    server.use(
+      http.get(`${T}/runs`, () =>
+        HttpResponse.json({
+          runs: [
+            {
+              id: "smoke-q",
+              name: "smoke-q",
+              phase: "queued",
+              waiting: "waiting for smoke-git to finish (concurrencyPolicy: Forbid)",
+            },
+          ],
+        }),
+      ),
+    );
+    renderRoute(`${page}?tab=runs`);
+    expect(
+      await screen.findByText("waiting for smoke-git to finish (concurrencyPolicy: Forbid)"),
+    ).toBeInTheDocument();
+  });
+
   it("gives ready CLI commands", async () => {
     renderRoute(`${page}?tab=cli`);
     expect(await screen.findByText("kubectl kubetest run smoke -n team-a --follow")).toBeInTheDocument();

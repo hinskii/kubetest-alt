@@ -329,3 +329,226 @@ uploaded 3 artifacts
     expect(within(queue).getByTestId("run-log")).toBeInTheDocument();
   });
 });
+
+describe("parallel and waiting runs", () => {
+  it("shows a worker's log when its tile is picked", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get(`${R}/log`, ({ request }) => {
+        const stage = new URL(request.url).searchParams.get("stage") ?? "";
+        asked.push(stage);
+        return HttpResponse.text(`log of ${stage || "the run"}\n`, {
+          headers: { "X-Run-Phase": "failed", "X-Next-Offset": "20" },
+        });
+      }),
+    );
+    renderRoute(`${page}?stage=worker-2`);
+    const log = await screen.findByRole("region", { name: "Log · Worker 2" });
+    expect(await within(log).findByText(/log of worker-2/)).toBeInTheDocument();
+    expect(asked).toContain("worker-2");
+    expect(screen.getByRole("region", { name: "Workers" })).toHaveTextContent("1 of 2 passed");
+  });
+
+  it("shows each worker's stages, and the log of the one picked", async () => {
+    const asked: string[] = [];
+    const st = (kind: "queue" | "fetch" | "run" | "collect", name: string, phase: string) => ({
+      kind,
+      name,
+      phase,
+    });
+    server.use(
+      http.get(R, () =>
+        HttpResponse.json({
+          ...finishedRun,
+          stages: [],
+          steps: [0, 1].map((i) => ({
+            key: `worker-${i}`,
+            kind: "Worker",
+            phase: "passed",
+            params: { greeting: ["hello", "hi"][i]! },
+            stages: [
+              st("queue", "Queued", "passed"),
+              st("fetch", "Write files", "passed"),
+              st("run", "Run busybox", "passed"),
+              st("collect", "Collect results", "passed"),
+            ],
+          })),
+        }),
+      ),
+      http.get(`${R}/log`, ({ request }) => {
+        const stage = new URL(request.url).searchParams.get("stage") ?? "";
+        asked.push(stage);
+        return HttpResponse.text(`log of ${stage}\n--- kubetest: collecting results ---\nuploaded\n`, {
+          headers: { "X-Run-Phase": "passed", "X-Next-Offset": "60" },
+        });
+      }),
+    );
+    renderRoute(page);
+    // By default: the first worker's tool output.
+    const log = await screen.findByRole("region", { name: "Log · Worker 0 · Run busybox" });
+    expect(await within(log).findByText("log of worker-0")).toBeInTheDocument();
+    const w1 = within(screen.getByRole("list", { name: "Worker 1 stages" }));
+    expect(w1.getAllByTestId("stage")).toHaveLength(4);
+    expect(screen.getByText("greeting=hi")).toBeInTheDocument();
+
+    await userEvent.click(w1.getByRole("button", { name: "Show the log of worker 1: Write files" }));
+    expect(await screen.findByRole("region", { name: "Log · Worker 1 · Write files" })).toBeInTheDocument();
+    await waitFor(() => expect(asked).toContain("worker-1/fetch"));
+
+    await userEvent.click(w1.getByRole("button", { name: "Show the log of worker 1: Collect results" }));
+    const collect = await screen.findByRole("region", { name: "Log · Worker 1 · Collect results" });
+    expect(await within(collect).findByText("uploaded")).toBeInTheDocument();
+    expect(asked).toContain("worker-1");
+  });
+
+  it("shows each running worker's live view, one picked at a time", async () => {
+    let signed = 1;
+    server.use(
+      http.get(R, () => {
+        const n = signed++;
+        return HttpResponse.json({
+          ...finishedRun,
+          phase: "running",
+          finished: false,
+          finishedAt: undefined,
+          stages: [],
+          steps: [
+            { key: "worker-0", kind: "Worker", phase: "passed", params: { vus: "2" } },
+            {
+              key: "worker-1",
+              kind: "Worker",
+              phase: "running",
+              params: { vus: "5" },
+              liveView: `/live/w1-${n}/ui/`,
+            },
+            {
+              key: "worker-2",
+              kind: "Worker",
+              phase: "running",
+              params: { vus: "10" },
+              liveView: `/live/w2-${n}/ui/`,
+            },
+          ],
+        });
+      }),
+    );
+    renderRoute(`${page}?tab=live`);
+    const frame = await screen.findByTitle("Live view of smoke-abcde, worker 1");
+    expect(frame).toHaveAttribute("src", "/live/w1-1/ui/");
+    const picker = within(screen.getByRole("group", { name: "Worker" }));
+    expect(picker.getAllByRole("button").map((b) => b.textContent)).toEqual([
+      "Worker 1 · vus=5",
+      "Worker 2 · vus=10",
+    ]);
+
+    await userEvent.click(picker.getByRole("button", { name: "Worker 2 · vus=10" }));
+    expect(screen.getByTitle("Live view of smoke-abcde, worker 2")).toHaveAttribute("src", "/live/w2-1/ui/");
+    expect(picker.getByRole("button", { name: "Worker 2 · vus=10" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("switches the log, the report and Open report between workers", async () => {
+    const asked: string[] = [];
+    const st = (kind: "queue" | "fetch" | "run" | "collect", name: string) => ({
+      kind,
+      name,
+      phase: "passed",
+    });
+    server.use(
+      http.get(R, () =>
+        HttpResponse.json({
+          ...finishedRun,
+          phase: "passed",
+          report: "workers/0/artifacts/r/k6-report.html",
+          stages: [],
+          steps: [0, 1].map((i) => ({
+            key: `worker-${i}`,
+            kind: "Worker",
+            phase: "passed",
+            params: { vus: ["2", "5"][i]! },
+            report: `workers/${i}/artifacts/r/k6-report.html`,
+            stages: [
+              st("queue", "Queued"),
+              st("fetch", "Write files"),
+              st("run", "Run k6"),
+              st("collect", "Collect results"),
+            ],
+          })),
+        }),
+      ),
+      http.get(`${R}/log`, ({ request }) => {
+        const stage = new URL(request.url).searchParams.get("stage") ?? "";
+        asked.push(stage);
+        return HttpResponse.text(`log of ${stage}\n`, {
+          headers: { "X-Run-Phase": "passed", "X-Next-Offset": "20" },
+        });
+      }),
+    );
+    renderRoute(`${page}?stage=worker-0/fetch`);
+    expect(await screen.findByRole("region", { name: "Log · Worker 0 · Write files" })).toBeInTheDocument();
+
+    // The log: another worker, the same stage.
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Worker" })).getByRole("button", { name: "Worker 1 · vus=5" }),
+    );
+    expect(await screen.findByRole("region", { name: "Log · Worker 1 · Write files" })).toBeInTheDocument();
+    await waitFor(() => expect(asked).toContain("worker-1/fetch"));
+
+    // The report: the picked worker's, switchable.
+    await openTab(/^Report/);
+    expect(screen.getByTitle("Report of smoke-abcde, worker 1")).toHaveAttribute(
+      "src",
+      expect.stringContaining("workers/1/artifacts/r/k6-report.html"),
+    );
+    await userEvent.click(
+      within(screen.getByRole("group", { name: "Worker" })).getByRole("button", { name: "Worker 0 · vus=2" }),
+    );
+    expect(await screen.findByTitle("Report of smoke-abcde, worker 0")).toHaveAttribute(
+      "src",
+      expect.stringContaining("workers/0/artifacts/r/k6-report.html"),
+    );
+
+    // Open report: each worker's, to pick.
+    await userEvent.click(screen.getByRole("button", { name: "Open report" }));
+    const reports = within(await screen.findByRole("list", { name: "Reports" }));
+    expect(reports.getByRole("link", { name: "Worker 1 · vus=5" })).toHaveAttribute(
+      "href",
+      expect.stringContaining("workers/1/artifacts/r/k6-report.html"),
+    );
+    expect(reports.getAllByRole("link")).toHaveLength(2);
+  });
+
+  it("says what a queued run waits for, on its queue stage", async () => {
+    const why = "waiting for smoke-abcde to finish (concurrencyPolicy: Forbid)";
+    server.use(
+      http.get(R, () =>
+        HttpResponse.json({
+          ...finishedRun,
+          phase: "queued",
+          finished: false,
+          message: why,
+          steps: [],
+          failedCases: [],
+          events: [],
+          stages: [
+            {
+              kind: "queue",
+              name: "Queued",
+              phase: "running",
+              startedAt: "2026-10-07T12:00:00Z",
+              message: why,
+            },
+          ],
+        }),
+      ),
+      http.get(
+        `${R}/log`,
+        () => new HttpResponse(null, { headers: { "X-Run-Phase": "queued", "X-Next-Offset": "0" } }),
+      ),
+    );
+    renderRoute(page);
+    const tile = within(await screen.findByRole("list", { name: "Run stages" })).getByTestId("stage");
+    expect(tile).toHaveAttribute("data-phase", "running");
+    expect(tile).toHaveTextContent(why);
+    expect(await screen.findByRole("region", { name: "Log · Queued" })).toHaveTextContent(why);
+  });
+});

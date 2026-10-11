@@ -95,7 +95,10 @@ export const runQuery = (k: RunKey) =>
   });
 
 /** A chunk of a run's log from offset on, with the run's phase. */
-export async function runLogChunk(k: RunKey, offset: number, signal?: AbortSignal, stage?: "fetch") {
+/** LogStage is a stage with a log of its own: the fetch, a worker, a worker's fetch. */
+export type LogStage = "fetch" | `worker-${number}` | `worker-${number}/fetch`;
+
+export async function runLogChunk(k: RunKey, offset: number, signal?: AbortSignal, stage?: LogStage) {
   const r = await api.GET("/api/v1/clusters/{cluster}/runs/{ns}/{id}/log", {
     params: { ...runParams(k), query: stage ? { offset, stage } : { offset } },
     parseAs: "text",

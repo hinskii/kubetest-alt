@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { runLogChunk, runQuery, type RunKey } from "@/api/queries";
+import { runLogChunk, runQuery, type LogStage, type RunKey } from "@/api/queries";
 import { Button } from "@/components/ui/button";
 import { goPage } from "@/lib/paths";
 
@@ -11,7 +11,7 @@ const FINAL = new Set(["passed", "failed", "error", "aborted"]);
  * useRunLog reads the stored log and, while the run is live, polls for
  * what was added (from the last offset). A phase change refreshes the run.
  */
-export function useRunLog(k: RunKey, live: boolean, phase: string, stage?: "fetch") {
+export function useRunLog(k: RunKey, live: boolean, phase: string, stage?: LogStage) {
   const qc = useQueryClient();
   const [text, setText] = useState("");
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
@@ -72,6 +72,24 @@ export function partOf(text: string, part?: "tool" | "collect"): string {
 }
 
 /**
+ * logOf is where a picked stage's log lives (?stage=): a log of its own
+ * (the fetch, a worker's, a worker's fetch), a part of one (the tool's
+ * output or its collecting), or the queue (no log: what Kubernetes said).
+ * "worker-1/run" is worker 1's tool output; "worker-1" its whole log.
+ */
+export function logOf(stage?: string): {
+  stage?: LogStage;
+  part?: "tool" | "collect";
+  queue?: boolean;
+} {
+  const [worker, kind] = stage?.startsWith("worker-") ? stage.split("/") : [undefined, stage];
+  if (kind === "queue") return { queue: true };
+  if (kind === "fetch") return { stage: (worker ? `${worker}/fetch` : "fetch") as LogStage };
+  const part = kind === "run" ? "tool" : kind === "collect" ? "collect" : undefined;
+  return { stage: worker as LogStage | undefined, part };
+}
+
+/**
  * RunLog shows the run's log — or a stage's (the fetcher's own, or the
  * tool's or the collecting part of the run's) — following the end while
  * you are at the bottom.
@@ -86,7 +104,7 @@ export function RunLog({
   k: RunKey;
   live: boolean;
   phase: string;
-  stage?: "fetch";
+  stage?: LogStage;
   part?: "tool" | "collect";
 }) {
   const log = useRunLog(k, live, phase, stage);

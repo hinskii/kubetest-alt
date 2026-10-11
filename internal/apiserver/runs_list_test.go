@@ -282,3 +282,30 @@ func TestRunEnvelope_Report(t *testing.T) {
 	plain := row("plain", 1, func(r *store.Row) { r.ArtifactRefs = []store.ArtifactRef{{Path: "a.html"}} })
 	assert.Empty(t, runEnvelopeFromRow(&plain).Report, "no report declared")
 }
+
+// Each parallel worker has its own report — live and from history.
+func TestRunEnvelope_WorkerReports(t *testing.T) {
+	arts := []string{"workers/0/artifacts/r/k6-report.html", "workers/1/artifacts/r/summary.json",
+		"workers/10/artifacts/r/k6-report.html"}
+	cr := liveRun("par", testsv1alpha1.PhasePassed)
+	cr.Status.ResolvedSpec = `{"artifacts":{"report":"r/k6-report.html"}}`
+	for _, p := range arts {
+		cr.Status.ArtifactRefs = append(cr.Status.ArtifactRefs, testsv1alpha1.ArtifactRef{Path: p})
+	}
+	cr.Status.Steps = map[string]testsv1alpha1.StepResult{"worker-0": {}, "worker-1": {}, "worker-10": {}}
+	e := runEnvelopeFromCR(cr)
+	assert.Equal(t, "workers/0/artifacts/r/k6-report.html", e.Report)
+	assert.Equal(t, "workers/0/artifacts/r/k6-report.html", e.Steps["worker-0"].Report)
+	assert.Empty(t, e.Steps["worker-1"].Report, "worker 1 made none")
+	assert.Equal(t, "workers/10/artifacts/r/k6-report.html", e.Steps["worker-10"].Report, "not worker 1's")
+
+	r := row("old", 1, func(r *store.Row) {
+		r.ResolvedSpec = map[string]any{"artifacts": map[string]any{"report": "r/k6-report.html"}}
+		for _, p := range arts {
+			r.ArtifactRefs = append(r.ArtifactRefs, store.ArtifactRef{Path: p})
+		}
+		r.Steps = map[string]any{"worker-0": map[string]any{"phase": "passed"}, "worker-10": map[string]any{"phase": "passed"}}
+	})
+	old := runEnvelopeFromRow(&r)
+	assert.Equal(t, "workers/10/artifacts/r/k6-report.html", old.Steps["worker-10"].Report)
+}

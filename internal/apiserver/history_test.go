@@ -150,6 +150,24 @@ func TestLogsText_ConcatenatesChunks(t *testing.T) {
 	assert.Equal(t, `attachment; filename="old.log"`, rec.Header().Get("Content-Disposition"))
 }
 
+func TestLogsText_StageLogs(t *testing.T) {
+	s, up, _ := mkStorageServer(t, []store.Row{archivedRow("old")})
+	keys := storageKeysFor("old")
+	up.put(keys.LogChunk(0), []byte("the run\n"))
+	up.put(keys.Stage("fetch").LogChunk(0), []byte("Cloning\n"))
+	up.put(keys.Worker(3).LogChunk(0), []byte("worker three\n"))
+	up.put(keys.Worker(3).Stage("fetch").LogChunk(0), []byte("worker three clones\n"))
+	base := "/runs/" + testUID("old") + "/logs.txt"
+
+	assert.Equal(t, "Cloning\n", get(t, s.Handler(), base+"?stage=fetch").Body.String())
+	assert.Equal(t, "worker three\n", get(t, s.Handler(), base+"?stage=worker-3").Body.String())
+	assert.Equal(t, "worker three clones\n", get(t, s.Handler(), base+"?stage=worker-3/fetch").Body.String())
+	assert.Equal(t, "the run\n", get(t, s.Handler(), base).Body.String())
+	for _, bad := range []string{"run", "worker-", "worker-x", "worker--1", "../logs", "worker-3/run", "fetch/fetch"} {
+		assert.Equal(t, http.StatusBadRequest, get(t, s.Handler(), base+"?stage="+bad).Code, bad)
+	}
+}
+
 func TestLogsText_NoChunksIsEmpty200(t *testing.T) {
 	s, _, _ := mkStorageServer(t, nil, liveRun("r1", testsv1alpha1.PhaseQueued))
 	rec := get(t, s.Handler(), "/runs/r1/logs.txt")

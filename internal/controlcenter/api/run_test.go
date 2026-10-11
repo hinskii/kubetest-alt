@@ -53,7 +53,10 @@ func newRunWorld(t *testing.T, archive *cctest.Archive, objs ...client.Object) *
 	}
 	env := cctest.New(t, o, objs...)
 	s := &Server{Clusters: env.Clusters, Log: discard(),
-		LiveURL: func(cluster, ns, run, entry string) string {
+		LiveURL: func(cluster, ns, run, worker, entry string) string {
+			if worker != "" {
+				run += "-w" + worker
+			}
 			return "/live/signed-" + cluster + "-" + ns + "-" + run + entry
 		}}
 	mux := http.NewServeMux()
@@ -68,7 +71,9 @@ func finished(name string, phase testsv1alpha1.Phase) *testsv1alpha1.TestRun {
 	r.Status.Phase = phase
 	r.Status.Message = "1 of 2 workers failed"
 	r.Status.Steps = map[string]testsv1alpha1.StepResult{
-		"worker-10": {Phase: "passed"}, "worker-2": {Phase: "failed", Message: "exit code 1"}, "attempt-1": {Phase: "failed"},
+		"worker-10": {Phase: "passed"}, "worker-2": {Phase: "failed", Message: "exit code 1",
+			Params: map[string]string{"greeting": "hi"},
+			Stages: []testsv1alpha1.Stage{{Kind: testsv1alpha1.StageRun, Name: "Run k6", Phase: "failed"}}}, "attempt-1": {Phase: "failed"},
 	}
 	r.Status.ArtifactRefs = []testsv1alpha1.ArtifactRef{
 		{Path: "report/index.html", ContentType: "text/html"},
@@ -119,6 +124,8 @@ func TestGetRun_Finished(t *testing.T) {
 		keys = append(keys, s.Kind+":"+s.Key)
 	}
 	assert.Equal(t, []string{"Try:attempt-1", "Worker:worker-2", "Worker:worker-10"}, keys, "natural order")
+	assert.Equal(t, map[string]string{"greeting": "hi"}, got.Steps[1].Params, "a worker's matrix values")
+	assert.Equal(t, []Stage{{Kind: "run", Name: "Run k6", Phase: "failed"}}, got.Steps[1].Stages, "a worker's own stages")
 
 	assert.Len(t, got.Artifacts, 3)
 	assert.Equal(t, []Media{
@@ -145,6 +152,7 @@ func TestGetRun_LiveWithEvents(t *testing.T) {
 			Type:           typ, Reason: reason, Message: msg, LastTimestamp: at(m), Count: 1}
 	}
 	run := live()
+	run.Status.Steps = nil // a leaf run: the live view is its own
 	run.Status.PodIP = "10.0.0.7"
 	run.Status.ResolvedSpec = `{"liveView":{"port":5665,"path":"/ui/"}}`
 	w := newRunWorld(t, nil, smokeTest(), run,
@@ -335,4 +343,36 @@ func TestDeleteRun(t *testing.T) {
 	assert.Equal(t, http.StatusForbidden, w.do(t, http.MethodDelete, runAPI+"smoke-abcde", developer, nil).Code)
 	require.Equal(t, http.StatusNoContent, w.do(t, http.MethodDelete, runAPI+"smoke-abcde", admin, nil).Code)
 	assert.Equal(t, http.StatusNotFound, w.do(t, http.MethodGet, runAPI+"smoke-abcde", viewer, nil).Code)
+}
+
+// A parallel run has no live view of its own; each running worker has one.
+func TestGetRun_ParallelWorkersLiveViews(t *testing.T) {
+	run := live()
+	run.Status.ResolvedSpec = `{"liveView":{"port":5665,"path":"/ui/"},"parallel":{"count":3}}`
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{
+		"worker-0": {Phase: "passed"}, "worker-1": {Phase: "running"}, "worker-2": {Phase: "queued"},
+	}
+	w := newRunWorld(t, nil, smokeTest(), run)
+
+	got := decodeAs[RunDetail](t, w.do(t, http.MethodGet, runAPI+"smoke-live", viewer, nil))
+	assert.Empty(t, got.LiveView, "the run itself has no pod")
+	require.Len(t, got.Steps, 3)
+	assert.Empty(t, got.Steps[0].LiveView, "a finished worker's is gone")
+	assert.Equal(t, "/live/signed-dev-team-a-smoke-live-w1/ui/", got.Steps[1].LiveView)
+	assert.Equal(t, "/live/signed-dev-team-a-smoke-live-w2/ui/", got.Steps[2].LiveView, "waits for its worker")
+}
+
+// Each parallel worker's report reaches the UI with its step.
+func TestGetRun_ParallelWorkersReports(t *testing.T) {
+	run := finished("smoke-par", testsv1alpha1.PhasePassed)
+	run.Status.ResolvedSpec = `{"artifacts":{"report":"r/k6-report.html"},"parallel":{"count":2}}`
+	run.Status.ArtifactRefs = []testsv1alpha1.ArtifactRef{
+		{Path: "workers/0/artifacts/r/k6-report.html"}, {Path: "workers/1/artifacts/r/k6-report.html"}}
+	run.Status.Steps = map[string]testsv1alpha1.StepResult{"worker-0": {Phase: "passed"}, "worker-1": {Phase: "passed"}}
+	w := newRunWorld(t, nil, smokeTest(), run)
+
+	got := decodeAs[RunDetail](t, w.do(t, http.MethodGet, runAPI+"smoke-par", viewer, nil))
+	assert.Equal(t, "workers/0/artifacts/r/k6-report.html", got.Report)
+	require.Len(t, got.Steps, 2)
+	assert.Equal(t, "workers/1/artifacts/r/k6-report.html", got.Steps[1].Report)
 }

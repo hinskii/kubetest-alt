@@ -174,6 +174,9 @@ func runRow(run apiclient.Run) RunRow {
 	if run.Comment != nil {
 		row.Comment = run.Comment.Text
 	}
+	if run.Phase == phaseQueued {
+		row.Waiting = run.Message
+	}
 	return row
 }
 
