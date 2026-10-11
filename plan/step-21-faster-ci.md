@@ -131,13 +131,26 @@ These stay in the plan only if the measurement shows a real win.
 
 ## 4. Results (filled in as the changes land)
 
-| Job | Before | After | Change |
-|---|---|---|---|
-| Tests / Run on Ubuntu | 5m 53s | | |
-| Tests / Integration | 4m 56s | | |
-| Lint | 1m 59s | | |
-| E2E (s3 / gcs) | 10m 52s / 12m 42s | | |
-| Catalog (k6) | 9m 33s | | |
+Run 1 after F1–F3 (`5f98a73`), every cache cold: new Go cache keys and
+an empty layer cache.
+
+| Job | Before | After F1–F3, cold | After, warm | Change |
+|---|---|---|---|---|
+| Tests / Run on Ubuntu | 5m 53s | 6m 22s (new cache key, empty) | | |
+| Tests / Integration | 4m 56s | **21s** (F2) | | −4m 35s |
+| Lint | 1m 59s | **59s** (F3) | | −1m |
+| Build images (once per workflow) | — | 5m 18s / 6m 2s | | |
+| E2E (s3 / gcs) | 10m 52s / 12m 42s | 7m 54s / 7m 5s | | |
+| Catalog (per tool) | 8m 26s – 12m 20s | **4m 8s – 5m 51s** (F1) | | about −5m each |
+
+Cold, E2E's wall clock is still ~12–13 min: the image build (5 min) now
+runs before the kind jobs. A warm run decides whether F1 pays off on the
+critical path.
+
+F5 corrected by measurement: the whole "Install UI test dependencies"
+step takes 25–31s. Most of it is pnpm install and the browser's system
+packages (apt); the browser download is a few seconds. Caching it saves
+~10s, not 30–60s.
 
 ## 5. Acceptance
 
