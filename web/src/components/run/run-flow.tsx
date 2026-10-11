@@ -2,7 +2,6 @@ import { Check, CircleDashed, Loader2, Minus, X } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
 import type { RunDetail } from "@/api/client";
-import { duration } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type Stage = RunDetail["stages"][number];
@@ -25,15 +24,26 @@ const look: Record<string, { box: string; icon: React.ReactNode; label: string }
   },
 };
 
-/** useNow ticks every second while on, for durations that grow live. */
+/** useNow ticks every 50 ms while on: a running stage's time runs like a stopwatch. */
 function useNow(on: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!on) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
+    const t = setInterval(() => setNow(Date.now()), 50);
     return () => clearInterval(t);
   }, [on]);
   return now;
+}
+
+/** stageTime is a stage's time for its tile: 0.42s, 34.27s, 1m 05.3s, 1h 02m. */
+export function stageTime(ms: number): string {
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`;
+  if (ms < 3_600_000) {
+    const m = Math.floor(ms / 60_000);
+    return `${m}m ${((ms % 60_000) / 1000).toFixed(1).padStart(4, "0")}s`;
+  }
+  const h = Math.floor(ms / 3_600_000);
+  return `${h}h ${String(Math.floor((ms % 3_600_000) / 60_000)).padStart(2, "0")}m`;
 }
 
 /** stageMs is a stage's duration: to its end, or to now while it runs. */
@@ -108,7 +118,7 @@ export function RunFlow({
                   {s.name}
                 </span>
                 <span className="text-muted-foreground shrink-0 text-sm tabular-nums">
-                  {ms === undefined ? "" : ms < 1000 && s.finishedAt ? "<1s" : duration(ms)}
+                  {ms === undefined ? "" : ms === 0 && s.finishedAt ? "<1s" : stageTime(ms)}
                 </span>
               </div>
               <span className="sr-only">{l.label}</span>

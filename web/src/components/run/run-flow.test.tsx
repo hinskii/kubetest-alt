@@ -1,7 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 
 import type { RunDetail } from "@/api/client";
-import { RunFlow, stageMs } from "@/components/run/run-flow";
+import { RunFlow, stageMs, stageTime } from "@/components/run/run-flow";
 
 type Stage = RunDetail["stages"][number];
 
@@ -27,7 +27,7 @@ describe("RunFlow", () => {
     render(<RunFlow stages={stages} />);
     const tiles = screen.getAllByTestId("stage");
     expect(tiles.map((s) => s.getAttribute("data-phase"))).toEqual(["passed", "passed", "failed", "skipped"]);
-    expect(tiles[0]).toHaveTextContent("Queued2.0s");
+    expect(tiles[0]).toHaveTextContent("Queued2.00s");
     expect(within(tiles[2]!).getByText("thresholds crossed")).toBeInTheDocument();
     expect(screen.getAllByTestId("stage-connector")).toHaveLength(3);
     expect(screen.getByRole("list", { name: "Run stages" })).toBeInTheDocument();
@@ -37,9 +37,11 @@ describe("RunFlow", () => {
     vi.useFakeTimers({ toFake: ["setInterval", "Date"] });
     vi.setSystemTime(new Date(t(10)));
     render(<RunFlow stages={[{ kind: "run", name: "Run k6", phase: "running", startedAt: t(5) }]} />);
-    expect(screen.getByTestId("stage")).toHaveTextContent("Run k65.0s");
+    expect(screen.getByTestId("stage")).toHaveTextContent("Run k65.00s");
+    act(() => vi.advanceTimersByTime(250));
+    expect(screen.getByTestId("stage")).toHaveTextContent("Run k65.25s");
     act(() => vi.advanceTimersByTime(3000));
-    expect(screen.getByTestId("stage")).toHaveTextContent("Run k68.0s");
+    expect(screen.getByTestId("stage")).toHaveTextContent("Run k68.25s");
   });
 
   it("draws nothing without stages (composite runs, runs from before)", () => {
@@ -52,5 +54,14 @@ describe("RunFlow", () => {
     expect(stageMs({ kind: "run", name: "Run", phase: "passed", startedAt: t(1), finishedAt: t(4) }, 0)).toBe(
       3000,
     );
+  });
+});
+
+describe("stageTime", () => {
+  it("reads like a stopwatch", () => {
+    expect(stageTime(420)).toBe("0.42s");
+    expect(stageTime(34_270)).toBe("34.27s");
+    expect(stageTime(65_300)).toBe("1m 05.3s");
+    expect(stageTime(3_720_000)).toBe("1h 02m");
   });
 });
