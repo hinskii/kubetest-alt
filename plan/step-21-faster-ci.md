@@ -1,4 +1,4 @@
-# Step 21 — Faster CI
+# Step 21 — Faster CI ✅
 
 Every push waits ~10–13 minutes for CI, and most of that time is spent
 setting up, not testing. A Catalog job runs its tool for 17 s and spends
@@ -129,28 +129,35 @@ These stay in the plan only if the measurement shows a real win.
 3. The E2E failure on the s3 leg of R2 (the fixture run never reached
    passed) gets its own fix first: it is a correctness problem, not speed.
 
-## 4. Results (filled in as the changes land)
+## 4. Results ✅
 
-Run 1 after F1–F3 (`5f98a73`), every cache cold: new Go cache keys and
-an empty layer cache.
+Measured on GitHub Actions, warm caches. Wall clock is push to the
+workflow's result.
 
-| Job | Before | After F1–F3, cold | After, warm | Change |
-|---|---|---|---|---|
-| Tests / Run on Ubuntu | 5m 53s | 6m 22s (new cache key, empty) | | |
-| Tests / Integration | 4m 56s | **21s** (F2) | | −4m 35s |
-| Lint | 1m 59s | **59s** (F3) | | −1m |
-| Build images (once per workflow) | — | 5m 18s / 6m 2s | | |
-| E2E (s3 / gcs) | 10m 52s / 12m 42s | 7m 54s / 7m 5s | | |
-| Catalog (per tool) | 8m 26s – 12m 20s | **4m 8s – 5m 51s** (F1) | | about −5m each |
+| Workflow / job | Before | After | Change |
+|---|---|---|---|
+| Tests / Run on Ubuntu | 5m 53s | 2m 13s – 2m 17s | −3m 40s (F3) |
+| Tests / Integration | 4m 56s | 21s – 28s | −4m 30s (F2) |
+| Lint | 1m 59s | 57s – 1m 4s | −1m (F3) |
+| Build images (once per workflow) | — | 39s – 44s | new (F1) |
+| E2E job (s3 / gcs) | 10m 52s / 12m 42s | 4m 13s / 4m 36s | about −7m (F1, F3, F4) |
+| E2E Go scenarios | 2m 44s | 70s | −1m 34s (F4) |
+| **E2E wall clock** | **~12–13 min** | **5m 5s – 5m 19s** | about −7m |
+| Catalog job (per tool) | 8m 26s – 12m 20s | 2m 23s – 3m 26s | about −7m each (F1, F6) |
+| **Catalog wall clock** | **~12–13 min** | **4m 10s** | about −8m |
+| Controller envtest (local, -race) | ~65s | ~44s | −21s (F7) |
 
-Cold, E2E's wall clock is still ~12–13 min: the image build (5 min) now
-runs before the kind jobs. A warm run decides whether F1 pays off on the
-critical path.
-
-F5 corrected by measurement: the whole "Install UI test dependencies"
-step takes 25–31s. Most of it is pnpm install and the browser's system
-packages (apt); the browser download is a few seconds. Caching it saves
-~10s, not 30–60s.
+Notes:
+- **Cold caches** (the first run after `go.sum`, a Dockerfile or the
+  Makefile changes): the image build takes 5–6 min and the Tests job ~6 min.
+  Even then the run is no slower than before.
+- **F5 dropped:** the browser download is a few seconds; caching it isn't
+  worth a cache entry.
+- **Go's test cache:** with the build cache kept (F3), unchanged packages
+  report `(cached)`. Go re-runs a package when its code, its dependencies or
+  the files and environment variables it reads change. The integration
+  tests (containers) and the kind e2e always run (`-count=1` in run.sh).
+- **Runner minutes per push:** Catalog ~150 → ~45 min; E2E ~23 → ~10 min.
 
 ## 5. Acceptance
 

@@ -92,13 +92,14 @@ test: manifests generate fmt vet openapi-check setup-envtest ## Run tests with -
 
 # INTEGRATION_PKGS are the packages with integration-tagged tests (found by
 # their build tag, so a new one is picked up by itself). Only these run:
-# every other package's tests already ran in `make test`.
+# every other package's tests already ran in `make test`. -count=1: they
+# talk to real containers, so a cached result would prove nothing.
 INTEGRATION_PKGS = $(shell git grep -l -E '^//go:build .*integration' -- '*.go' | xargs -n1 dirname | sort -u | sed 's|^|./|')
 
 .PHONY: test-integration
 test-integration: ## Run integration tests (requires Docker: testcontainers-go).
 	@if [ -z "$(INTEGRATION_PKGS)" ]; then echo "test-integration: no integration-tagged tests found"; exit 1; fi
-	go test -tags integration -race -timeout 5m $(INTEGRATION_PKGS) -coverprofile cover.integration.out
+	go test -tags integration -race -count=1 -timeout 5m $(INTEGRATION_PKGS) -coverprofile cover.integration.out
 
 # COVERAGE_PKGS_INTEGRATION covers packages whose non-trivial code paths
 # only exercise under the `integration` build tag (real Postgres for
