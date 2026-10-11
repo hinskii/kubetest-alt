@@ -1,8 +1,18 @@
 [
   {
-    "name": "UI JavaScript (brotli)",
-    "path": "../internal/controlcenter/webui/dist/assets/*.js",
-    "limit": "180 kB"
+    "name": "First load: entry JavaScript (brotli)",
+    "path": "../internal/controlcenter/webui/dist/assets/index-*.js",
+    "limit": "150 kB"
   },
-  { "name": "UI CSS (brotli)", "path": "../internal/controlcenter/webui/dist/assets/*.css", "limit": "15 kB" }
+  {
+    "name": "CodeMirror, loaded on demand (brotli)",
+    "path": "../internal/controlcenter/webui/dist/assets/yaml-view-*.js",
+    "limit": "150 kB"
+  },
+  {
+    "name": "All JavaScript (brotli)",
+    "path": "../internal/controlcenter/webui/dist/assets/*.js",
+    "limit": "350 kB"
+  },
+  { "name": "CSS (brotli)", "path": "../internal/controlcenter/webui/dist/assets/*.css", "limit": "15 kB" }
 ]

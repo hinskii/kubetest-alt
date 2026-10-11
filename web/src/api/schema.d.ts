@@ -11,9 +11,88 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Configured clusters, each probed now. */
+        /** Configured clusters, each probed now, in config order. */
         get: operations["listClusters"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Every Test in the cluster, by namespace and name. */
+        get: operations["listTests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A Test with its templates merged: parameters, schedule, definition. */
+        get: operations["getTest"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a GUI-managed Test; its run history stays.
+         * @description Requires the admin role.
+         */
+        delete: operations["deleteTest"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One page of a Test's runs, newest first. */
+        get: operations["listTestRuns"];
+        put?: never;
+        /**
+         * Start a run of the Test, now or at notBefore.
+         * @description Requires the developer role.
+         */
+        post: operations["startRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clusters/{cluster}/tests/{ns}/{name}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set (or, with "", remove) a GUI-managed Test's recurring schedule.
+         * @description Requires the developer role.
+         */
+        put: operations["setSchedule"];
         post?: never;
         delete?: never;
         options?: never;
@@ -52,6 +131,10 @@ export interface components {
             name: string;
             reachable: boolean;
         };
+        Commit: {
+            sha: string;
+            url?: string;
+        };
         Error: {
             error: string;
         };
@@ -60,6 +143,86 @@ export interface components {
             email: string;
             /** @enum {string} */
             role: "viewer" | "developer" | "admin";
+        };
+        Param: {
+            default?: string;
+            enum?: string[];
+            name: string;
+            pattern?: string;
+            required: boolean;
+            /** @enum {string} */
+            type: "string" | "integer" | "number" | "boolean";
+        };
+        RunPage: {
+            next?: string;
+            runs: components["schemas"]["RunRow"][];
+        };
+        RunRef: {
+            /** Format: date-time */
+            finishedAt?: null | string;
+            name: string;
+            phase: string;
+        };
+        RunRequest: {
+            config?: {
+                [key: string]: string;
+            };
+            /** Format: date-time */
+            notBefore?: null | string;
+        };
+        RunRow: {
+            comment?: string;
+            commit?: components["schemas"]["Commit"];
+            createdBy?: string;
+            /** Format: int64 */
+            durationMs?: number;
+            id: string;
+            name: string;
+            /** Format: date-time */
+            notBefore?: null | string;
+            phase: string;
+            source?: string;
+            /** Format: date-time */
+            startedAt?: null | string;
+        };
+        Schedule: {
+            error?: string;
+            expr: string;
+            next: string[];
+        };
+        ScheduleResult: {
+            schedule?: components["schemas"]["Schedule"];
+        };
+        ScheduleUpdate: {
+            schedule: string;
+        };
+        StartedRun: {
+            name: string;
+            namespace: string;
+            /** Format: date-time */
+            notBefore?: null | string;
+        };
+        TestDetail: {
+            definition: string;
+            locked: boolean;
+            name: string;
+            namespace: string;
+            params: components["schemas"]["Param"][];
+            problem?: string;
+            schedule?: components["schemas"]["Schedule"];
+            templates: string[];
+            tool: string;
+        };
+        TestList: {
+            tests: components["schemas"]["TestSummary"][];
+        };
+        TestSummary: {
+            latestRun?: components["schemas"]["RunRef"];
+            locked: boolean;
+            name: string;
+            namespace: string;
+            problem?: string;
+            tool: string;
         };
     };
     responses: never;
@@ -79,13 +242,334 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The clusters, in config order. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["Cluster"][];
+                };
+            };
+        };
+    };
+    listTests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestList"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestDetail"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listTestRuns: {
+        parameters: {
+            query?: {
+                after?: string;
+            };
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunPage"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    startRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RunRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StartedRun"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    setSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cluster: string;
+                ns: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ScheduleUpdate"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleResult"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -99,7 +583,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The user. */
+            /** @description OK */
             200: {
                 headers: {
                     [name: string]: unknown;

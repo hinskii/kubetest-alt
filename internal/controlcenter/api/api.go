@@ -58,8 +58,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}
-	mux.HandleFunc("GET "+Prefix+"/me", s.me)
-	mux.HandleFunc("GET "+Prefix+"/clusters", s.clusters)
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.Method+" "+rt.Path, rt.handler)
+	}
 	mux.HandleFunc(Prefix+"/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "no such API endpoint: "+r.Method+" "+r.URL.Path)
 	})
@@ -68,20 +69,19 @@ func (s *Server) Register(mux *http.ServeMux) {
 // Me is the signed-in user.
 type Me struct {
 	// Email is "" for an anonymous request (no sign-in header).
-	Email string `json:"email"`
-	// Role is viewer, developer or admin.
-	Role string `json:"role"`
+	Email string `json:"email" required:"true"`
+	Role  string `json:"role" required:"true" enum:"viewer,developer,admin"`
 	// Can says what the role allows, so the UI needn't know the ladder.
-	Can Capabilities `json:"can"`
+	Can Capabilities `json:"can" required:"true"`
 }
 
 // Capabilities are the actions a role allows.
 type Capabilities struct {
 	// Run: start, abort and comment runs; create and edit Tests; set
 	// schedules (developer).
-	Run bool `json:"run"`
+	Run bool `json:"run" required:"true"`
 	// Delete: delete runs and Tests, clean up (admin).
-	Delete bool `json:"delete"`
+	Delete bool `json:"delete" required:"true"`
 }
 
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
@@ -92,9 +92,9 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 
 // Cluster is one configured cluster and whether its kubetest API answered.
 type Cluster struct {
-	Name        string `json:"name"`
-	DisplayName string `json:"displayName"`
-	Reachable   bool   `json:"reachable"`
+	Name        string `json:"name" required:"true"`
+	DisplayName string `json:"displayName" required:"true"`
+	Reachable   bool   `json:"reachable" required:"true"`
 	// Error is why it isn't reachable — the API's or the proxy's answer.
 	Error string `json:"error,omitempty"`
 }
@@ -124,7 +124,7 @@ func (s *Server) clusters(w http.ResponseWriter, r *http.Request) {
 
 // Error is every error response's body.
 type Error struct {
-	Error string `json:"error"`
+	Error string `json:"error" required:"true"`
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

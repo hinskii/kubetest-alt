@@ -1,0 +1,18 @@
+# A GUI-managed Test the browser tests open (web/e2e/test-page.spec.ts).
+# test/e2e/run.sh applies it before Playwright; nothing ever runs it.
+apiVersion: tests.kubetest.io/v1alpha1
+kind: Test
+metadata:
+  name: ui-smoke
+  labels:
+    app.kubernetes.io/managed-by: ui
+    kubetest.io/tool: busybox
+spec:
+  container:
+    image: busybox:1.37
+    command: ["sh", "-c"]
+    args: ["echo {{ config.greeting }}"]
+  config:
+    greeting:
+      type: string
+      default: hello

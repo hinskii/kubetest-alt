@@ -12,9 +12,10 @@ export function renderRoute(path: string) {
     context: { queryClient },
     history: createMemoryHistory({ initialEntries: [path] }),
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...result, router, queryClient };
 }

@@ -16,55 +16,147 @@ limitations under the License.
 
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"net/http"
+	"reflect"
+
+	"github.com/swaggest/jsonschema-go"
+	"github.com/swaggest/openapi-go"
+	"github.com/swaggest/openapi-go/openapi31"
+
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
+)
+
+// route is one API endpoint: registered on the mux and described in the
+// OpenAPI spec from the same table, so neither can drift from the other.
+type route struct {
+	Method, Path string
+	// ID is the operationId (the generated client's name for it).
+	ID, Summary string
+	// Role is the least role allowed (viewer: everyone signed in).
+	Role auth.Role
+	// In are the request's path/query parameters and body, as structs
+	// tagged path:, query: and json:.
+	In []any
+	// Out is the success response body (nil: none) with its status.
+	Out    any
+	Status int
+	// Errors are the error statuses it answers with (body: Error).
+	Errors  []int
+	handler http.HandlerFunc
+}
+
+type clusterParams struct {
+	Cluster string `path:"cluster"`
+}
+
+type testParams struct {
+	Cluster   string `path:"cluster"`
+	Namespace string `path:"ns"`
+	Name      string `path:"name"`
+}
+
+type runsParams struct {
+	Cluster   string `path:"cluster"`
+	Namespace string `path:"ns"`
+	Name      string `path:"name"`
+	// After is the cursor of the page (RunPage.next of the previous one).
+	After string `query:"after"`
+}
+
+const testPath = Prefix + "/clusters/{cluster}/tests/{ns}/{name}"
+
+func (s *Server) routes() []route {
+	h := func(min auth.Role, f http.HandlerFunc) http.HandlerFunc {
+		if min == auth.RoleViewer {
+			return f
+		}
+		return requireRole(min, f)
+	}
+	rs := []route{
+		{Method: http.MethodGet, Path: Prefix + "/me", ID: "getMe",
+			Summary: "The signed-in user and what their role allows.", Out: Me{}, handler: s.me},
+		{Method: http.MethodGet, Path: Prefix + "/clusters", ID: "listClusters",
+			Summary: "Configured clusters, each probed now, in config order.", Out: []Cluster{}, handler: s.clusters},
+		{Method: http.MethodGet, Path: Prefix + "/clusters/{cluster}/tests", ID: "listTests",
+			Summary: "Every Test in the cluster, by namespace and name.", In: []any{clusterParams{}},
+			Out: TestList{}, Errors: []int{404, 502}, handler: s.listTests},
+		{Method: http.MethodGet, Path: testPath, ID: "getTest",
+			Summary: "A Test with its templates merged: parameters, schedule, definition.", In: []any{testParams{}},
+			Out: TestDetail{}, Errors: []int{404, 502}, handler: s.getTest},
+		{Method: http.MethodDelete, Path: testPath, ID: "deleteTest", Role: auth.RoleAdmin,
+			Summary: "Delete a GUI-managed Test; its run history stays.", In: []any{testParams{}},
+			Status: http.StatusNoContent, Errors: []int{403, 404, 409, 502}, handler: s.deleteTest},
+		{Method: http.MethodPut, Path: testPath + "/schedule", ID: "setSchedule", Role: auth.RoleDeveloper,
+			Summary: "Set (or, with \"\", remove) a GUI-managed Test's recurring schedule.",
+			In:      []any{testParams{}, ScheduleUpdate{}}, Out: ScheduleResult{},
+			Errors: []int{400, 403, 404, 409, 502}, handler: s.setSchedule},
+		{Method: http.MethodGet, Path: testPath + "/runs", ID: "listTestRuns",
+			Summary: "One page of a Test's runs, newest first.", In: []any{runsParams{}},
+			Out: RunPage{}, Errors: []int{404, 502}, handler: s.listTestRuns},
+		{Method: http.MethodPost, Path: testPath + "/runs", ID: "startRun", Role: auth.RoleDeveloper,
+			Summary: "Start a run of the Test, now or at notBefore.", In: []any{testParams{}, RunRequest{}},
+			Out: StartedRun{}, Status: http.StatusCreated, Errors: []int{400, 403, 404, 502}, handler: s.startRun},
+	}
+	for i := range rs {
+		rs[i].handler = h(rs[i].Role, rs[i].handler)
+	}
+	return rs
+}
 
 // OpenAPISpec describes the API for the UI's generated TypeScript client
 // (web/src/api/schema.d.ts); openapi/control-center.json is this,
-// zero-diff checked.
-func OpenAPISpec() map[string]any {
-	const typ, errField = "type", "error"
-	scalar := func(t string) map[string]any { return map[string]any{typ: t} }
-	str, boolean := scalar("string"), scalar("boolean")
-	ref := func(name string) map[string]any { return map[string]any{"$ref": "#/components/schemas/" + name} }
-	object := func(required []string, props map[string]any) map[string]any {
-		return map[string]any{typ: "object", "required": required, "properties": props}
+// zero-diff checked. Schemas are reflected from the Go types.
+func OpenAPISpec() (*openapi31.Spec, error) {
+	r := openapi31.NewReflector()
+	r.Spec.Info.WithTitle("kubetest Control Center").WithVersion("v1").
+		WithDescription("Control Center's backend for its UI. Signed-in identity comes from the " +
+			"sign-in proxy's header; clusters are reached through the Kubernetes service proxy.")
+	// Schemas by type name, without the package prefix.
+	r.JSONSchemaReflector().DefaultOptions = append(r.JSONSchemaReflector().DefaultOptions,
+		jsonschema.InterceptDefName(func(t reflect.Type, _ string) string { return t.Name() }))
+	for _, rt := range (&Server{}).routes() {
+		oc, err := r.NewOperationContext(rt.Method, rt.Path)
+		if err != nil {
+			return nil, err
+		}
+		oc.SetID(rt.ID)
+		oc.SetSummary(rt.Summary)
+		if rt.Role != auth.RoleViewer {
+			oc.SetDescription("Requires the " + rt.Role.String() + " role.")
+		}
+		for _, in := range rt.In {
+			oc.AddReqStructure(in)
+		}
+		status := rt.Status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		oc.AddRespStructure(rt.Out, openapi.WithHTTPStatus(status))
+		for _, code := range rt.Errors {
+			oc.AddRespStructure(Error{}, openapi.WithHTTPStatus(code))
+		}
+		if err := r.AddOperation(oc); err != nil {
+			return nil, err
+		}
 	}
-	ok := func(desc string, schema map[string]any) map[string]any {
-		return map[string]any{"description": desc,
-			"content": map[string]any{"application/json": map[string]any{"schema": schema}}}
-	}
-	return map[string]any{
-		"openapi": "3.1.0",
-		"info": map[string]any{
-			"title":   "kubetest Control Center",
-			"version": "v1",
-			"description": "Control Center's backend for its UI. Signed-in identity comes from the " +
-				"sign-in proxy's header; clusters are reached through the Kubernetes service proxy.",
-		},
-		"paths": map[string]any{
-			"/api/v1/me": map[string]any{"get": map[string]any{
-				"operationId": "getMe", "summary": "The signed-in user and what their role allows.",
-				"responses": map[string]any{"200": ok("The user.", ref("Me"))},
-			}},
-			"/api/v1/clusters": map[string]any{"get": map[string]any{
-				"operationId": "listClusters", "summary": "Configured clusters, each probed now.",
-				"responses": map[string]any{"200": ok("The clusters, in config order.",
-					map[string]any{typ: "array", "items": ref("Cluster")})},
-			}},
-		},
-		"components": map[string]any{"schemas": map[string]any{
-			"Me": object([]string{"email", "role", "can"}, map[string]any{
-				"email": str,
-				"role":  map[string]any{typ: "string", "enum": []string{"viewer", "developer", "admin"}},
-				"can":   ref("Capabilities"),
-			}),
-			"Capabilities": object([]string{"run", "delete"}, map[string]any{"run": boolean, "delete": boolean}),
-			"Cluster": object([]string{"name", "displayName", "reachable"},
-				map[string]any{"name": str, "displayName": str, "reachable": boolean, "error": str}),
-			"Error": object([]string{errField}, map[string]any{errField: str}),
-		}},
-	}
+	return r.Spec, nil
 }
 
 // OpenAPIJSON is OpenAPISpec, indented.
-func OpenAPIJSON() ([]byte, error) { return json.MarshalIndent(OpenAPISpec(), "", "  ") }
+func OpenAPIJSON() ([]byte, error) {
+	spec, err := OpenAPISpec()
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return nil, err
+	}
+	var v any // re-marshal for stable, indented output
+	if err := json.Unmarshal(b, &v); err != nil {
+		return nil, err
+	}
+	return json.MarshalIndent(v, "", "  ")
+}

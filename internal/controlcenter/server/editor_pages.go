@@ -425,19 +425,6 @@ func (s *Server) renderEditor(w http.ResponseWriter, r *http.Request, c *cluster
 
 // deleteTest: POST /tests/{ns}/{name}/delete (admin). The run history
 // stays; the API refuses Tests managed outside the GUI.
-func (s *Server) deleteTest(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	if err := api(r, c).DeleteTest(r.Context(), ns, name); err != nil {
-		redirect(w, r, testPath(c.Name, ns, name), "Could not delete the Test: "+messageOf(err))
-		return
-	}
-	redirect(w, r, clusterPath(c.Name), "Test "+ns+"/"+name+" deleted. Its run history stays.")
-}
-
 // atoi is strconv.Atoi without the error (0 for anything else).
 func atoi(s string) int {
 	n, _ := strconv.Atoi(s)

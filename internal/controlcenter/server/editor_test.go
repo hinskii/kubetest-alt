@@ -235,17 +235,10 @@ func TestEditor_GitOpsTestIsDuplicatedNotEdited(t *testing.T) {
 	w := newWorld(t, gitops, k6Template())
 
 	assert.Equal(t, http.StatusConflict, w.get(t, clusterURL+"/tests/team-a/smoke/edit", developer).Code)
-	test := w.get(t, clusterURL+"/tests/team-a/smoke", developer).Body.String()
-	assert.NotContains(t, test, "/edit\"")
-	assert.Contains(t, test, "Duplicate")
-	assert.NotContains(t, w.get(t, clusterURL+"/tests/team-a/smoke", admin).Body.String(), "Delete test")
 
 	dup := w.get(t, newURL+"?namespace=team-a&from=smoke", developer).Body.String()
 	assert.Contains(t, dup, `name="name" value="smoke-copy"`)
 	assert.Contains(t, dup, "grafana/k6:1.4.0")
-
-	rec := w.post(t, clusterURL+"/tests/team-a/smoke/delete", admin, url.Values{})
-	assert.Contains(t, rec.Header().Get("Location"), "Could+not+delete")
 }
 
 func TestEditor_Roles(t *testing.T) {
@@ -253,16 +246,6 @@ func TestEditor_Roles(t *testing.T) {
 	viewer := "someone@example.com"
 	assert.Equal(t, http.StatusForbidden, w.get(t, newURL, viewer).Code)
 	assert.Equal(t, http.StatusForbidden, w.post(t, newURL, viewer, wizardForm(actSave)).Code)
-	assert.NotContains(t, w.get(t, clusterURL, viewer).Body.String(), "New test")
-	assert.Contains(t, w.get(t, clusterURL, developer).Body.String(), "New test")
-
-	assert.Equal(t, http.StatusForbidden, w.post(t, clusterURL+"/tests/team-a/smoke/delete", developer, url.Values{}).Code)
-	assert.Contains(t, w.get(t, clusterURL+"/tests/team-a/smoke", admin).Body.String(), "Delete test smoke")
-	rec := w.post(t, clusterURL+"/tests/team-a/smoke/delete", admin, url.Values{})
-	require.Equal(t, http.StatusSeeOther, rec.Code)
-	assert.Contains(t, rec.Header().Get("Location"), "deleted")
-	err := w.k8s.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "smoke"}, &testsv1alpha1.Test{})
-	assert.True(t, apierrors.IsNotFound(err))
 }
 
 func TestManifestYAML_KeepsMeaningfulEmptyObjects(t *testing.T) {
@@ -403,17 +386,6 @@ func TestEditor_MainPathOutsideTheCheckoutWarns(t *testing.T) {
 	body := w.post(t, newURL, developer, form).Body.String()
 	assert.Contains(t, body, "script is other/x.js, which the sparse checkout (perf) leaves out")
 	assert.Contains(t, body, "The API would admit this Test", "a warning, not an error")
-}
-
-func TestTestPages_NotReady(t *testing.T) {
-	test := smokeTest()
-	test.Status.Conditions = []metav1.Condition{{Type: "Ready", Status: metav1.ConditionFalse, Reason: "ParameterMissing",
-		Message: "set spec.config.script: The k6 script.", LastTransitionTime: metav1.Now()}}
-	w := newWorld(t, test)
-	assert.Contains(t, w.get(t, clusterURL, developer).Body.String(), `<span class="chip warning" title="set spec.config.script: The k6 script.">not ready</span>`)
-	page := w.get(t, clusterURL+"/tests/team-a/smoke", developer).Body.String()
-	assert.Contains(t, page, "Not ready to run:</strong> set spec.config.script: The k6 script.")
-	assert.Contains(t, page, `/tests/team-a/smoke/edit">edit the Test</a>`)
 }
 
 func TestEditor_LiveYAML(t *testing.T) {

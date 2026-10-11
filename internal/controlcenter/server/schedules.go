@@ -20,13 +20,10 @@ import (
 	"cmp"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 
-	"github.com/robfig/cron/v3"
-
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
-	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
@@ -34,13 +31,6 @@ import (
 // (fired by the operator's scheduler); one-shot runs are TestRuns waiting
 // for spec.notBefore. Control Center only reads and edits those — it keeps
 // no schedule of its own.
-
-// cronParser is the operator's and the webhook's parser: five fields, an
-// optional CRON_TZ=<zone> prefix, UTC otherwise.
-var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-
-// nextFiresShown is how many upcoming fire times a schedule lists.
-const nextFiresShown = 3
 
 // maxQueuedListed bounds the queued runs scanned for one-shot schedules.
 const maxQueuedListed = 200
@@ -51,51 +41,10 @@ const backToSchedules = "schedules"
 
 func schedulesPath(c string) string { return clusterPath(c) + "/schedules" }
 
-// nextFires returns the next n fire times of a cron expression after now,
-// in UTC.
-func nextFires(expr string, now time.Time, n int) ([]time.Time, error) {
-	sched, err := cronParser.Parse(expr)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]time.Time, 0, n)
-	// Without CRON_TZ the library uses the zone of the time it is given;
-	// schedules are UTC (as the operator evaluates them), not CC's zone.
-	t := now.UTC()
-	for range n {
-		t = sched.Next(t)
-		if t.IsZero() {
-			break
-		}
-		out = append(out, t.UTC())
-	}
-	return out, nil
-}
-
-// scheduleView is a Test's recurring schedule as the pages show it.
-type scheduleView struct {
-	Expr string
-	Next []time.Time
-	Err  string // the expression doesn't parse (never fires)
-}
-
-func viewSchedule(expr string, now time.Time) *scheduleView {
-	if expr == "" {
-		return nil
-	}
-	v := &scheduleView{Expr: expr}
-	next, err := nextFires(expr, now, nextFiresShown)
-	if err != nil {
-		v.Err = err.Error()
-	}
-	v.Next = next
-	return v
-}
-
 type recurringRow struct {
 	Name, Namespace, Tool string
 	Locked                bool
-	Schedule              *scheduleView
+	Schedule              *uiapi.Schedule
 	LatestRun             *testsv1alpha1.RunReference
 }
 
@@ -129,7 +78,7 @@ func (s *Server) schedulesPage(w http.ResponseWriter, r *http.Request) {
 		data.Recurring = append(data.Recurring, recurringRow{
 			Name: t.Name, Namespace: t.Namespace, Tool: t.Labels[labelTool],
 			Locked:    t.Labels[labelManagedBy] != managedByUI,
-			Schedule:  viewSchedule(t.Spec.Schedule, now),
+			Schedule:  uiapi.ScheduleOf(t.Spec.Schedule, now),
 			LatestRun: t.Status.LatestRun,
 		})
 	}
@@ -166,42 +115,4 @@ func scheduledRuns(runs []apiclient.Run, now time.Time) []apiclient.Run {
 	}
 	slices.SortFunc(out, func(a, b apiclient.Run) int { return a.NotBefore.Compare(*b.NotBefore) })
 	return out
-}
-
-// setSchedule sets or clears a GUI-managed Test's recurring schedule.
-func (s *Server) setSchedule(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	back := testPath(c.Name, ns, name)
-	expr := strings.Join(strings.Fields(r.PostFormValue("schedule")), " ")
-	if r.PostFormValue("remove") != "" {
-		expr = ""
-	}
-	var next []time.Time
-	if expr != "" {
-		var err error
-		if next, err = nextFires(expr, time.Now(), 1); err != nil {
-			redirect(w, r, back, "Not a valid cron expression: "+err.Error())
-			return
-		}
-	}
-	if _, err := api(r, c).SetTestSchedule(r.Context(), ns, name, expr); err != nil {
-		if apiclient.IsConflict(err) {
-			redirect(w, r, back, "This Test is managed in Git: change spec.schedule there.")
-			return
-		}
-		redirect(w, r, back, "Could not save the schedule: "+messageOf(err))
-		return
-	}
-	switch {
-	case expr == "":
-		redirect(w, r, back, "Schedule removed.")
-	case len(next) == 0:
-		redirect(w, r, back, "Schedule saved; it never fires.")
-	default:
-		redirect(w, r, back, "Schedule saved. Next run: "+views.When(next[0])+".")
-	}
 }

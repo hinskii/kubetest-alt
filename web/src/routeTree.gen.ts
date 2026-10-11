@@ -10,33 +10,58 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ClustersClusterIndexRouteImport } from './routes/clusters/$cluster/index'
+import { Route as ClustersClusterTestsNsNameRouteImport } from './routes/clusters/$cluster/tests/$ns/$name'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ClustersClusterIndexRoute = ClustersClusterIndexRouteImport.update({
+  id: '/clusters/$cluster/',
+  path: '/clusters/$cluster/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ClustersClusterTestsNsNameRoute =
+  ClustersClusterTestsNsNameRouteImport.update({
+    id: '/clusters/$cluster/tests/$ns/$name',
+    path: '/clusters/$cluster/tests/$ns/$name',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/clusters/$cluster/': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/clusters/$cluster': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/clusters/$cluster/': typeof ClustersClusterIndexRoute
+  '/clusters/$cluster/tests/$ns/$name': typeof ClustersClusterTestsNsNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/clusters/$cluster/' | '/clusters/$cluster/tests/$ns/$name'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/clusters/$cluster' | '/clusters/$cluster/tests/$ns/$name'
+  id:
+    | '__root__'
+    | '/'
+    | '/clusters/$cluster/'
+    | '/clusters/$cluster/tests/$ns/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ClustersClusterIndexRoute: typeof ClustersClusterIndexRoute
+  ClustersClusterTestsNsNameRoute: typeof ClustersClusterTestsNsNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +73,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/clusters/$cluster/': {
+      id: '/clusters/$cluster/'
+      path: '/clusters/$cluster'
+      fullPath: '/clusters/$cluster/'
+      preLoaderRoute: typeof ClustersClusterIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/clusters/$cluster/tests/$ns/$name': {
+      id: '/clusters/$cluster/tests/$ns/$name'
+      path: '/clusters/$cluster/tests/$ns/$name'
+      fullPath: '/clusters/$cluster/tests/$ns/$name'
+      preLoaderRoute: typeof ClustersClusterTestsNsNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ClustersClusterIndexRoute: ClustersClusterIndexRoute,
+  ClustersClusterTestsNsNameRoute: ClustersClusterTestsNsNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

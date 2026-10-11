@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import type { Cluster } from "@/api/client";
 import { clustersQuery } from "@/api/queries";
@@ -32,12 +32,10 @@ function Home() {
 }
 
 function ClusterCard({ cluster }: { cluster: Cluster }) {
-  // Cluster pages are still server-rendered (step 20R strangler): a plain
-  // link, a full page load.
-  const href = `/clusters/${encodeURIComponent(cluster.name)}`;
   return (
-    <a
-      href={href}
+    <Link
+      to="/clusters/$cluster"
+      params={{ cluster: cluster.name }}
       className="group rounded-xl focus-visible:outline-2"
       data-testid={`cluster-${cluster.name}`}
     >
@@ -48,15 +46,15 @@ function ClusterCard({ cluster }: { cluster: Cluster }) {
             {cluster.reachable ? (
               <Badge className="bg-success-soft text-success">connected</Badge>
             ) : (
-              <Badge className="bg-danger-soft text-destructive">unreachable</Badge>
+              <Badge className="bg-danger-soft text-danger">unreachable</Badge>
             )}
           </CardTitle>
           <CardDescription className="font-mono">{cluster.name}</CardDescription>
         </CardHeader>
         {cluster.error && (
-          <CardContent className="text-sm text-destructive break-words">{cluster.error}</CardContent>
+          <CardContent className="text-sm text-danger break-words">{cluster.error}</CardContent>
         )}
       </Card>
-    </a>
+    </Link>
   );
 }

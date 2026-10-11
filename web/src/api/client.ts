@@ -14,6 +14,11 @@ export const api = createClient<paths>({
 
 export type Me = components["schemas"]["Me"];
 export type Cluster = components["schemas"]["Cluster"];
+export type TestSummary = components["schemas"]["TestSummary"];
+export type TestDetail = components["schemas"]["TestDetail"];
+export type Param = components["schemas"]["Param"];
+export type RunRow = components["schemas"]["RunRow"];
+export type Schedule = components["schemas"]["Schedule"];
 
 /** ApiError carries the API's `{error}` message and the HTTP status. */
 export class ApiError extends Error {

@@ -29,6 +29,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
@@ -63,22 +64,15 @@ var funcs = template.FuncMap{
 	"sub":          func(a, b int) int { return a - b },
 	"dict":         dict,
 	"shortSHA":     shortSHA,
-	"commitURL":    commitURL,
+	"commitURL":    uiapi.CommitURL,
 	"num":          FormatNumber,
 	"durationF":    func(ms float64) string { return duration(int64(math.Round(ms))) },
 	"inc":          func(n int) int { return n + 1 },
 	"runID":        RunID,
 }
 
-// RunID is the id the API finds a run by: its name while the TestRun
-// exists, its UID once only run history has it (the API looks archived
-// runs up by UID).
-func RunID(r apiclient.Run) string {
-	if r.Origin == "archive" && r.UID != "" {
-		return r.UID
-	}
-	return r.Name
-}
+// RunID is api.RunID (kept for the remaining server-rendered pages).
+func RunID(r apiclient.Run) string { return uiapi.RunID(r) }
 
 // FormatNumber renders a metric value: integers as such, otherwise up to
 // three decimals.
@@ -105,41 +99,6 @@ func shortSHA(sha string) string {
 		return sha[:7]
 	}
 	return sha
-}
-
-// commitURL links a commit on GitHub, GitLab or Bitbucket (cloud or a
-// self-hosted instance with the name in its host), from an https, ssh://
-// or scp-style (git@host:owner/repo.git) repository URI. "" for anything
-// else — the page then shows the SHA without a link.
-func commitURL(repo, sha string) string {
-	if sha == "" {
-		return ""
-	}
-	var host, path string
-	if u, err := url.Parse(repo); err == nil && u.Host != "" {
-		if u.Scheme != "https" && u.Scheme != "http" && u.Scheme != "ssh" {
-			return ""
-		}
-		host, path = u.Hostname(), u.Path
-	} else if at, colon := strings.Index(repo, "@"), strings.Index(repo, ":"); at >= 0 && colon > at {
-		host, path = repo[at+1:colon], repo[colon+1:]
-	} else {
-		return ""
-	}
-	path = strings.TrimSuffix(strings.Trim(path, "/"), ".git")
-	if host == "" || strings.Count(path, "/") < 1 {
-		return ""
-	}
-	base := "https://" + host + "/" + path
-	switch h := strings.ToLower(host); {
-	case strings.Contains(h, "github"):
-		return base + "/commit/" + url.PathEscape(sha)
-	case strings.Contains(h, "gitlab"):
-		return base + "/-/commit/" + url.PathEscape(sha)
-	case strings.Contains(h, "bitbucket"):
-		return base + "/commits/" + url.PathEscape(sha)
-	}
-	return ""
 }
 
 // dict builds a map for passing several values to a sub-template:

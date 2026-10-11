@@ -77,9 +77,11 @@ browser ── oauth2-proxy ── CC (Go)
   wrappers over `pkg/apiclient`; CC-side computation stays in Go
   (analytics summaries, run comparison, schedules overview, cleanup
   preview, the editor's build/preview/dry run, YAML formatting).
-- **OpenAPI for the BFF**, generated in Go like the apiserver's
-  (`cmd/gen-openapi`-style), zero-diff checked in CI; the TS client is
-  generated from it (`pnpm gen:api`), also zero-diff checked.
+- **OpenAPI for the BFF**, reflected from the handlers' Go types
+  (swaggest/openapi-go) through one route table that also registers the
+  handlers — a route can't exist without its spec entry. Written by
+  `cmd/gen-openapi`, zero-diff checked in CI; the TS client is generated
+  from it (`pnpm gen:api`), also zero-diff checked.
 - **CSP: scripts stay `'self'`; the UI document allows inline styles.**
   Vite emits no inline scripts (the theme bootstrap is the shared
   `/static/theme.js`). sonner and Radix inject `<style>` elements at run
@@ -87,7 +89,8 @@ browser ── oauth2-proxy ── CC (Go)
   (`webui.CSP`, found in R0's browser check). Style injection can restyle a
   page but not run code; the server-rendered pages keep the stricter policy;
   artifacts and live views keep their sandbox CSPs. Playwright fails any
-  test that logs a console error, so a CSP violation can't slip in.
+  test that logs a console error, so a CSP violation can't slip in (R1
+  caught Zod's eval probe this way: Zod runs `jitless`).
 - **Auth/roles in the SPA:** `GET /api/v1/me` → email, role; the UI hides
   what a role can't do, the BFF enforces it.
 
@@ -157,7 +160,7 @@ parity (and its old template and handler are deleted in the same commit).
 | Phase | Scope | Exit criteria |
 |---|---|---|
 | **R0 Foundation** ✅ | `web/` scaffold, toolchain, CI job, Docker stage, embed + SPA fallback, theme (tokens, light/dark, the toggle), app shell (top bar, user + role, breadcrumbs, notices/toasts, error boundary, 404), BFF skeleton (`/me`, `/clusters`), OpenAPI + TS generation, MSW + Playwright harness | the home page in React in the image on kind; e2e sign-in path unchanged. Done: unknown addresses get the UI with a 404 (its not-found page); breadcrumbs come with R1's first nested page |
-| **R1 Browse** | tests list (groups, filters, locked/not-ready chips, auto-refresh), Test page (header, params, run form incl. "start at", schedule panel, run history paging, definition in CodeMirror read-only, delete/duplicate/edit links) | parity checklist ✓; old templates `home`, `tests`, `test` deleted |
+| **R1 Browse** ✅ | tests list (groups, filters, locked/not-ready chips, auto-refresh), Test page (header, params, run form incl. "start at", schedule panel, run history paging, definition in CodeMirror read-only, delete/duplicate/edit links) | parity checklist ✓; old templates `home`, `tests`, `test` deleted. Done: BFF `listTests`, `getTest`, `deleteTest`, `setSchedule`, `listTestRuns`, `startRun`; the server's helpers it shares moved to `api/view.go`; Go page tests and BFF tests share `cctest` (real kubetest API on fake k8s); tables use shadcn's Table — TanStack Table comes with the first sortable table (R3 test cases) |
 | **R2 Runs** | run page: facts, Now: (events), live log (polling via Query), log download, live view iframe, report iframe + dark inversion + original colours, failed cases, metrics, child runs, comment, abort / rerun / delete, Kubernetes events panel, Run again | parity ✓; `run.html`, `run.js` deleted |
 | **R3 Insights** | analytics (trends, summary, comparison + markdown download), test cases + history, schedules overview, cleanup preview/apply | parity ✓; remaining read pages deleted |
 | **R4 Editor (= 20j in React)** | the 3-step wizard (what → where → parameters), tool and namespace comboboxes (namespace typed or picked, catalog follows), per-tool source rules (projects git-only, inline single-file, none), inline script editor (CodeMirror by file type), test data rows, live YAML panel (BFF preview, debounced), dry run on Create, Edit, Duplicate, YAML mode (CodeMirror + server line errors), the Test page's **Settings** tab with per-section saves | the 20j acceptance (3 screens for an inline k6 Test, git Playwright) in Playwright; `editor.*`, `refresh.js` deleted |

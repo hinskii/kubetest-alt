@@ -36,6 +36,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/yamlview"
 	"github.com/hinskii/kubetest-alt/internal/resolver"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
@@ -648,7 +649,7 @@ func (b *builder) timing() {
 	}
 	s.Schedule = f.Schedule
 	if f.Schedule != "" {
-		if _, err := nextFires(f.Schedule, time.Now(), 1); err != nil {
+		if _, err := uiapi.NextFires(f.Schedule, time.Now(), 1); err != nil {
 			b.fail("Schedule: " + err.Error())
 		}
 	}

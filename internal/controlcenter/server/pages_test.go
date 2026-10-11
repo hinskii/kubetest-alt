@@ -32,16 +32,13 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
-	"github.com/hinskii/kubetest-alt/internal/apiserver"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/cctest"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
@@ -50,10 +47,10 @@ import (
 )
 
 const (
-	bucket     = "kubetest"
-	proxyPath  = "/api/v1/namespaces/kubetest-alt/services/http:kubetest-alt-apiserver:8080/proxy"
-	developer  = "dev@example.com"
-	admin      = "boss@example.com"
+	bucket     = cctest.Bucket
+	proxyPath  = cctest.ProxyPath
+	developer  = cctest.Developer
+	admin      = cctest.Admin
 	runUID     = "11111111-2222-3333-4444-555555555555"
 	clusterURL = "/clusters/dev"
 )
@@ -76,37 +73,18 @@ func newWorld(t *testing.T, objs ...client.Object) *world {
 // TestRun is gone), when archive is non-nil.
 func newWorldWithArchive(t *testing.T, archive *archiveStore, objs ...client.Object) *world {
 	t.Helper()
-	sch := runtime.NewScheme()
-	require.NoError(t, clientgoscheme.AddToScheme(sch))
-	require.NoError(t, testsv1alpha1.AddToScheme(sch))
-	k8s := fake.NewClientBuilder().WithScheme(sch).WithObjects(objs...).Build()
-	objects := storage.NewFake()
-	api := &apiserver.Server{K8sClient: k8s, Bucket: bucket,
-		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects, Cases: cannedCases{}}
+	o := cctest.Options{Cases: cannedCases{}}
 	if archive != nil {
-		api.Store, api.Deleter = archive, archive
+		o.Store, o.Deleter = archive, archive
 	}
-
-	mux := http.NewServeMux()
-	mux.Handle(proxyPath+"/", http.StripPrefix(proxyPath, api.Handler()))
-	ts := httptest.NewServer(mux)
-	t.Cleanup(ts.Close)
-
-	cfg := &config.Config{Environment: config.EnvProduction,
-		RBAC: config.RBAC{Admins: []string{admin}, Developers: []string{developer}}}
-	reg, err := clusters.New(t.Context(), []config.Cluster{{
-		Name: "dev", DisplayName: "Deploy (dev)", Server: ts.URL,
-		Auth:      config.ClusterAuth{Type: config.AuthServiceAccount},
-		APIServer: config.APIServerRef{Namespace: "kubetest-alt", Service: "kubetest-alt-apiserver", Port: 8080},
-	}}, clusters.Options{InClusterConfig: func() (*rest.Config, error) { return &rest.Config{}, nil }})
-	require.NoError(t, err)
-	res, err := auth.NewResolver(cfg, "")
+	env := cctest.New(t, o, objs...)
+	res, err := auth.NewResolver(&config.Config{Environment: config.EnvProduction, RBAC: env.RBAC}, "")
 	require.NoError(t, err)
 	v, err := views.New()
 	require.NoError(t, err)
-	s := &Server{Clusters: reg, Auth: res, Views: v, ProbeTimeout: time.Second,
+	s := &Server{Clusters: env.Clusters, Auth: res, Views: v, ProbeTimeout: time.Second,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	return &world{h: s.Handler(), k8s: k8s, objects: objects}
+	return &world{h: s.Handler(), k8s: env.K8s, objects: env.Objects}
 }
 
 func (w *world) get(t *testing.T, path, user string) *httptest.ResponseRecorder {
@@ -149,13 +127,6 @@ func smokeTest() *testsv1alpha1.Test {
 	}
 }
 
-func gitopsTest() *testsv1alpha1.Test {
-	return &testsv1alpha1.Test{
-		ObjectMeta: metav1.ObjectMeta{Name: "checkout", Namespace: "team-b", Labels: map[string]string{"kubetest.io/tool": "cypress"}},
-		Spec:       testsv1alpha1.TestSpec{Container: testsv1alpha1.ContainerConfig{Image: "cypress/included", Args: []string{"run"}}},
-	}
-}
-
 func runOf(name string, phase testsv1alpha1.Phase) *testsv1alpha1.TestRun {
 	now := metav1.NewTime(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
 	r := &testsv1alpha1.TestRun{
@@ -171,71 +142,6 @@ func runOf(name string, phase testsv1alpha1.Phase) *testsv1alpha1.TestRun {
 		r.Status.ArtifactRefs = []testsv1alpha1.ArtifactRef{{Path: "report/index.html", ContentType: "text/html"}}
 	}
 	return r
-}
-
-func TestTestsPage_GroupsByToolWithLatestRunAndLock(t *testing.T) {
-	w := newWorld(t, smokeTest(), gitopsTest())
-	rec := w.get(t, clusterURL, "")
-	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
-	body := rec.Body.String()
-	assert.Contains(t, body, "2 of 2 tests")
-	assert.Less(t, strings.Index(body, ">cypress<"), strings.Index(body, ">k6<"), "groups sorted by tool")
-	assert.Contains(t, body, `href="/clusters/dev/tests/team-a/smoke"`)
-	assert.Contains(t, body, `href="/clusters/dev/runs/team-a/smoke-abcde"`)
-	assert.Contains(t, body, "status-failed")
-	assert.Contains(t, body, `<div id="tests-list" data-refresh>`, "the list refreshes itself (refresh.js)")
-	assert.Regexp(t, `href="/static/highlight.css\?v=[0-9a-f]{12}"`, body, "versioned: a style change is never cached stale")
-	assert.Equal(t, 1, strings.Count(body, ">read-only<"), "only the Test not created by the GUI is locked")
-
-	filtered := w.get(t, clusterURL+"?tool=k6", "").Body.String()
-	assert.Contains(t, filtered, "1 of 2 tests")
-	assert.NotContains(t, filtered, "checkout")
-}
-
-func TestTestPage_RunFormOnlyForDevelopers(t *testing.T) {
-	w := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhaseFailed))
-	page := "/clusters/dev/tests/team-a/smoke"
-
-	dev := w.get(t, page, developer).Body.String()
-	assert.Contains(t, dev, `name="config.vus" value="10" step="1"`)
-	assert.Contains(t, dev, `<option value="stage" selected>stage</option>`)
-	assert.Contains(t, dev, `name="config.target" value="" required`)
-	assert.Contains(t, dev, `href="/clusters/dev/runs/team-a/smoke-abcde"`, "run history")
-	assert.Contains(t, dev, developer, "who started it")
-	assert.Contains(t, dev, `<section class="panel" id="runs" data-refresh>`, "the run history refreshes itself")
-
-	viewer := w.get(t, page, "someone@example.com").Body.String()
-	assert.NotContains(t, viewer, "Run test")
-
-	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/dev/tests/team-a/nope", "").Code)
-	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/prod/tests/team-a/smoke", "").Code)
-}
-
-func TestStartRun_SendsOnlyChangedParamsAndRedirects(t *testing.T) {
-	w := newWorld(t, smokeTest())
-	page := "/clusters/dev/tests/team-a/smoke"
-	rec := w.post(t, page+"/run", developer, url.Values{
-		"config.vus": {"50"}, "config.env": {"stage"}, "config.target": {"https://shop"},
-		"notBefore": {"2030-01-02T03:04"},
-	})
-	require.Equal(t, http.StatusSeeOther, rec.Code, rec.Body.String())
-	loc := rec.Header().Get("Location")
-	assert.True(t, strings.HasPrefix(loc, "/clusters/dev/runs/team-a/smoke-"), loc)
-	assert.Contains(t, loc, "notice=Run+scheduled+for+2030-01-02+03%3A04+UTC.")
-
-	var runs testsv1alpha1.TestRunList
-	require.NoError(t, w.k8s.List(context.Background(), &runs))
-	require.Len(t, runs.Items, 1)
-	r := runs.Items[0]
-	assert.Equal(t, map[string]string{"vus": "50", "target": "https://shop"}, r.Spec.Config, "defaults are not sent")
-	assert.Equal(t, developer, r.Spec.Tags["kubetest.io/created-by"])
-	require.NotNil(t, r.Spec.NotBefore)
-	assert.Equal(t, time.Date(2030, 1, 2, 3, 4, 0, 0, time.UTC), r.Spec.NotBefore.UTC())
-
-	missing := w.post(t, page+"/run", developer, url.Values{"config.vus": {"5"}})
-	assert.Contains(t, missing.Header().Get("Location"), "Parameter+target+is+required")
-
-	assert.Equal(t, http.StatusForbidden, w.post(t, page+"/run", "someone@example.com", url.Values{}).Code)
 }
 
 func TestRunPage_FinishedRun(t *testing.T) {
@@ -357,7 +263,7 @@ func TestClusterUnreachable(t *testing.T) {
 	require.NoError(t, err)
 	w.h = (&Server{Clusters: reg, Auth: res, Views: v, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}).Handler()
 
-	rec := w.get(t, clusterURL, "")
+	rec := w.get(t, clusterURL+"/schedules", "")
 	assert.Equal(t, http.StatusBadGateway, rec.Code)
 	assert.Contains(t, rec.Body.String(), "Cannot reach the kubetest API of dev")
 	assert.Equal(t, http.StatusBadGateway, w.get(t, "/clusters/dev/runs/a/b/log", "").Code)
@@ -369,24 +275,13 @@ func TestLogDownload_UnknownRunIs404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.get(t, "/clusters/dev/runs/team-a/ghost/logs.txt", "").Code)
 }
 
-func TestGeneratePrefixAndRedirectGuard(t *testing.T) {
-	assert.Equal(t, "smoke-", generatePrefix("smoke"))
-	long := generatePrefix(strings.Repeat("a", 70))
-	assert.Len(t, long, 51)
+func TestRedirectGuard(t *testing.T) {
 	rec := httptest.NewRecorder()
 	redirect(rec, httptest.NewRequest(http.MethodPost, "/", nil), "//evil.example", "")
 	assert.Equal(t, "/", rec.Header().Get("Location"))
 }
 
-func TestTestPage_Paging(t *testing.T) {
-	w := newWorld(t, smokeTest())
-	body := w.get(t, "/clusters/dev/tests/team-a/smoke?after=garbage", "")
-	assert.Equal(t, http.StatusBadGateway, body.Code, "a bad cursor is the API's 400, shown as such")
-	assert.Contains(t, body.Body.String(), "malformed cursor")
-	assert.Contains(t, w.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String(), "No runs yet.")
-}
-
-func TestRunAndTestPages_ShowCommit(t *testing.T) {
+func TestRunPage_ShowsCommit(t *testing.T) {
 	const sha = "0123456789abcdef0123456789abcdef01234567"
 	run := runOf("smoke-abcde", testsv1alpha1.PhasePassed)
 	run.Status.ResolvedSpec = `{"content":{"git":{"uri":"https://bot:s3cret@github.com/acme/tests.git"}}}`
@@ -399,13 +294,6 @@ func TestRunAndTestPages_ShowCommit(t *testing.T) {
 	assert.Contains(t, body, "· main")
 	assert.NotContains(t, body, "s3cret")
 
-	test := w.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String()
-	assert.Contains(t, test, "<th>Commit</th>")
-	assert.Contains(t, test, ">0123456</a>")
-
-	plain := newWorld(t, smokeTest(), runOf("smoke-abcde", testsv1alpha1.PhasePassed))
-	assert.NotContains(t, plain.get(t, "/clusters/dev/tests/team-a/smoke", "").Body.String(), "<th>Commit</th>",
-		"no git source, no commit column")
 }
 
 func TestRunPage_OpenReport(t *testing.T) {

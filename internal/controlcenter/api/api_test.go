@@ -166,10 +166,23 @@ func TestOpenAPI_DescribesEveryRoute(t *testing.T) {
 	b, err := OpenAPIJSON()
 	require.NoError(t, err)
 	var spec struct {
-		Paths map[string]map[string]any `json:"paths"`
+		Paths map[string]map[string]struct {
+			OperationID string `json:"operationId"`
+		} `json:"paths"`
 	}
 	require.NoError(t, json.Unmarshal(b, &spec))
-	assert.Contains(t, spec.Paths, "/api/v1/me")
-	assert.Contains(t, spec.Paths, "/api/v1/clusters")
-	assert.Len(t, spec.Paths, 2, "a route without a spec entry has no typed client")
+	routes := (&Server{}).routes()
+	ids := map[string]bool{}
+	for _, rt := range routes {
+		op, ok := spec.Paths[rt.Path][strings.ToLower(rt.Method)]
+		require.True(t, ok, "%s %s has no spec entry, so no typed client", rt.Method, rt.Path)
+		assert.Equal(t, rt.ID, op.OperationID)
+		assert.False(t, ids[rt.ID], "operationId %s used twice", rt.ID)
+		ids[rt.ID] = true
+	}
+	n := 0
+	for _, ops := range spec.Paths {
+		n += len(ops)
+	}
+	assert.Equal(t, len(routes), n, "every spec entry is served")
 }

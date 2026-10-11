@@ -33,32 +33,6 @@ import (
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 )
 
-func TestNextFires(t *testing.T) {
-	now := time.Date(2026, 10, 7, 12, 30, 0, 0, time.UTC)
-	got, err := nextFires("0 2 * * *", now, 3)
-	require.NoError(t, err)
-	assert.Equal(t, []time.Time{
-		time.Date(2026, 10, 8, 2, 0, 0, 0, time.UTC),
-		time.Date(2026, 10, 9, 2, 0, 0, 0, time.UTC),
-		time.Date(2026, 10, 10, 2, 0, 0, 0, time.UTC),
-	}, got, "UTC without a zone")
-
-	warsaw, err := time.LoadLocation("Europe/Warsaw")
-	require.NoError(t, err)
-	got, err = nextFires("0 2 * * *", now.In(warsaw), 1)
-	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, 10, 8, 2, 0, 0, 0, time.UTC), got[0], "UTC whatever zone Control Center runs in")
-
-	got, err = nextFires("CRON_TZ=Europe/Warsaw 0 2 * * *", now, 1)
-	require.NoError(t, err)
-	assert.Equal(t, time.Date(2026, 10, 8, 0, 0, 0, 0, time.UTC), got[0], "02:00 in Warsaw (CEST) is 00:00 UTC")
-
-	_, err = nextFires("every night", now, 1)
-	require.Error(t, err)
-	_, err = nextFires("0 0 0 2 * *", now, 1)
-	require.Error(t, err, "six fields (seconds) are not the operator's format")
-}
-
 func TestScheduledRuns_FutureQueuedOnly(t *testing.T) {
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	later, sooner, past := now.Add(2*time.Hour), now.Add(time.Hour), now.Add(-time.Minute)
@@ -133,50 +107,4 @@ func TestSchedulesPage(t *testing.T) {
 	assert.Equal(t, "cancelled before its start time", got.Spec.Abort.Message)
 	rec = w.post(t, "/clusters/dev/runs/team-a/later-2/abort", developer, url.Values{"back": {"https://evil.example"}})
 	assert.True(t, strings.HasPrefix(rec.Header().Get("Location"), "/clusters/dev/runs/team-a/later-2?"), "unknown back → the run")
-}
-
-func TestSetSchedule(t *testing.T) {
-	w := newWorld(t, smokeTest(), gitopsTest())
-	page := "/clusters/dev/tests/team-a/smoke"
-	post := func(user, expr string) *http.Response {
-		return w.post(t, page+"/schedule", user, url.Values{"schedule": {expr}}).Result()
-	}
-	stored := func() string {
-		var got testsv1alpha1.Test
-		require.NoError(t, w.k8s.Get(context.Background(), types.NamespacedName{Namespace: "team-a", Name: "smoke"}, &got))
-		return got.Spec.Schedule
-	}
-	notice := func(resp *http.Response) string {
-		u, err := url.Parse(resp.Header.Get("Location"))
-		require.NoError(t, err)
-		return u.Query().Get("notice")
-	}
-
-	assert.Equal(t, http.StatusForbidden, post("", "0 2 * * *").StatusCode, "viewers can't schedule")
-
-	resp := post(developer, "  0   2 * * 1-5 ")
-	assert.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Contains(t, notice(resp), "Schedule saved. Next run: ")
-	assert.Equal(t, "0 2 * * 1-5", stored(), "whitespace normalized")
-
-	body := w.get(t, page, developer).Body.String()
-	assert.Contains(t, body, `Runs on <span class="mono">0 2 * * 1-5</span>`)
-	assert.Contains(t, body, `value="0 2 * * 1-5"`)
-	assert.Contains(t, body, "Remove schedule")
-
-	resp = post(developer, "every night")
-	assert.Contains(t, notice(resp), "Not a valid cron expression")
-	assert.Equal(t, "0 2 * * 1-5", stored(), "an invalid expression changes nothing")
-
-	resp = w.post(t, page+"/schedule", developer, url.Values{"schedule": {"0 2 * * 1-5"}, "remove": {"1"}}).Result()
-	assert.Equal(t, "Schedule removed.", notice(resp), "the Remove button wins over the field")
-	assert.Empty(t, stored())
-	require.Equal(t, http.StatusSeeOther, post(developer, "0 3 * * *").StatusCode)
-	assert.Equal(t, "Schedule removed.", notice(post(developer, "")), "an emptied field removes it too")
-	assert.Empty(t, stored())
-
-	locked := w.post(t, "/clusters/dev/tests/team-b/checkout/schedule", developer, url.Values{"schedule": {"0 2 * * *"}}).Result()
-	assert.Equal(t, "This Test is managed in Git: change spec.schedule there.", notice(locked))
-	gitops := w.get(t, "/clusters/dev/tests/team-b/checkout", developer).Body.String()
-	assert.NotContains(t, gitops, "Save schedule", "Git-managed Tests have no schedule form")
 }

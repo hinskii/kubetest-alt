@@ -3,9 +3,11 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
 import { meQuery } from "@/api/queries";
+import { Notice } from "@/components/notice";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const me = useQuery(meQuery);
@@ -27,8 +29,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        <TooltipProvider>{children}</TooltipProvider>
+      </main>
       <Toaster />
+      <Notice />
     </div>
   );
 }

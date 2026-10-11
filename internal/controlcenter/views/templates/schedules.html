@@ -13,7 +13,7 @@
       <tr>
         <td><a href="/clusters/{{pathEscape $d.Cluster}}/tests/{{pathEscape .Namespace}}/{{pathEscape .Name}}">{{.Name}}</a> <span class="muted">{{.Namespace}}</span>{{with .Tool}} <span class="chip">{{.}}</span>{{end}}</td>
         <td class="mono">{{.Schedule.Expr}}</td>
-        <td>{{with .Schedule.Err}}<span class="status status-error">invalid</span> <span class="muted small">{{.}}</span>{{else}}{{range $i, $t := .Schedule.Next}}{{if $i}}<br>{{end}}<span{{if $i}} class="muted"{{end}}>{{when $t}}</span>{{end}}{{end}}</td>
+        <td>{{with .Schedule.Error}}<span class="status status-error">invalid</span> <span class="muted small">{{.}}</span>{{else}}{{range $i, $t := .Schedule.Next}}{{if $i}}<br>{{end}}<span{{if $i}} class="muted"{{end}}>{{when $t}}</span>{{end}}{{end}}</td>
         <td>{{template "latest" (dict "Cluster" $d.Cluster "Namespace" .Namespace "Run" .LatestRun)}}</td>
         <td>{{if .Locked}}<span class="chip" title="Defined in Git: edit spec.schedule there">read-only</span>{{end}}</td>
       </tr>

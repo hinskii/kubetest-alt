@@ -21,6 +21,7 @@ package e2e
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -72,6 +73,25 @@ func ccRequest(t *testing.T, method, rawURL, user string, form url.Values) *http
 	if user != "" {
 		req.Header.Set("X-Forwarded-Email", user)
 	}
+	resp, err := noRedirect.Do(req)
+	require.NoError(t, err)
+	return resp
+}
+
+// ccJSON calls Control Center's UI API as user, with an optional JSON body.
+func ccJSON(t *testing.T, method, rawURL, user string, body any) *http.Response {
+	t.Helper()
+	var r io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		require.NoError(t, err)
+		r = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, rawURL, r)
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("X-Forwarded-Email", user)
 	resp, err := noRedirect.Do(req)
 	require.NoError(t, err)
 	return resp
@@ -148,16 +168,19 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	require.Len(t, test.Spec.Content.Files, 1)
 	assert.Equal(t, "live.js", test.Spec.Content.Files[0].Path)
 
-	tests := ccPage(t, ui+"/clusters/local", ccDeveloper)
-	assert.Contains(t, tests, ">e2e-cc-k6<")
+	tests := ccPage(t, ui+"/api/v1/clusters/local/tests", ccDeveloper)
+	assert.Contains(t, tests, `"name":"e2e-cc-k6"`)
 
-	// 4. Start it from Control Center, as a developer.
-	resp = ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6/run", ccDeveloper, url.Values{})
+	// 4. Start it from Control Center, as a developer (the UI's API).
+	testAPI := ui + "/api/v1/clusters/local/tests/" + workloadNS + "/e2e-cc-k6"
+	resp = ccJSON(t, http.MethodPost, testAPI+"/runs", ccDeveloper, map[string]any{})
+	var started struct{ Name string }
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&started))
 	_ = resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	runPath := strings.SplitN(resp.Header.Get("Location"), "?", 2)[0]
-	require.True(t, strings.HasPrefix(runPath, "/clusters/local/runs/"+workloadNS+"/e2e-cc-k6-"), runPath)
-	runName := runPath[strings.LastIndex(runPath, "/")+1:]
+	runName := started.Name
+	require.True(t, strings.HasPrefix(runName, "e2e-cc-k6-"), runName)
+	runPath := "/clusters/local/runs/" + workloadNS + "/" + runName
 
 	// 5. Live view, through the proxy without a session (signed link).
 	waitForPhase(t, ctx, c, runName, testsv1alpha1.PhaseRunning, 3*time.Minute)
@@ -206,14 +229,16 @@ func scenarioControlCenter(t *testing.T, ctx context.Context, c client.Client) {
 	assert.Contains(t, page, ">Scheduled<", "the scheduler's event for the run's pod")
 	logs := ccPage(t, ui+runPath+"/logs.txt", ccDeveloper)
 	assert.Contains(t, logs, "live.js", "the run's log through Control Center")
-	history := ccPage(t, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6", ccDeveloper)
-	assert.Contains(t, history, ">"+runName+"<", "the run in the Test's history")
+	history := ccPage(t, testAPI+"/runs", ccDeveloper)
+	assert.Contains(t, history, `"name":"`+runName+`"`, "the run in the Test's history")
 
 	// 7. An admin deletes the Test; its run history stays.
-	resp = ccRequest(t, http.MethodPost, ui+"/clusters/local/tests/"+workloadNS+"/e2e-cc-k6/delete", "admin@e2e.test", url.Values{})
+	resp = ccJSON(t, http.MethodDelete, testAPI, ccDeveloper, nil)
 	_ = resp.Body.Close()
-	require.Equal(t, http.StatusSeeOther, resp.StatusCode)
-	assert.Contains(t, resp.Header.Get("Location"), "deleted")
+	assert.Equal(t, http.StatusForbidden, resp.StatusCode, "developers can't delete")
+	resp = ccJSON(t, http.MethodDelete, testAPI, "admin@e2e.test", nil)
+	_ = resp.Body.Close()
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 	err = c.Get(ctx, client.ObjectKey{Namespace: workloadNS, Name: "e2e-cc-k6"}, &testsv1alpha1.Test{})
 	assert.True(t, apierrors.IsNotFound(err), "the Test is gone")
 	assert.Contains(t, ccPage(t, ui+runPath, ccDeveloper), ">passed<", "its run stays")

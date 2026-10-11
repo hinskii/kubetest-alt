@@ -30,32 +30,25 @@ import (
 	"strings"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"k8s.io/apimachinery/pkg/api/meta"
-
 	testsv1alpha1 "github.com/hinskii/kubetest-alt/api/v1alpha1"
+	uiapi "github.com/hinskii/kubetest-alt/internal/controlcenter/api"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/auth"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/views"
+	"github.com/hinskii/kubetest-alt/internal/controlcenter/webui"
 	"github.com/hinskii/kubetest-alt/pkg/apiclient"
 	"github.com/hinskii/kubetest-alt/pkg/expr"
 )
 
 // Labels Control Center reads from Tests.
+// (The UI's API package owns them; see api/view.go.)
 const (
-	labelTool      = "kubetest.io/tool"
-	labelManagedBy = "app.kubernetes.io/managed-by"
-	// managedByUI marks a Test the GUI may edit (CLAUDE.md §7).
-	managedByUI = "ui"
-	// toolOther groups Tests without a tool label on the tests page.
-	toolOther = "other"
-	// conditionReady is a Test's readiness (the operator's Test
-	// controller): False when it can't run as it is.
-	conditionReady = "Ready"
+	labelTool      = uiapi.LabelTool
+	labelManagedBy = uiapi.LabelManagedBy
+	managedByUI    = uiapi.ManagedByUI
 	// tagCreatedBy names who started a run (a TestRun tag) or created a
 	// Test (an annotation).
-	tagCreatedBy = "kubetest.io/created-by"
+	tagCreatedBy = uiapi.TagCreatedBy
 )
 
 // HTML input types of parameter fields (inputNumber is also the
@@ -82,31 +75,26 @@ var finalPhases = map[string]bool{
 	string(testsv1alpha1.PhaseError): true, string(testsv1alpha1.PhaseAborted): true,
 }
 
-// runsPerPage is the history page size on a Test's page.
-const runsPerPage = 25
-
 // maxLogPoll bounds one live-log poll response; the page asks again at
 // once while X-More says there is more.
 const maxLogPoll = 1 << 20
 
 // routes registers the cluster pages on mux. Mutations need a role.
 func (s *Server) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /clusters/{cluster}", s.testsPage)
-	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}", s.testPage)
+	// React pages (step 20R): the UI's router renders them.
+	mux.Handle("GET /clusters/{cluster}", webui.Index())
+	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}", webui.Index())
 	mux.Handle("GET /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/new", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitNewTest)))
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.submitEditTest)))
 	mux.Handle("POST /clusters/{cluster}/tests/new/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.newTestYAML)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/edit/yaml", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.editTestYAML)))
-	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/delete", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.deleteTest)))
-	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/run", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.startRun)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases", s.testCasesPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/cases/history", s.caseHistoryPage)
 	mux.HandleFunc("GET /clusters/{cluster}/schedules", s.schedulesPage)
 	mux.Handle("GET /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.cleanupPage)))
 	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/cleanup", auth.Require(auth.RoleAdmin, http.HandlerFunc(s.cleanupRuns)))
-	mux.Handle("POST /clusters/{cluster}/tests/{ns}/{name}/schedule", auth.Require(auth.RoleDeveloper, http.HandlerFunc(s.setSchedule)))
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics", s.testAnalyticsPage)
 	mux.HandleFunc("GET /clusters/{cluster}/tests/{ns}/{name}/analytics/compare.md", s.comparisonMarkdownDownload)
 	mux.HandleFunc("GET /clusters/{cluster}/runs/{ns}/{id}", s.runPage)
@@ -202,73 +190,6 @@ func clusterCrumbs(c *clusters.Cluster) []views.Crumb {
 	return []views.Crumb{{Label: "Clusters", Href: "/"}, {Label: c.DisplayNameOrName(), Href: clusterPath(c.Name)}}
 }
 
-// --- tests list -------------------------------------------------------------------
-
-type testRow struct {
-	Name, Namespace, Tool string
-	Locked                bool
-	LatestRun             *testsv1alpha1.RunReference
-	// Problem is why the Test can't run as it is (its Ready condition).
-	Problem string
-}
-
-type testGroup struct {
-	Tool  string
-	Tests []testRow
-}
-
-type testsData struct {
-	Cluster            string
-	Namespace, Tool    string // filters
-	Namespaces, Tools  []string
-	Groups             []testGroup
-	Total, Shown       int
-	ClusterDisplayName string
-}
-
-func (s *Server) testsPage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	nsFilter, toolFilter := r.URL.Query().Get("namespace"), r.URL.Query().Get("tool")
-	tests, err := api(r, c).ListTests(r.Context(), "")
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	data := testsData{Cluster: c.Name, ClusterDisplayName: c.DisplayNameOrName(), Namespace: nsFilter, Tool: toolFilter, Total: len(tests)}
-	namespaces, tools := map[string]bool{}, map[string]bool{}
-	groups := map[string][]testRow{}
-	for _, t := range tests {
-		tool := t.Labels[labelTool]
-		if tool == "" {
-			tool = toolOther
-		}
-		namespaces[t.Namespace], tools[tool] = true, true
-		if (nsFilter != "" && t.Namespace != nsFilter) || (toolFilter != "" && tool != toolFilter) {
-			continue
-		}
-		groups[tool] = append(groups[tool], testRow{
-			Name: t.Name, Namespace: t.Namespace, Tool: tool,
-			Locked:    t.Labels[labelManagedBy] != managedByUI,
-			LatestRun: t.Status.LatestRun,
-			Problem:   notReady(t.Status.Conditions),
-		})
-		data.Shown++
-	}
-	data.Namespaces = slices.Sorted(maps.Keys(namespaces))
-	data.Tools = slices.Sorted(maps.Keys(tools))
-	for _, tool := range slices.Sorted(maps.Keys(groups)) {
-		rows := groups[tool]
-		slices.SortFunc(rows, func(a, b testRow) int {
-			return strings.Compare(a.Namespace+"/"+a.Name, b.Namespace+"/"+b.Name)
-		})
-		data.Groups = append(data.Groups, testGroup{Tool: tool, Tests: rows})
-	}
-	s.page(w, r, "tests", c.DisplayNameOrName(), clusterCrumbs(c)[:1], data)
-}
-
 // --- test page ----------------------------------------------------------------------
 
 // param is one spec.config parameter as a form field.
@@ -278,29 +199,6 @@ type param struct {
 	Enum                                      []string
 	Required                                  bool
 	InputType, Step                           string
-}
-
-type testData struct {
-	Cluster    string
-	Test       *apiclient.ResolvedTest
-	Params     []param
-	Runs       []apiclient.Run
-	NextCursor string
-	PageCursor string
-	// ShowCommit: some run on the page checked out a git commit.
-	ShowCommit bool
-	// Schedule is the Test's recurring schedule (spec.schedule), if any.
-	Schedule *scheduleView
-	// Problem is why the Test can't run as it is (its Ready condition).
-	Problem string
-}
-
-// notReady is the message of a Test's Ready=False condition, or "".
-func notReady(conds []metav1.Condition) string {
-	if c := meta.FindStatusCondition(conds, conditionReady); c != nil && c.Status == metav1.ConditionFalse {
-		return cmp.Or(c.Message, c.Reason)
-	}
-	return ""
 }
 
 func paramsOf(spec *testsv1alpha1.TestSpec) []param {
@@ -321,88 +219,6 @@ func paramsOf(spec *testsv1alpha1.TestSpec) []param {
 		out = append(out, f)
 	}
 	return out
-}
-
-func (s *Server) testPage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	client := api(r, c)
-	t, err := client.GetResolvedTest(r.Context(), ns, name)
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	cursor := r.URL.Query().Get("after")
-	runs, err := client.ListRuns(r.Context(), apiclient.ListRunsOptions{
-		Namespace: ns, Test: name, Limit: runsPerPage, After: cursor,
-	})
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	data := testData{Cluster: c.Name, Test: t, Params: paramsOf(t.Spec), Runs: runs.Runs,
-		NextCursor: runs.NextCursor, PageCursor: cursor, Problem: notReady(t.Conditions)}
-	if t.Spec != nil {
-		data.Schedule = viewSchedule(t.Spec.Schedule, time.Now())
-	}
-	data.ShowCommit = slices.ContainsFunc(runs.Runs, func(r apiclient.Run) bool { return r.Git != nil && r.Git.Commit != "" })
-	s.page(w, r, "test", name, clusterCrumbs(c), data)
-}
-
-// startRun creates a TestRun from the run form: parameters that differ
-// from their defaults, and an optional start time (UTC).
-func (s *Server) startRun(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.cluster(w, r)
-	if !ok {
-		return
-	}
-	ns, name := r.PathValue("ns"), r.PathValue("name")
-	back := testPath(c.Name, ns, name)
-	client := api(r, c)
-	t, err := client.GetResolvedTest(r.Context(), ns, name)
-	if err != nil {
-		s.apiError(w, r, c, err)
-		return
-	}
-	if err := r.ParseForm(); err != nil {
-		redirect(w, r, back, "Could not read the form: "+err.Error())
-		return
-	}
-	overrides := map[string]string{}
-	for _, p := range paramsOf(t.Spec) {
-		v := strings.TrimSpace(r.PostForm.Get("config." + p.Name))
-		if v != "" && v != p.Default {
-			overrides[p.Name] = v
-		}
-		if v == "" && p.Required {
-			redirect(w, r, back, fmt.Sprintf("Parameter %s is required.", p.Name))
-			return
-		}
-	}
-	run := &testsv1alpha1.TestRun{Spec: testsv1alpha1.TestRunSpec{TestRef: name, Config: overrides}}
-	run.GenerateName = generatePrefix(name)
-	if v := strings.TrimSpace(r.PostForm.Get("notBefore")); v != "" {
-		at, err := time.ParseInLocation("2006-01-02T15:04", v, time.UTC)
-		if err != nil {
-			redirect(w, r, back, "Start time must look like 2026-10-07T18:30 (UTC).")
-			return
-		}
-		nb := metav1.NewTime(at)
-		run.Spec.NotBefore = &nb
-	}
-	created, err := client.CreateRun(r.Context(), ns, run)
-	if err != nil {
-		redirect(w, r, back, "Could not start the run: "+messageOf(err))
-		return
-	}
-	notice := "Run started."
-	if run.Spec.NotBefore != nil && run.Spec.NotBefore.After(time.Now()) {
-		notice = "Run scheduled for " + run.Spec.NotBefore.UTC().Format("2006-01-02 15:04 UTC") + "."
-	}
-	redirect(w, r, runPath(c.Name, ns, created.Name), notice)
 }
 
 // rerunRun starts the run's Test again with the parameters that run used
@@ -443,22 +259,13 @@ func (s *Server) rerunRun(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	run := &testsv1alpha1.TestRun{Spec: testsv1alpha1.TestRunSpec{TestRef: old.TestRef, Config: overrides}}
-	run.GenerateName = generatePrefix(old.TestRef)
+	run.GenerateName = uiapi.GeneratePrefix(old.TestRef)
 	created, err := client.CreateRun(r.Context(), ns, run)
 	if err != nil {
 		redirect(w, r, back, "Could not start the run: "+messageOf(err))
 		return
 	}
 	redirect(w, r, runPath(c.Name, ns, created.Name), "Run started again with the parameters of "+old.Name+".")
-}
-
-// generatePrefix keeps generateName within the 63-character run name
-// (the API server appends 5 characters).
-func generatePrefix(test string) string {
-	if len(test) > 50 {
-		test = strings.TrimRight(test[:50], "-.")
-	}
-	return test + "-"
 }
 
 // --- run page ----------------------------------------------------------------------
