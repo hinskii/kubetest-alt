@@ -55,3 +55,40 @@ test("Settings: a section saves alone", async ({ page }) => {
     "timeout:",
   );
 });
+
+test("the tests list: pass rate, recent runs, search and status", async ({ page }) => {
+  test.setTimeout(120_000);
+  // A finished run of ui-smoke, so it has stats and a recent run.
+  const r = await page.request.post(`/api/v1/clusters/${cluster}/tests/${ns}/ui-smoke/runs`, {
+    data: { config: {} },
+  });
+  expect(r.status(), await r.text()).toBe(201);
+  const run = ((await r.json()) as { name: string }).name;
+  await expect
+    .poll(
+      async () =>
+        (
+          (await (await page.request.get(`/api/v1/clusters/${cluster}/runs/${ns}/${run}`)).json()) as {
+            finished: boolean;
+          }
+        ).finished,
+      { timeout: 90_000 },
+    )
+    .toBe(true);
+
+  await page.goto(`/clusters/${cluster}?namespace=${ns}`);
+  await page.getByRole("searchbox", { name: "Search" }).fill("ui-smo");
+  await expect(page).toHaveURL(/q=ui-smo/);
+  const row = page.getByTestId("test-row").filter({ hasText: "ui-smoke" });
+  await expect(page.getByTestId("test-row")).toHaveCount(1);
+  await expect(row.getByText(/^\d+%$/)).toBeVisible();
+  await expect(
+    row.getByRole("list", { name: "Recent runs" }).getByRole("link", { name: new RegExp(`^${run} · `) }),
+  ).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Status" }).click();
+  await page.getByRole("option", { name: "Never run" }).click();
+  await expect(page).toHaveURL(/status=never/);
+  await expect(page.getByTestId("test-row")).toHaveCount(0);
+  await expect(page.getByText("No tests match.")).toBeVisible();
+});

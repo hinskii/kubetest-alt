@@ -808,6 +808,31 @@
         ],
         "type": "object"
       },
+      "RecentRun": {
+        "properties": {
+          "durationMs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "durationMs",
+          "finishedAt"
+        ],
+        "type": "object"
+      },
       "RecurringSchedule": {
         "properties": {
           "latestRun": {
@@ -1799,6 +1824,17 @@
       },
       "TestList": {
         "properties": {
+          "range": {
+            "enum": [
+              "24h",
+              "7d",
+              "30d"
+            ],
+            "type": "string"
+          },
+          "statsUnavailable": {
+            "type": "string"
+          },
           "tests": {
             "items": {
               "$ref": "#/components/schemas/TestSummary"
@@ -1807,7 +1843,8 @@
           }
         },
         "required": [
-          "tests"
+          "tests",
+          "range"
         ],
         "type": "object"
       },
@@ -1850,6 +1887,56 @@
         ],
         "type": "object"
       },
+      "TestStats": {
+        "properties": {
+          "aborted": {
+            "type": "integer"
+          },
+          "errored": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "p50Ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "p95Ms": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "passRatio": {
+            "type": [
+              "null",
+              "number"
+            ]
+          },
+          "passed": {
+            "type": "integer"
+          },
+          "recent": {
+            "items": {
+              "$ref": "#/components/schemas/RecentRun"
+            },
+            "type": "array"
+          },
+          "total": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "passed",
+          "failed",
+          "errored",
+          "aborted",
+          "p50Ms",
+          "p95Ms",
+          "recent"
+        ],
+        "type": "object"
+      },
       "TestSummary": {
         "properties": {
           "latestRun": {
@@ -1866,6 +1953,9 @@
           },
           "problem": {
             "type": "string"
+          },
+          "stats": {
+            "$ref": "#/components/schemas/TestStats"
           },
           "tool": {
             "type": "string"
@@ -2825,6 +2915,20 @@
         "operationId": "listTests",
         "parameters": [
           {
+            "description": "The stats' window. Default 7d.",
+            "in": "query",
+            "name": "range",
+            "schema": {
+              "description": "The stats' window. Default 7d.",
+              "enum": [
+                "24h",
+                "7d",
+                "30d"
+              ],
+              "type": "string"
+            }
+          },
+          {
             "in": "path",
             "name": "cluster",
             "required": true,
@@ -2865,7 +2969,7 @@
             "description": "Bad Gateway"
           }
         },
-        "summary": "Every Test in the cluster, by namespace and name."
+        "summary": "Every Test in the cluster, by namespace and name, with its runs' stats over ?range= and its newest runs (from run history)."
       },
       "post": {
         "description": "Requires the developer role.",

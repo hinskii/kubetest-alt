@@ -103,6 +103,10 @@ type Server struct {
 	// /tests/{name}/testcases[/history]). Nil makes them 503.
 	Cases CaseReader
 
+	// Stats serves per-Test stats over run history (GET /stats/tests).
+	// Nil makes it 503.
+	Stats StatsReader
+
 	// Templates resolves spec.use for GET /tests/{name}/resolved. Nil uses
 	// K8sClient (the production path).
 	Templates resolver.TemplateStore
@@ -180,6 +184,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /tests/{name}", s.getTest)
 	mux.HandleFunc("GET /tests/{name}/resolved", s.getResolvedTest)
 	mux.HandleFunc("GET /tests/{name}/testcases", s.listTestCaseStats)
+	mux.HandleFunc("GET /stats/tests", s.listTestStats)
 	mux.HandleFunc("GET /tests/{name}/testcases/history", s.listTestCaseHistory)
 	mux.HandleFunc("PATCH /tests/{name}", s.patchTest)
 	mux.HandleFunc("DELETE /tests/{name}", s.deleteTest)

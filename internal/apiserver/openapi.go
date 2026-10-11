@@ -229,6 +229,23 @@ func OpenAPISpec() map[string]any {
 				},
 				"parameters": []any{pathParam("id", "TestRun name or UID."), namespaceParam()},
 			},
+			"/stats/tests": map[string]any{
+				"get": map[string]any{
+					"summary": "Per Test, its finished runs over ?since= (default 7d, max 90d): counts by " +
+						"phase, pass ratio (passed of passed+failed+error), p50/p95 duration (passed and " +
+						"failed runs) — and its ?recent= newest runs (default 10, max 30), newest first.",
+					"parameters": []any{
+						queryParam("since", "Window: 24h, 7d, … up to 90d (default 7d)."),
+						queryParam("recent", "Newest runs per Test (1-30, default 10)."),
+						namespaceParam(),
+					},
+					"responses": map[string]any{
+						"200": jsonResponse(jsonArrayOf("#/components/schemas/TestStats")),
+						"400": errorSchema(),
+						"503": map[string]any{"description": "Run history store not configured."},
+					},
+				},
+			},
 			"/tests/{name}/testcases": map[string]any{
 				"get": map[string]any{
 					"summary": "Every test case of a Test aggregated over its last ?runs=N runs that " +
@@ -526,6 +543,29 @@ func OpenAPISpec() map[string]any {
 						"message":    map[string]any{"type": "string"},
 						"details":    map[string]any{"type": "string", "description": "Failure text (stack excerpt), trimmed to 4 KiB."},
 						"file":       map[string]any{"type": "string"},
+					},
+				},
+				"TestStats": map[string]any{
+					"type": "object",
+					"required": []string{"namespace", "test", "total", "passed", "failed", "errored", "aborted",
+						"p50Ms", "p95Ms", "recent"},
+					"properties": map[string]any{
+						"namespace": map[string]any{"type": "string"}, "test": map[string]any{"type": "string"},
+						"total": map[string]any{"type": "integer"}, "passed": map[string]any{"type": "integer"},
+						"failed": map[string]any{"type": "integer"}, "errored": map[string]any{"type": "integer"},
+						"aborted":   map[string]any{"type": "integer"},
+						"passRatio": map[string]any{"type": "number", "description": "0..1; absent without a verdict."},
+						"p50Ms":     map[string]any{"type": "integer"}, "p95Ms": map[string]any{"type": "integer"},
+						"recent": jsonArrayOf("#/components/schemas/RecentRun"),
+					},
+				},
+				"RecentRun": map[string]any{
+					"type":     "object",
+					"required": []string{"uid", "name", "phase", "durationMs", "finishedAt"},
+					"properties": map[string]any{
+						"uid": map[string]any{"type": "string"}, "name": map[string]any{"type": "string"},
+						"phase": map[string]any{"type": "string"}, "durationMs": map[string]any{"type": "integer"},
+						"finishedAt": map[string]any{"type": "string", "format": "date-time"},
 					},
 				},
 				"CaseStats": map[string]any{

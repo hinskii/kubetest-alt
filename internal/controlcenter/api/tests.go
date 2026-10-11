@@ -39,6 +39,11 @@ const maxBody = 64 << 10
 // TestList is every Test in a cluster; the UI groups and filters it.
 type TestList struct {
 	Tests []TestSummary `json:"tests" required:"true" nullable:"false"`
+	// Range is the window the Tests' stats are over (?range=).
+	Range string `json:"range" required:"true" enum:"24h,7d,30d"`
+	// StatsUnavailable says why there are no stats when the cluster keeps
+	// no run history.
+	StatsUnavailable string `json:"statsUnavailable,omitempty"`
 }
 
 // TestSummary is a Test as the tests list shows it.
@@ -52,7 +57,40 @@ type TestSummary struct {
 	// Problem is why the Test can't run as it is (its Ready condition).
 	Problem   string  `json:"problem,omitempty"`
 	LatestRun *RunRef `json:"latestRun,omitempty"`
+	// Stats are the Test's finished runs over the range; nil without run
+	// history (StatsUnavailable) or without any run.
+	Stats *TestStats `json:"stats,omitempty"`
 }
+
+// TestStats are a Test's finished runs over the list's range.
+type TestStats struct {
+	Total   int `json:"total" required:"true"`
+	Passed  int `json:"passed" required:"true"`
+	Failed  int `json:"failed" required:"true"`
+	Errored int `json:"errored" required:"true"`
+	Aborted int `json:"aborted" required:"true"`
+	// PassRatio is passed of the runs with a verdict (passed, failed,
+	// error), 0..1; absent without any.
+	PassRatio *float64 `json:"passRatio,omitempty"`
+	// P50Ms and P95Ms are over passed and failed runs; 0 without any.
+	P50Ms int64 `json:"p50Ms" required:"true"`
+	P95Ms int64 `json:"p95Ms" required:"true"`
+	// Recent are the Test's newest runs, oldest first (also before the
+	// range).
+	Recent []RecentRun `json:"recent" required:"true" nullable:"false"`
+}
+
+// RecentRun is one of a Test's newest runs.
+type RecentRun struct {
+	// ID finds the run (its name).
+	ID         string    `json:"id" required:"true"`
+	Phase      string    `json:"phase" required:"true"`
+	DurationMs int64     `json:"durationMs" required:"true"`
+	FinishedAt time.Time `json:"finishedAt" required:"true"`
+}
+
+// RecentRuns is how many of a Test's newest runs the list shows.
+const RecentRuns = 10
 
 // RunRef is a Test's latest run.
 type RunRef struct {
@@ -114,15 +152,41 @@ func (s *Server) listTests(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	rangeName := r.URL.Query().Get("range")
+	if _, ok := Ranges[rangeName]; !ok {
+		rangeName = "7d"
+	}
+	// The stats come from run history, alongside the Tests.
+	var stats []apiclient.TestStats
+	var statsErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		stats, statsErr = client.TestStats(r.Context(), "", rangeName, RecentRuns)
+	}()
 	tests, err := client.ListTests(r.Context(), "")
+	<-done
 	if err != nil {
 		s.apiError(w, c, err)
 		return
 	}
-	out := TestList{Tests: make([]TestSummary, 0, len(tests))}
+	out := TestList{Tests: make([]TestSummary, 0, len(tests)), Range: rangeName}
+	byTest := map[string]*TestStats{}
+	switch {
+	case apiclient.IsUnavailable(statsErr):
+		out.StatsUnavailable = messageOf(statsErr)
+	case statsErr != nil:
+		// The list stands without them; say why they're missing.
+		out.StatsUnavailable = "run statistics failed: " + messageOf(statsErr)
+	default:
+		for _, st := range stats {
+			byTest[st.Namespace+"/"+st.Test] = statsOut(st)
+		}
+	}
 	for _, t := range tests {
 		row := TestSummary{Name: t.Name, Namespace: t.Namespace, Tool: t.Labels[LabelTool],
-			Locked: Locked(t.Labels), Problem: NotReady(t.Status.Conditions)}
+			Locked: Locked(t.Labels), Problem: NotReady(t.Status.Conditions),
+			Stats: byTest[t.Namespace+"/"+t.Name]}
 		if lr := t.Status.LatestRun; lr != nil {
 			row.LatestRun = &RunRef{Name: lr.Name, Phase: string(lr.Phase)}
 			if lr.FinishedAt != nil {
@@ -136,6 +200,19 @@ func (s *Server) listTests(w http.ResponseWriter, r *http.Request) {
 		return cmp.Or(strings.Compare(a.Namespace, b.Namespace), strings.Compare(a.Name, b.Name))
 	})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// statsOut is a Test's stats for the list: recent runs oldest first, as
+// the marks read left to right.
+func statsOut(st apiclient.TestStats) *TestStats {
+	out := &TestStats{Total: st.Total, Passed: st.Passed, Failed: st.Failed, Errored: st.Errored,
+		Aborted: st.Aborted, PassRatio: st.PassRatio, P50Ms: st.P50Ms, P95Ms: st.P95Ms,
+		Recent: make([]RecentRun, 0, len(st.Recent))}
+	for _, rr := range slices.Backward(st.Recent) {
+		out.Recent = append(out.Recent, RecentRun{ID: rr.Name, Phase: rr.Phase, DurationMs: rr.DurationMs,
+			FinishedAt: rr.FinishedAt.UTC()})
+	}
+	return out
 }
 
 func (s *Server) getTest(w http.ResponseWriter, r *http.Request) {

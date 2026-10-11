@@ -198,7 +198,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every Test in the cluster, by namespace and name. */
+        /** Every Test in the cluster, by namespace and name, with its runs' stats over ?range= and its newest runs (from run history). */
         get: operations["listTests"];
         put?: never;
         /**
@@ -673,6 +673,14 @@ export interface components {
             warnings: string[];
             yaml?: string;
         };
+        RecentRun: {
+            /** Format: int64 */
+            durationMs: number;
+            /** Format: date-time */
+            finishedAt: string;
+            id: string;
+            phase: string;
+        };
         RecurringSchedule: {
             latestRun?: components["schemas"]["RunRef"];
             locked: boolean;
@@ -944,6 +952,9 @@ export interface components {
             yamlOnly?: string;
         };
         TestList: {
+            /** @enum {string} */
+            range: "24h" | "7d" | "30d";
+            statsUnavailable?: string;
             tests: components["schemas"]["TestSummary"][];
         };
         TestOverview: {
@@ -957,12 +968,26 @@ export interface components {
             since: string;
             summary: components["schemas"]["Summary"];
         };
+        TestStats: {
+            aborted: number;
+            errored: number;
+            failed: number;
+            /** Format: int64 */
+            p50Ms: number;
+            /** Format: int64 */
+            p95Ms: number;
+            passRatio?: null | number;
+            passed: number;
+            recent: components["schemas"]["RecentRun"][];
+            total: number;
+        };
         TestSummary: {
             latestRun?: components["schemas"]["RunRef"];
             locked: boolean;
             name: string;
             namespace: string;
             problem?: string;
+            stats?: components["schemas"]["TestStats"];
             tool: string;
         };
         ToolTemplate: {
@@ -1591,7 +1616,10 @@ export interface operations {
     };
     listTests: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The stats' window. Default 7d. */
+                range?: "24h" | "7d" | "30d";
+            };
             header?: never;
             path: {
                 cluster: string;

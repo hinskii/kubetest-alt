@@ -41,6 +41,7 @@ import (
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/cctest"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/clusters"
 	"github.com/hinskii/kubetest-alt/internal/controlcenter/config"
+	"github.com/hinskii/kubetest-alt/internal/store"
 )
 
 var (
@@ -159,6 +160,46 @@ func TestListTests(t *testing.T) {
 	assert.Empty(t, got[1].Tool, "no tool label")
 	assert.True(t, got[2].Locked, "not created by the GUI: read-only")
 	assert.Equal(t, "set spec.config.script: The k6 script.", got[2].Problem)
+	assert.Equal(t, "run history store is not configured", decodeAs[TestList](t, rec).StatsUnavailable,
+		"no history: the list stands, saying why there are no stats")
+}
+
+type fakeStats struct{ since string }
+
+func (f *fakeStats) TestStats(_ context.Context, sf store.StatsFilter) ([]store.TestStats, error) {
+	f.since = time.Since(sf.Since).Round(time.Hour).String()
+	ratio := []store.RecentRun{
+		{UID: "u2", Name: "smoke-2", Phase: "failed", DurationMs: 2000, FinishedAt: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)},
+		{UID: "u1", Name: "smoke-1", Phase: "passed", DurationMs: 1000, FinishedAt: time.Date(2026, 10, 11, 11, 0, 0, 0, time.UTC)},
+	}
+	return []store.TestStats{
+		{Namespace: "team-a", TestRef: "smoke", Total: 4, Passed: 3, Failed: 1, P50Ms: 1000, P95Ms: 2000, Recent: ratio},
+		{Namespace: "team-a", TestRef: "deleted-test", Total: 1, Passed: 1},
+	}, nil
+}
+
+func TestListTests_Stats(t *testing.T) {
+	stats := &fakeStats{}
+	env := cctest.New(t, cctest.Options{Stats: stats}, smokeTest(), gitopsTest())
+	w := &world{h: handler(env.Clusters), k8s: env.K8s}
+
+	rec := w.do(t, http.MethodGet, "/api/v1/clusters/dev/tests?range=30d", viewer, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	list := decodeAs[TestList](t, rec)
+	assert.Equal(t, "30d", list.Range)
+	assert.Equal(t, "720h0m0s", stats.since)
+	assert.Empty(t, list.StatsUnavailable)
+	require.Len(t, list.Tests, 2, "a deleted Test's history adds no row")
+	smoke := list.Tests[0].Stats
+	require.NotNil(t, smoke)
+	require.NotNil(t, smoke.PassRatio)
+	assert.InDelta(t, 0.75, *smoke.PassRatio, 1e-9)
+	assert.Equal(t, int64(2000), smoke.P95Ms)
+	assert.Equal(t, []string{"smoke-1", "smoke-2"}, []string{smoke.Recent[0].ID, smoke.Recent[1].ID}, "oldest first")
+	assert.Nil(t, list.Tests[1].Stats, "no runs, no stats")
+
+	rec = w.do(t, http.MethodGet, "/api/v1/clusters/dev/tests?range=bogus", viewer, nil)
+	assert.Equal(t, "7d", decodeAs[TestList](t, rec).Range, "unknown range: the default")
 }
 
 func TestGetTest(t *testing.T) {

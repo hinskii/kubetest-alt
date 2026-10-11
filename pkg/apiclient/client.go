@@ -339,6 +339,26 @@ func (c *Client) RunTestCases(ctx context.Context, namespace, id string, failedO
 
 // TestCaseStats aggregates a Test's cases over its last `runs` runs
 // (0 = server default).
+// TestStats returns per-Test stats over finished runs (GET /stats/tests):
+// namespace "" is every namespace the server sees; since is the window
+// ("7d", "24h"; "" the server's default, 7d); recent the newest runs per
+// Test (0: the default, 10).
+func (c *Client) TestStats(ctx context.Context, namespace, since string, recent int) ([]TestStats, error) {
+	q := url.Values{}
+	if namespace != "" {
+		q.Set(QueryNamespace, namespace)
+	}
+	if since != "" {
+		q.Set("since", since)
+	}
+	if recent > 0 {
+		q.Set("recent", strconv.Itoa(recent))
+	}
+	var out []TestStats
+	err := c.getJSON(ctx, "/stats/tests", q, &out)
+	return out, err
+}
+
 func (c *Client) TestCaseStats(ctx context.Context, namespace, test string, runs int) ([]CaseStats, error) {
 	q := ns(namespace)
 	if runs > 0 {

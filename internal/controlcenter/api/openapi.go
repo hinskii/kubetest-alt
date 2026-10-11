@@ -53,6 +53,11 @@ type clusterParams struct {
 	Cluster string `path:"cluster"`
 }
 
+type testListParams struct {
+	Cluster string `path:"cluster"`
+	Range   string `query:"range" enum:"24h,7d,30d" description:"The stats' window. Default 7d."`
+}
+
 type testParams struct {
 	Cluster   string `path:"cluster"`
 	Namespace string `path:"ns"`
@@ -128,7 +133,8 @@ func (s *Server) routes() []route {
 			In:      []any{writeParams{}, TestForm{}}, Out: SavedTest{}, Status: http.StatusCreated,
 			Errors: []int{400, 403, 404, 409, 502}, ErrorBodies: map[int]any{400: FormError{}}, handler: s.write(false)},
 		{Method: http.MethodGet, Path: Prefix + "/clusters/{cluster}/tests", ID: "listTests",
-			Summary: "Every Test in the cluster, by namespace and name.", In: []any{clusterParams{}},
+			Summary: "Every Test in the cluster, by namespace and name, with its runs' stats over ?range= " +
+				"and its newest runs (from run history).", In: []any{testListParams{}},
 			Out: TestList{}, Errors: []int{404, 502}, handler: s.listTests},
 		{Method: http.MethodGet, Path: testPath, ID: "getTest",
 			Summary: "A Test with its templates merged: parameters, schedule, definition.", In: []any{testParams{}},

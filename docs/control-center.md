@@ -133,6 +133,21 @@ cluster (`roles/container.clusterViewer`) and, in it, Kubernetes RBAC for
 `services/proxy` on the kubetest API server Service — the same Role the
 chart creates locally, bound to the Google identity.
 
+## Tests list
+
+A cluster's page lists its Tests by tool. Beside each: its pass rate over
+the last 7 days (passed of the runs with a verdict — passed, failed,
+error — and how many ran), the P50 duration (passed and failed runs), its
+newest runs as marks — oldest → newest, coloured by phase, each a link to
+the run — and its last run. Filter by namespace, tool and the last run's
+status (passed / failed, error or aborted / never run), search by name,
+sort by any column with a sort mark; all of it in the address, so a link
+keeps it.
+
+The pass rate, P50 and marks come from run history (Postgres, `GET
+/stats/tests` of the kubetest API). A cluster without it lists its Tests
+and says so.
+
 ## Live view
 
 A running run of a Test with `spec.liveView` (k6 in the catalog) shows the

@@ -58,6 +58,7 @@ type Options struct {
 	Deleter   apiserver.RunDeleter
 	Commenter apiserver.RunCommenter
 	Cases     apiserver.CaseReader
+	Stats     apiserver.StatsReader
 }
 
 // Env is the kubetest API server and Control Center's view of it.
@@ -79,7 +80,8 @@ func New(t *testing.T, o Options, objs ...client.Object) *Env {
 	objects := storage.NewFake()
 	api := &apiserver.Server{K8sClient: k8s, Bucket: Bucket,
 		Downloader: objects, Lister: objects, Presigner: objects, Remover: objects,
-		Store: o.Store, Deleter: o.Deleter, Commenter: o.Commenter, Cases: o.Cases}
+		Store: o.Store, Deleter: o.Deleter, Commenter: o.Commenter, Cases: o.Cases,
+		Stats: o.Stats}
 
 	mux := http.NewServeMux()
 	mux.Handle(ProxyPath+"/", http.StripPrefix(ProxyPath, api.Handler()))

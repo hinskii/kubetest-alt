@@ -172,6 +172,13 @@ Kueue, not a queue of our own; wiring Kueue in is a step of its own.
 
 ## 20b — Tests list: statistics, search, status filter
 
+**Done.** As below, with two changes: the endpoint is `GET /stats/tests`
+(`/tests/stats` would hide a Test named "stats"), and without run history
+it is a 503 like test cases, which Control Center shows as "no pass rates
+or recent runs: …" over the list. Recent runs reach back 90 days whatever
+the window (a Test idle for a week still shows its last runs). Marks link
+to the run page (the drawer is not built).
+
 **kubetest API — `GET /tests/stats?namespace=&since=<duration>&recent=<n>`**
 (new): per Test over finished runs since `since` (default 7d, max 90d):
 `total, passed, failed, errored, aborted, passRatio, p50Ms, p95Ms`, and

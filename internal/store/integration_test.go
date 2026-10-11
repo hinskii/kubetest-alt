@@ -617,3 +617,65 @@ func TestIntegration_TestCases(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, gone)
 }
+
+func TestIntegration_TestStats(t *testing.T) {
+	ctx := t.Context()
+	p := NewPostgres(harness.pool)
+	// A month no other test uses.
+	base := time.Date(2025, 9, 20, 12, 0, 0, 0, time.UTC)
+	ns := "stats-" + time.Now().Format("150405.000000")
+	save := func(i int, testRef string, phase testsv1alpha1.Phase, at time.Time, ms int64) {
+		uid := fmt.Sprintf("bbbbbbbb-0000-0000-0000-0000000005%02d", i)
+		run := newRun(uid, testRef, phase, at)
+		run.Namespace = ns
+		run.Status.DurationMs = ms
+		require.NoError(t, p.SaveFinished(ctx, run))
+	}
+	// smoke: 10 runs in the window, durations 1s..10s; one older run.
+	phases := []testsv1alpha1.Phase{"passed", "passed", "failed", "passed", "error",
+		"passed", "aborted", "passed", "failed", "passed"}
+	for i, ph := range phases {
+		save(i, "smoke", ph, base.Add(time.Duration(i)*time.Hour), int64(i+1)*1000)
+	}
+	save(20, "smoke", "passed", base.Add(-10*24*time.Hour), 99_000)
+	// old: only a run before the window.
+	save(30, "old", "failed", base.Add(-5*24*time.Hour), 5000)
+	// Another namespace's run is not counted.
+	other := newRun("bbbbbbbb-0000-0000-0000-000000000599", "smoke", "passed", base)
+	other.Namespace = ns + "-other"
+	require.NoError(t, p.SaveFinished(ctx, other))
+
+	stats, err := p.TestStats(ctx, StatsFilter{Namespace: ns, Since: base.Add(-time.Hour),
+		RecentSince: base.Add(-30 * 24 * time.Hour), Recent: 3})
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+	old, smoke := stats[0], stats[1]
+
+	assert.Equal(t, "smoke", smoke.TestRef)
+	assert.Equal(t, 10, smoke.Total, "the run before the window is not counted")
+	assert.Equal(t, []int{6, 2, 1, 1}, []int{smoke.Passed, smoke.Failed, smoke.Errored, smoke.Aborted})
+	// Durations of passed and failed runs: 1,2,3,4,6,8,9,10 s.
+	assert.Equal(t, int64(4000), smoke.P50Ms, "nearest rank")
+	assert.Equal(t, int64(10_000), smoke.P95Ms)
+	require.Len(t, smoke.Recent, 3, "newest 3")
+	assert.Equal(t, "passed", smoke.Recent[0].Phase)
+	assert.Equal(t, int64(10_000), smoke.Recent[0].DurationMs)
+	assert.True(t, smoke.Recent[0].FinishedAt.Equal(base.Add(9*time.Hour)))
+	assert.Equal(t, "failed", smoke.Recent[1].Phase)
+
+	assert.Equal(t, "old", old.TestRef)
+	assert.Zero(t, old.Total, "nothing in the window")
+	assert.Zero(t, old.P50Ms)
+	require.Len(t, old.Recent, 1, "but its recent run shows")
+	assert.Equal(t, "failed", old.Recent[0].Phase)
+
+	all, err := p.TestStats(ctx, StatsFilter{Since: base.Add(-time.Hour), Recent: 1})
+	require.NoError(t, err)
+	var namespaces []string
+	for _, s := range all {
+		if s.TestRef == "smoke" && (s.Namespace == ns || s.Namespace == ns+"-other") {
+			namespaces = append(namespaces, s.Namespace)
+		}
+	}
+	assert.Len(t, namespaces, 2, "every namespace without a filter")
+}

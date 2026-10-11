@@ -183,6 +183,7 @@ func main() {
 			srv.Commenter = pg
 			srv.Audit = pg
 			srv.Cases = pg
+			srv.Stats = pg
 			pgPool = pool
 			setupLog.Info("Postgres run archive wired")
 		}

@@ -177,6 +177,34 @@ type TestCase struct {
 	File       string `json:"file,omitempty"`
 }
 
+// TestStats sums one Test's finished runs over a window (GET /stats/tests).
+type TestStats struct {
+	Namespace string `json:"namespace"`
+	Test      string `json:"test"`
+	Total     int    `json:"total"`
+	Passed    int    `json:"passed"`
+	Failed    int    `json:"failed"`
+	Errored   int    `json:"errored"`
+	Aborted   int    `json:"aborted"`
+	// PassRatio is passed of the runs with a verdict (passed, failed,
+	// error), 0..1; nil without any.
+	PassRatio *float64 `json:"passRatio,omitempty"`
+	// P50Ms and P95Ms are over passed and failed runs; 0 without any.
+	P50Ms int64 `json:"p50Ms"`
+	P95Ms int64 `json:"p95Ms"`
+	// Recent are the Test's newest runs, newest first.
+	Recent []RecentRun `json:"recent"`
+}
+
+// RecentRun is one of a Test's newest runs.
+type RecentRun struct {
+	UID        string    `json:"uid"`
+	Name       string    `json:"name"`
+	Phase      string    `json:"phase"`
+	DurationMs int64     `json:"durationMs"`
+	FinishedAt time.Time `json:"finishedAt"`
+}
+
 // CaseStats aggregates one test case over a Test's recent runs
 // (GET /tests/{name}/testcases).
 type CaseStats struct {
