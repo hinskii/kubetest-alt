@@ -136,6 +136,18 @@ func RowFromRun(run *testsv1alpha1.TestRun, warn WarnFunc) (Row, error) {
 		}
 		r.Steps = steps
 	}
+	for _, st := range run.Status.Stages {
+		s := Stage{Kind: string(st.Kind), Name: st.Name, Phase: string(st.Phase), Message: st.Message}
+		if st.StartedAt != nil {
+			t := st.StartedAt.UTC()
+			s.StartedAt = &t
+		}
+		if st.FinishedAt != nil {
+			t := st.FinishedAt.UTC()
+			s.FinishedAt = &t
+		}
+		r.Stages = append(r.Stages, s)
+	}
 	if run.Status.ResolvedSpec != "" {
 		// ResolvedSpec is a JSON snapshot of Test.Spec captured at start.
 		// Round-trip through generic map so it lands in a JSONB column

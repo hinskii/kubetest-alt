@@ -287,6 +287,12 @@ func TestRowFromRun_RunContext(t *testing.T) {
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{
 		"s0": {Phase: testsv1alpha1.StepPhaseFailed, Message: "step timeout exceeded"},
 	}
+	fetched := metav1.NewTime(time.Date(2026, 10, 11, 12, 0, 3, 0, time.FixedZone("CEST", 2*3600)))
+	run.Status.Stages = []testsv1alpha1.Stage{
+		{Kind: testsv1alpha1.StageFetch, Name: "Clone git repository", Phase: testsv1alpha1.StepPhasePassed,
+			FinishedAt: &fetched},
+		{Kind: testsv1alpha1.StageRun, Name: "Run k6", Phase: testsv1alpha1.StepPhaseFailed, Message: "thresholds"},
+	}
 
 	row, err := RowFromRun(run, nil)
 	require.NoError(t, err)
@@ -297,7 +303,13 @@ func TestRowFromRun_RunContext(t *testing.T) {
 	assert.Equal(t, "main", row.GitRevision)
 	assert.Equal(t, "abc123", row.GitCommit)
 	assert.Equal(t, "step timeout exceeded", row.Steps["s0"].(map[string]any)["message"])
+	require.Len(t, row.Stages, 2)
+	assert.Equal(t, Stage{Kind: "fetch", Name: "Clone git repository", Phase: "passed",
+		FinishedAt: ptr(fetched.UTC())}, row.Stages[0], "times in UTC")
+	assert.Equal(t, "thresholds", row.Stages[1].Message)
 }
+
+func ptr[T any](v T) *T { return &v }
 
 func TestRowFromRun_ToolFallsBackToLabel(t *testing.T) {
 	run := mkTerminalRun(t)

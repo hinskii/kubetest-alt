@@ -524,6 +524,10 @@ func runEnvelopeFromRow(row *store.Row) runEnvelope {
 	}
 	f := row.FinishedAt
 	e.FinishedAt = &f
+	for _, st := range row.Stages {
+		e.Stages = append(e.Stages, apiclient.Stage{Kind: st.Kind, Name: st.Name, Phase: st.Phase,
+			StartedAt: st.StartedAt, FinishedAt: st.FinishedAt, Message: st.Message})
+	}
 	if len(row.Steps) > 0 {
 		// Steps are stored as generic JSON; re-decode into the wire shape.
 		if b, err := json.Marshal(row.Steps); err == nil {

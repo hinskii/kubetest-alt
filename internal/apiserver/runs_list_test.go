@@ -148,6 +148,7 @@ func TestRunEnvelope_CarriesRunContext(t *testing.T) {
 	cr.Status.TestCounts = &testsv1alpha1.TestCounts{Total: 3, Passed: 2, Failed: 1}
 	cr.Status.Metrics = map[string]string{"p95_ms": "120.5", "garbage": "n/a"}
 	cr.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "failed", Message: "step timeout exceeded"}}
+	cr.Status.Stages = []testsv1alpha1.Stage{{Kind: testsv1alpha1.StageRun, Name: "Run k6", Phase: "running"}}
 
 	e := runEnvelopeFromCR(cr)
 	assert.Equal(t, "k6", e.Tool)
@@ -158,6 +159,7 @@ func TestRunEnvelope_CarriesRunContext(t *testing.T) {
 	assert.Equal(t, map[string]float64{"p95_ms": 120.5}, e.Metrics, "unparseable metrics dropped")
 	assert.Equal(t, "step timeout exceeded", e.Steps["s0"].Message)
 	assert.Equal(t, "bob", e.Abort.RequestedBy)
+	assert.Equal(t, []apiclient.Stage{{Kind: "run", Name: "Run k6", Phase: "running"}}, e.Stages)
 }
 
 func TestRunEnvelope_FromArchivedRow(t *testing.T) {
@@ -165,11 +167,14 @@ func TestRunEnvelope_FromArchivedRow(t *testing.T) {
 		r.Tool = "jmeter"
 		r.Config = map[string]string{"threads": "20"}
 		r.Steps = map[string]any{"s0": map[string]any{"phase": "passed", "message": "ok"}}
+		r.Stages = []store.Stage{{Kind: "fetch", Name: "Clone git repository", Phase: "error", Message: "FETCH_ERROR: x"}}
 	})
 	e := runEnvelopeFromRow(&r)
 	assert.Equal(t, "jmeter", e.Tool)
 	assert.Equal(t, "20", e.Config["threads"])
 	assert.Equal(t, "ok", e.Steps["s0"].Message)
+	assert.Equal(t, []apiclient.Stage{{Kind: "fetch", Name: "Clone git repository", Phase: "error", Message: "FETCH_ERROR: x"}},
+		e.Stages, "a run from history keeps its course")
 }
 
 func TestRunEnvelope_GitCheckout(t *testing.T) {

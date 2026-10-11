@@ -70,6 +70,7 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 
 	resolvedSpec := jsonbOrNil(row.ResolvedSpec)
 	steps := jsonbOrNil(row.Steps)
+	stages := jsonbOrNil(row.Stages)
 	metrics := jsonbOrNil(row.Metrics)
 	testCounts := jsonbOrNil(row.TestCounts)
 	artifacts := jsonbOrNil(row.ArtifactRefs)
@@ -85,13 +86,13 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			queued_at, started_at, finished_at, duration_ms,
 			resolved_spec, steps, metrics, test_counts, artifact_refs,
 			logs_ref, message, tags, config, tool, parent_run,
-			git_revision, git_commit
+			git_revision, git_commit, stages
 		) VALUES (
 			$1, $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
 			$11, $12, $13, $14, $15,
 			$16, $17, $18, $19, $20, $21,
-			$22, $23
+			$22, $23, $24
 		)
 		ON CONFLICT (uid, finished_at) DO UPDATE SET
 			name          = EXCLUDED.name,
@@ -114,7 +115,8 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 			tool          = EXCLUDED.tool,
 			parent_run    = EXCLUDED.parent_run,
 			git_revision  = EXCLUDED.git_revision,
-			git_commit    = EXCLUDED.git_commit
+			git_commit    = EXCLUDED.git_commit,
+			stages        = EXCLUDED.stages
 	`
 	_, err = p.pool.Exec(ctx, stmt,
 		row.UID, row.Name, row.Namespace, row.TestRef, row.Phase, nullIfEmpty(row.Source),
@@ -122,7 +124,7 @@ func (p *Postgres) SaveFinished(ctx context.Context, run *testsv1alpha1.TestRun)
 		resolvedSpec, steps, metrics, testCounts, artifacts,
 		nullIfEmpty(row.LogsRef), nullIfEmpty(row.Message), tags,
 		config, nullIfEmpty(row.Tool), nullIfEmpty(row.ParentRun),
-		nullIfEmpty(row.GitRevision), nullIfEmpty(row.GitCommit),
+		nullIfEmpty(row.GitRevision), nullIfEmpty(row.GitCommit), stages,
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert %s: %w", row.UID, err)
@@ -374,7 +376,7 @@ const selectCols = `
 	queued_at, started_at, finished_at, duration_ms,
 	resolved_spec, steps, metrics, test_counts, artifact_refs,
 	logs_ref, message, tags, config, tool, parent_run,
-	comment, comment_by, comment_at, git_revision, git_commit
+	comment, comment_by, comment_at, git_revision, git_commit, stages
 `
 
 func scanRows(rows pgx.Rows) ([]Row, error) {
@@ -388,6 +390,7 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			duration   *int64
 			specBytes  []byte
 			stepsBytes []byte
+			stageBytes []byte
 			metricsB   []byte
 			tcBytes    []byte
 			arBytes    []byte
@@ -406,7 +409,7 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			&r.QueuedAt, &r.StartedAt, &r.FinishedAt, &duration,
 			&specBytes, &stepsBytes, &metricsB, &tcBytes, &arBytes,
 			&logsRef, &message, &tagsBytes, &cfgBytes, &tool, &parentRun,
-			&comment, &commentBy, &commentAt, &gitRev, &gitCommit,
+			&comment, &commentBy, &commentAt, &gitRev, &gitCommit, &stageBytes,
 		); err != nil {
 			return nil, err
 		}
@@ -456,6 +459,9 @@ func scanRows(rows pgx.Rows) ([]Row, error) {
 			return nil, err
 		}
 		if err := unmarshalJSONBIfPresent(stepsBytes, &r.Steps); err != nil {
+			return nil, err
+		}
+		if err := unmarshalJSONBIfPresent(stageBytes, &r.Stages); err != nil {
 			return nil, err
 		}
 		if err := unmarshalJSONBIfPresent(metricsB, &r.Metrics); err != nil {
@@ -551,6 +557,10 @@ func jsonbOrNil(v any) any {
 			return nil
 		}
 	case []ArtifactRef:
+		if len(vv) == 0 {
+			return nil
+		}
+	case []Stage:
 		if len(vv) == 0 {
 			return nil
 		}

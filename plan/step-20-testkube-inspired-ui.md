@@ -111,8 +111,11 @@ a `stages` JSONB column, migration) and Control Center's `RunDetail`
   Details (facts, parameters, metrics, comment), Events. The header holds
   the actions (abort is a dialog), and the stages sit above the tabs.
 
+- **stages in run history**: a `stages` JSONB column (migration 0007),
+  written with the rest of a finished run and served for archived runs,
+  so a run's course outlives its TestRun.
+
 **Left:**
-- stages in run history (a `stages` column);
 - the flow of composite and parallel runs;
 - the Test page's tabs.
 

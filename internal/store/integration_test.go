@@ -254,6 +254,12 @@ func TestIntegration_RunContextColumns(t *testing.T) {
 	run.Labels = map[string]string{LabelParentRun: "suite-run"}
 	run.Status.Content = &testsv1alpha1.ContentStatus{GitRevision: "v1.2.0", GitCommit: "0123456789abcdef0123456789abcdef01234567"}
 	run.Status.Steps = map[string]testsv1alpha1.StepResult{"s0": {Phase: "failed", Message: "step timeout exceeded"}}
+	started := metav1.NewTime(finished.Add(-10 * time.Second))
+	run.Status.Stages = []testsv1alpha1.Stage{
+		{Kind: testsv1alpha1.StageQueue, Name: "Queued", Phase: testsv1alpha1.StepPhasePassed},
+		{Kind: testsv1alpha1.StageRun, Name: "Run k6", Phase: testsv1alpha1.StepPhaseFailed,
+			StartedAt: &started, Message: "thresholds crossed"},
+	}
 	require.NoError(t, p.SaveFinished(ctx, run))
 
 	got, err := p.Get(ctx, uid)
@@ -264,6 +270,11 @@ func TestIntegration_RunContextColumns(t *testing.T) {
 	assert.Equal(t, "v1.2.0", got.GitRevision)
 	assert.Equal(t, "0123456789abcdef0123456789abcdef01234567", got.GitCommit)
 	assert.Equal(t, "step timeout exceeded", got.Steps["s0"].(map[string]any)["message"])
+	require.Len(t, got.Stages, 2, "the run's course stays in history")
+	assert.Equal(t, "Run k6", got.Stages[1].Name)
+	assert.Equal(t, "thresholds crossed", got.Stages[1].Message)
+	require.NotNil(t, got.Stages[1].StartedAt)
+	assert.True(t, started.Time.Equal(*got.Stages[1].StartedAt))
 
 	ui, err := p.List(ctx, Filter{TestRef: "ctx-test", Source: "ui"}, Page{})
 	require.NoError(t, err)

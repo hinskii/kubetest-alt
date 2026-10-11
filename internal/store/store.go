@@ -86,18 +86,20 @@ type Comment struct {
 // Row is the wire shape returned by List/Get. Mirrors the DB row 1:1 so
 // the API server can json.Marshal it directly.
 type Row struct {
-	UID          string             `json:"uid"`
-	Name         string             `json:"name"`
-	Namespace    string             `json:"namespace"`
-	TestRef      string             `json:"testRef"`
-	Phase        string             `json:"phase"`
-	Source       string             `json:"source,omitempty"`
-	QueuedAt     *time.Time         `json:"queuedAt,omitempty"`
-	StartedAt    *time.Time         `json:"startedAt,omitempty"`
-	FinishedAt   time.Time          `json:"finishedAt"`
-	DurationMs   int64              `json:"durationMs,omitempty"`
-	ResolvedSpec map[string]any     `json:"resolvedSpec,omitempty"`
-	Steps        map[string]any     `json:"steps,omitempty"`
+	UID          string         `json:"uid"`
+	Name         string         `json:"name"`
+	Namespace    string         `json:"namespace"`
+	TestRef      string         `json:"testRef"`
+	Phase        string         `json:"phase"`
+	Source       string         `json:"source,omitempty"`
+	QueuedAt     *time.Time     `json:"queuedAt,omitempty"`
+	StartedAt    *time.Time     `json:"startedAt,omitempty"`
+	FinishedAt   time.Time      `json:"finishedAt"`
+	DurationMs   int64          `json:"durationMs,omitempty"`
+	ResolvedSpec map[string]any `json:"resolvedSpec,omitempty"`
+	Steps        map[string]any `json:"steps,omitempty"`
+	// Stages are a leaf run's course (step 20a), in order.
+	Stages       []Stage            `json:"stages,omitempty"`
 	Metrics      map[string]float64 `json:"metrics,omitempty"`
 	TestCounts   *TestCounts        `json:"testCounts,omitempty"`
 	ArtifactRefs []ArtifactRef      `json:"artifactRefs,omitempty"`
@@ -177,3 +179,13 @@ var ErrNotFound = errors.New("store: row not found")
 // Clock returns "now" in UTC. Overridable so tests get deterministic
 // timestamps (e.g. for retention math). Defaults to time.Now().UTC().
 type Clock func() time.Time
+
+// Stage is one part of a leaf run's course (TestRun.status.stages).
+type Stage struct {
+	Kind       string     `json:"kind"`
+	Name       string     `json:"name"`
+	Phase      string     `json:"phase,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Message    string     `json:"message,omitempty"`
+}
